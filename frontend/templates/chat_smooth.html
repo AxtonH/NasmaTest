@@ -821,7 +821,7 @@
                     <div id="conversationHistoryEmpty" class="history-empty text-sm">No conversations yet.</div>
                 </div>
                 <div class="p-6 border-t border-gray-200/50 space-y-3" style="position: relative !important; z-index: 2147483647 !important; pointer-events: auto !important;">
-                    <button onclick="fetch('/api/auth/logout', {method: 'POST', headers: {'Content-Type': 'application/json'}}).then(() => {localStorage.removeItem('nasma_remember_me_token'); sessionStorage.setItem('just_logged_out', 'true'); window.location.href='/login';}).catch(() => {localStorage.removeItem('nasma_remember_me_token'); sessionStorage.setItem('just_logged_out', 'true'); window.location.href='/login';});" class="logout-btn" style="
+                    <button onclick="logoutUser()" class="logout-btn" style="
                         width: 100%;
                         display: flex;
                         align-items: center;
@@ -927,10 +927,195 @@
         let currentState = 'initial';
         let userAvatarUrl = null; // Cache for user avatar
         let currentThreadId = null; // Persist backend thread for flows
+        const REMEMBER_ME_STORAGE_KEY = 'nasma_remember_me_token';
+        let rememberMeFingerprintCache = null;
+        let rememberMeFingerprintPromise = null;
+        let rememberMeAutoLoginPromise = null;
+
+        class DeviceFingerprint {
+            static async generate() {
+                try {
+                    const components = [];
+                    components.push(navigator.userAgent || '');
+                    try {
+                        const dims = `${screen.width}x${screen.height}x${screen.colorDepth}`;
+                        components.push(dims);
+                    } catch (_) {
+                        components.push('screen-unknown');
+                    }
+                    try {
+                        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                        components.push(tz || 'tz-unknown');
+                    } catch (_) {
+                        components.push('tz-error');
+                    }
+                    components.push(navigator.language || 'lang-unknown');
+                    components.push(navigator.platform || 'platform-unknown');
+                    components.push(String(navigator.hardwareConcurrency || 'hc-unknown'));
+                    components.push(String(navigator.deviceMemory || 'mem-unknown'));
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        ctx.textBaseline = 'top';
+                        ctx.font = '14px Arial';
+                        ctx.fillText('Device fingerprint', 2, 2);
+                        components.push(canvas.toDataURL());
+                    } catch (_) {
+                        components.push('canvas-error');
+                    }
+                    const fingerprint = components.join('|');
+                    const hash = await DeviceFingerprint.hashString(fingerprint);
+                    return hash;
+                } catch (_) {
+                    return '';
+                }
+            }
+
+            static async hashString(str) {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(str);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+        }
+
+        async function getDeviceFingerprint() {
+            if (rememberMeFingerprintCache) {
+                return rememberMeFingerprintCache;
+            }
+            if (rememberMeFingerprintPromise) {
+                return rememberMeFingerprintPromise;
+            }
+            rememberMeFingerprintPromise = DeviceFingerprint.generate()
+                .then(fp => {
+                    rememberMeFingerprintCache = fp || '';
+                    return rememberMeFingerprintCache;
+                })
+                .catch(() => '')
+                .finally(() => {
+                    rememberMeFingerprintPromise = null;
+                });
+            return rememberMeFingerprintPromise;
+        }
+
+        async function attemptAutoLogin() {
+            const token = localStorage.getItem(REMEMBER_ME_STORAGE_KEY);
+            if (!token) {
+                return false;
+            }
+            if (rememberMeAutoLoginPromise) {
+                return rememberMeAutoLoginPromise;
+            }
+            rememberMeAutoLoginPromise = (async () => {
+                try {
+                    const fingerprint = await getDeviceFingerprint();
+                    if (!fingerprint) {
+                        return false;
+                    }
+                    const resp = await fetch('/api/auth/verify-remember-me', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ token, device_fingerprint: fingerprint })
+                    });
+                    if (!resp.ok) {
+                        if (resp.status === 401) {
+                            localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
+                        }
+                        return false;
+                    }
+                    const data = await resp.json().catch(() => ({}));
+                    if (data && data.success) {
+                        return true;
+                    }
+                    if (resp.status === 401) {
+                        localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
+                    }
+                    return false;
+                } catch (err) {
+                    console.error('Auto-login attempt failed', err);
+                    return false;
+                } finally {
+                    rememberMeAutoLoginPromise = null;
+                }
+            })();
+            return rememberMeAutoLoginPromise;
+        }
+
+        function cloneFormData(fd) {
+            const clone = new FormData();
+            if (!fd) {
+                return clone;
+            }
+            fd.forEach((value, key) => {
+                if (value instanceof File) {
+                    clone.append(key, value, value.name);
+                } else if (value instanceof Blob) {
+                    clone.append(key, value);
+                } else {
+                    clone.append(key, value);
+                }
+            });
+            return clone;
+        }
+
+        async function authFetch(url, options = {}, retryOptions = {}) {
+            const opts = { ...options };
+            if (!opts.credentials) {
+                opts.credentials = 'include';
+            }
+            const originalBody = opts.body;
+            let response;
+            try {
+                response = await fetch(url, opts);
+            } catch (error) {
+                throw error;
+            }
+            if (response && response.status !== 401 && response.status !== 440) {
+                return response;
+            }
+
+            const reauthenticated = await attemptAutoLogin();
+            if (!reauthenticated) {
+                return response;
+            }
+
+            if (retryOptions.retryBody) {
+                opts.body = retryOptions.retryBody();
+            } else if (originalBody instanceof FormData) {
+                opts.body = cloneFormData(originalBody);
+            } else if (originalBody instanceof URLSearchParams) {
+                opts.body = new URLSearchParams(originalBody);
+            } else if (typeof originalBody === 'string') {
+                opts.body = originalBody;
+            } else if (originalBody instanceof Blob) {
+                opts.body = originalBody.slice(0, originalBody.size);
+            } else {
+                opts.body = originalBody;
+            }
+
+            return fetch(url, opts);
+        }
+
+        async function logoutUser() {
+            try {
+                await authFetch('/api/auth/logout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (_) {
+                // Ignore network errors during logout
+            } finally {
+                localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
+                sessionStorage.setItem('just_logged_out', 'true');
+                window.location.href = '/login';
+            }
+        }
         // Fetch user's first name for greeting
         (async function () {
             try {
-                const resp = await fetch('/api/odoo/employee/current');
+                const resp = await authFetch('/api/odoo/employee/current');
                 const data = await resp.json();
                 const fullName = data && data.success && data.data && data.data.name ? String(data.data.name) : '';
                 const firstName = fullName.split(' ').filter(Boolean)[0] || '';
@@ -967,7 +1152,7 @@
         // Fetch user avatar from Odoo
         async function fetchUserAvatar() {
             try {
-                const response = await fetch('/api/user/avatar');
+                const response = await authFetch('/api/user/avatar');
                 const data = await response.json();
 
                 if (data.success && data.image_data) {
@@ -1332,7 +1517,7 @@
             }
             historyState.loading = true;
             try {
-                const response = await fetch('/api/conversations');
+                const response = await authFetch('/api/conversations');
                 if (!response.ok) {
                     throw new Error('Failed to fetch conversations');
                 }
@@ -1375,7 +1560,7 @@
                 ensureConversationSidebarClosed();
                 closeNewSidebar();
 
-                const response = await fetch(`/api/conversations/${encodeURIComponent(thread.thread_id)}/messages`);
+                const response = await authFetch(`/api/conversations/${encodeURIComponent(thread.thread_id)}/messages`);
                 if (!response.ok) {
                     throw new Error('Failed to load conversation');
                 }
@@ -1465,7 +1650,7 @@
                         const fd = new FormData();
                         fd.append('file', input.files[0]);
                         try {
-                            const resp = await fetch('/api/new-users/upload', { method: 'POST', body: fd });
+                            const resp = await authFetch('/api/new-users/upload', { method: 'POST', body: fd }, { retryBody: () => cloneFormData(fd) });
                             const data = await resp.json();
                             if (!data.success) {
                                 addMessageToChat('File parse failed: ' + (data.message || 'Unknown error'), false);
@@ -1718,7 +1903,7 @@
                                         company_name: companyName,
                                         private_street: record['private_street'] || record['Private Street'] || ''
                                     };
-                                    const resp = await fetch('/api/new-users/preview-service', {
+                                    const resp = await authFetch('/api/new-users/preview-service', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify(payload)
@@ -2009,10 +2194,10 @@
                                     const fd = new FormData();
                                     fd.append('file', file);
                                     fd.append('thread_id', currentThreadId);
-                                    const resp = await fetch('/api/timeoff/supporting-document', {
+                                    const resp = await authFetch('/api/timeoff/supporting-document', {
                                         method: 'POST',
                                         body: fd
-                                    });
+                                    }, { retryBody: () => cloneFormData(fd) });
                                     const data = await resp.json();
                                     if (!resp.ok || !data.success) {
                                         const msg = data && data.message ? data.message : 'Upload failed';
@@ -2379,7 +2564,7 @@
                                 const fd = new FormData();
                                 fd.append('file', input.files[0]);
                                 try {
-                                    const resp = await fetch('/api/new-users/upload', { method: 'POST', body: fd });
+                                    const resp = await authFetch('/api/new-users/upload', { method: 'POST', body: fd }, { retryBody: () => cloneFormData(fd) });
                                     const data = await resp.json();
                                     if (!data.success) {
                                         addMessageToChat('File parse failed: ' + (data.message || 'Unknown error'), false);
@@ -2433,7 +2618,7 @@
                 if (!action || !model || !Number.isInteger(id)) return;
                 if (action === 'note') { window.__nsSecondApprovalNote && window.__nsSecondApprovalNote(el); return; }
                 el.disabled = true;
-                const resp = await fetch('/api/odoo/approve', {
+                const resp = await authFetch('/api/odoo/approve', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ model, id, action })
@@ -2493,7 +2678,7 @@
                 document.getElementById('chatContainer').appendChild(typingDiv);
                 setTimeout(scrollToBottom, 50);
 
-                const response = await fetch('/api/chat', {
+                const response = await authFetch('/api/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2873,45 +3058,9 @@
          });
 
         // Logout buttons
-        document.getElementById('logoutButton').addEventListener('click', function() {
-            fetch('/api/auth/logout', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            }).then(() => {
-                // Clear remember me token from localStorage
-                localStorage.removeItem('nasma_remember_me_token');
-                // Set flag to prevent auto-login after logout
-                sessionStorage.setItem('just_logged_out', 'true');
-                window.location.href = '/login';
-            }).catch(() => {
-                // Even if logout fails, clear tokens and redirect
-                localStorage.removeItem('nasma_remember_me_token');
-                sessionStorage.setItem('just_logged_out', 'true');
-                window.location.href = '/login';
-            });
-        });
+        document.getElementById('logoutButton').addEventListener('click', logoutUser);
 
-        document.getElementById('conversationLogoutButton').addEventListener('click', function() {
-            fetch('/api/auth/logout', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            }).then(() => {
-                // Clear remember me token from localStorage
-                localStorage.removeItem('nasma_remember_me_token');
-                // Set flag to prevent auto-login after logout
-                sessionStorage.setItem('just_logged_out', 'true');
-                window.location.href = '/login';
-            }).catch(() => {
-                // Even if logout fails, clear tokens and redirect
-                localStorage.removeItem('nasma_remember_me_token');
-                sessionStorage.setItem('just_logged_out', 'true');
-                window.location.href = '/login';
-            });
-        });
+        document.getElementById('conversationLogoutButton').addEventListener('click', logoutUser);
 
         document.addEventListener('DOMContentLoaded', function() {
             initializeConversationHistory();
@@ -3059,7 +3208,7 @@
             try {
                 if (window.__keepalive) clearInterval(window.__keepalive);
                 window.__keepalive = setInterval(async () => {
-                    try { await fetch('/api/ping', { method: 'GET', cache: 'no-store' }); } catch (e) {}
+                    try { await authFetch('/api/ping', { method: 'GET', cache: 'no-store' }); } catch (e) {}
                 }, 120000);
             } catch (e) {}
 
@@ -3090,22 +3239,7 @@
             }
 
             if (sidebarLogoutButton) {
-                sidebarLogoutButton.addEventListener('click', function() {
-                    fetch('/api/auth/logout', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        }
-                    }).then(() => {
-                        localStorage.removeItem('nasma_remember_me_token');
-                        sessionStorage.setItem('just_logged_out', 'true');
-                        window.location.href = '/login';
-                    }).catch(() => {
-                        localStorage.removeItem('nasma_remember_me_token');
-                        sessionStorage.setItem('just_logged_out', 'true');
-                        window.location.href = '/login';
-                    });
-                });
+                sidebarLogoutButton.addEventListener('click', logoutUser);
             }
         });
 
@@ -3203,22 +3337,7 @@
                 logoutBtn.addEventListener('click', function(e) {
                     e.preventDefault();
                     e.stopPropagation();
-                    fetch('/api/auth/logout', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        }
-                    })
-                        .then(() => {
-                            localStorage.removeItem('nasma_remember_me_token');
-                            sessionStorage.setItem('just_logged_out', 'true');
-                            window.location.href = '/login';
-                        })
-                        .catch(() => {
-                            localStorage.removeItem('nasma_remember_me_token');
-                            sessionStorage.setItem('just_logged_out', 'true');
-                            window.location.href = '/login';
-                        });
+                    logoutUser();
                 });
             } else {
                 console.error('logoutBtn not found!');
@@ -3237,22 +3356,7 @@
                         transitionToInitial();
                         currentThreadId = null;
                     } else if (target.id === 'logoutBtn') {
-                        fetch('/api/auth/logout', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            }
-                        })
-                            .then(() => {
-                                localStorage.removeItem('nasma_remember_me_token');
-                                sessionStorage.setItem('just_logged_out', 'true');
-                                window.location.href = '/login';
-                            })
-                            .catch(() => {
-                                localStorage.removeItem('nasma_remember_me_token');
-                                sessionStorage.setItem('just_logged_out', 'true');
-                                window.location.href = '/login';
-                            });
+                        logoutUser();
                     }
                 });
             }
