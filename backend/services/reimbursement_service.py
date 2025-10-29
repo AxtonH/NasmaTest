@@ -187,11 +187,17 @@ class ReimbursementService:
             self._log(f"Amount detected: {amount}", "bot_logic")
 
         # Extract date if mentioned
+        # CRITICAL: Only add date confidence if there are other indicators
+        # This prevents dates from timeoff/overtime flows from triggering reimbursement
         expense_date = self._extract_date(message_lower)
         if expense_date:
             extracted_data['date'] = expense_date
-            confidence += 0.2  # Date is a moderate indicator
-            self._log(f"Date detected: {expense_date}", "bot_logic")
+            # Only boost confidence if we already have some reimbursement context
+            if confidence > 0 or pattern_matches > 0:
+                confidence += 0.2  # Date is a moderate indicator when combined with other signals
+                self._log(f"Date detected with context: {expense_date}", "bot_logic")
+            else:
+                self._log(f"Date detected but no reimbursement context, skipping confidence boost: {expense_date}", "bot_logic")
 
         # Boost confidence for multiple patterns
         if pattern_matches > 1:
