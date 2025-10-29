@@ -40,6 +40,9 @@ class ChatGPTService:
         self.halfday_service = None
         self.reimbursement_service = None
         self.metrics_service = None
+
+        # Per-request Odoo session data (set before processing each message)
+        self.current_odoo_session = None
         
         # Leave types that require the user to pick between full days vs custom hours
         self.leave_mode_config = {
@@ -2040,7 +2043,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 except Exception:
                     pass
                 debug_log(f"User confirmed submission with full context present; submitting.", "bot_logic")
-                return self._submit_timeoff_request(thread_id, session, employee_data)
+                return self._submit_timeoff_request(thread_id, session, employee_data, self.current_odoo_session)
 
             # Missing leave type
             if not sel_type_now:
@@ -2369,8 +2372,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 response_text = "Please reply with 'yes' to submit the request or 'no' to cancel."
                 return self._create_response(response_text, thread_id)
     
-    def _submit_timeoff_request(self, thread_id: str, session: dict, employee_data: dict) -> dict:
-        """Submit the time-off request to Odoo"""
+    def _submit_timeoff_request(self, thread_id: str, session: dict, employee_data: dict, odoo_session_data: dict = None) -> dict:
+        """Submit the time-off request to Odoo (with optional session data for stateless mode)"""
         try:
             debug_log(f"Starting time-off submission for thread: {thread_id}", "bot_logic")
             debug_log(f"Full session structure: {session}", "bot_logic")
@@ -2517,15 +2520,33 @@ Be thorough and informative while maintaining clarity and accuracy."""
                     'data': datas
                 })
 
-            success, result = self.timeoff_service.submit_leave_request(
-                employee_id=employee_id,
-                leave_type_id=leave_type_id,
-                start_date=start_date,
-                end_date=end_date,
-                description=f"Time off request submitted via Nasma chatbot",
-                extra_fields=extra_fields or None,
-                supporting_attachments=attachment_payloads or None
-            )
+            # Use stateless version if session data provided, otherwise fall back to old method
+            if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+                print(f"DEBUG: Using stateless submit with session_id: {odoo_session_data.get('session_id')[:20]}...")
+                success, result = self.timeoff_service.submit_leave_request_stateless(
+                    employee_id=employee_id,
+                    leave_type_id=leave_type_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    description=f"Time off request submitted via Nasma chatbot",
+                    extra_fields=extra_fields or None,
+                    supporting_attachments=attachment_payloads or None,
+                    session_id=odoo_session_data.get('session_id'),
+                    user_id=odoo_session_data.get('user_id'),
+                    username=odoo_session_data.get('username'),
+                    password=odoo_session_data.get('password')
+                )
+            else:
+                print("DEBUG: Using legacy submit (no session data provided)")
+                success, result = self.timeoff_service.submit_leave_request(
+                    employee_id=employee_id,
+                    leave_type_id=leave_type_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    description=f"Time off request submitted via Nasma chatbot",
+                    extra_fields=extra_fields or None,
+                    supporting_attachments=attachment_payloads or None
+                )
             
             if success:
                 extras = extra_fields if isinstance(extra_fields, dict) else {}

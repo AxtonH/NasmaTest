@@ -167,6 +167,23 @@ def create_app():
 
     PEOPLE_CULTURE_DENIED = "sorry this flow is restricted to members of the People & Culture Department"
 
+    def get_odoo_session_data():
+        """
+        Get Odoo session data from Flask session (per-user, thread-safe)
+
+        Returns:
+            Dict with session_id, user_id, username, password or None if not authenticated
+        """
+        if not session.get('authenticated'):
+            return None
+
+        return {
+            'session_id': session.get('odoo_session_id'),
+            'user_id': session.get('user_id'),
+            'username': session.get('username'),
+            'password': session.get('password')  # May be None if not stored
+        }
+
     def _is_people_culture_member(data) -> bool:
         """Return True if the provided employee data belongs to People & Culture."""
         try:
@@ -470,27 +487,34 @@ def create_app():
                     'message': 'Username and password are required'
                 }), 400
 
-            # Authenticate with Odoo
-            success, message = odoo_service.authenticate(username, password)
+            # Authenticate with Odoo (stateless - returns session data)
+            success, message, session_data = odoo_service.authenticate(username, password)
 
-            if success:
-                # Store authentication in session (without password for security)
+            if success and session_data:
+                # Store authentication in Flask session (per-user, isolated)
                 # Only set permanent session if remember_me is checked
                 session.permanent = remember_me  # Permanent session only with remember_me
                 session['authenticated'] = True
                 session['username'] = username
-                session['user_id'] = odoo_service.user_id
+                session['user_id'] = session_data['user_id']
                 # Persist Odoo web session id for rehydration across reloads
-                session['odoo_session_id'] = odoo_service.session_id
-                # Note: Not storing password in session for security reasons
+                session['odoo_session_id'] = session_data['session_id']
+                # Store password encrypted for session renewal (only if remember_me)
+                if remember_me:
+                    session['password'] = password  # Flask session is encrypted by default
 
                 debug_log(f"Authentication successful for {username} (permanent session: {remember_me})", "bot_logic")
-                debug_log(f"Session stored: {dict(session)}", "bot_logic")
+                debug_log(f"Session stored with session_id: {session_data['session_id'][:20]}...", "bot_logic")
 
                 response_data = {
                     'success': True,
                     'message': message,
-                    'user_info': odoo_service.get_user_info()
+                    'user_info': {
+                        'user_id': session_data['user_id'],
+                        'username': username,
+                        'database': Config.ODOO_DB,
+                        'server_url': Config.ODOO_URL
+                    }
                 }
 
                 # Handle remember me functionality
@@ -539,23 +563,29 @@ def create_app():
             if credentials:
                 username, password = credentials
 
-                # Authenticate with Odoo
-                success, message = odoo_service.authenticate(username, password)
+                # Authenticate with Odoo (stateless - returns session data)
+                success, message, session_data = odoo_service.authenticate(username, password)
 
-                if success:
-                    # Store authentication in session
+                if success and session_data:
+                    # Store authentication in Flask session (per-user, isolated)
                     session.permanent = True
                     session['authenticated'] = True
                     session['username'] = username
-                    session['user_id'] = odoo_service.user_id
-                    session['odoo_session_id'] = odoo_service.session_id
+                    session['user_id'] = session_data['user_id']
+                    session['odoo_session_id'] = session_data['session_id']
+                    session['password'] = password  # For session renewal
 
                     debug_log(f"Auto-login successful for {username} via remember me token", "bot_logic")
 
                     return jsonify({
                         'success': True,
                         'message': 'Auto-login successful',
-                        'user_info': odoo_service.get_user_info()
+                        'user_info': {
+                            'user_id': session_data['user_id'],
+                            'username': username,
+                            'database': Config.ODOO_DB,
+                            'server_url': Config.ODOO_URL
+                        }
                     })
 
             return jsonify({
@@ -1653,6 +1683,8 @@ def create_app():
                 if intent == 'timeoff_request' and confidence >= 0.5:
                     # Handle time-off request through ChatGPT service
                     debug_log(f"Time-off intent detected with confidence {confidence:.2f}", "bot_logic")
+                    # Set per-request Odoo session data for stateless API calls
+                    chatgpt_service.current_odoo_session = get_odoo_session_data()
                     response = chatgpt_service.get_response(message, thread_id, employee_data)
                     if response:
                         if isinstance(response, dict):
@@ -1798,6 +1830,8 @@ def create_app():
                 else:
                     # Delegate to ChatGPT
                     debug_log(f"Calling ChatGPT with employee_data: {employee_data is not None}", "bot_logic")
+                    # Set per-request Odoo session data for stateless API calls
+                    chatgpt_service.current_odoo_session = get_odoo_session_data()
                     response = chatgpt_service.get_response(message, thread_id, employee_data)
                     debug_log(f"ChatGPT response received", "bot_logic")
 

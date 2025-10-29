@@ -314,7 +314,116 @@ class TimeOffService:
             import traceback
             traceback.print_exc()
             return False, f"Error submitting leave request: {str(e)}"
-    
+
+    def submit_leave_request_stateless(self, employee_id: int, leave_type_id: int,
+                           start_date: str, end_date: str, description: str = None,
+                           extra_fields: Optional[Dict] = None,
+                           supporting_attachments: Optional[List[Dict[str, Any]]] = None,
+                           session_id: str = None, user_id: int = None,
+                           username: str = None, password: str = None) -> Tuple[bool, Any]:
+        """Submit a leave request to Odoo (stateless version with explicit session)"""
+        try:
+            print(f"DEBUG: submit_leave_request_stateless - employee_id: {employee_id}, session_id: {session_id[:20] if session_id else 'None'}..., user_id: {user_id}")
+
+            if not session_id or not user_id:
+                print(f"DEBUG: Missing session_id or user_id")
+                return False, "Session data missing"
+
+            # Prepare leave request data
+            leave_data = {
+                'employee_id': employee_id,
+                'holiday_status_id': leave_type_id,
+                'request_date_from': start_date,
+                'request_date_to': end_date,
+                'name': description or "Time off request submitted via Nasma chatbot",
+                'state': 'confirm'  # Submit for approval
+            }
+
+            # Merge any extra fields (e.g., request_unit_hours for Half Days)
+            if extra_fields and isinstance(extra_fields, dict):
+                leave_data.update(extra_fields)
+
+            print(f"DEBUG: Leave request data: {leave_data}")
+
+            # Create the leave request using stateless method
+            params = {
+                'args': [leave_data],
+                'kwargs': {}
+            }
+
+            print(f"DEBUG: Making Odoo request to create leave")
+            success, data = self._make_odoo_request_stateless(
+                'hr.leave', 'create', params,
+                session_id=session_id,
+                user_id=user_id,
+                username=username,
+                password=password
+            )
+
+            print(f"DEBUG: Odoo request result - Success: {success}, Data: {data}")
+
+            if success:
+                leave_id = data
+                print(f"DEBUG: Leave request created successfully with ID: {leave_id}")
+
+                # Handle attachments if provided
+                attachment_ids: List[int] = []
+                if supporting_attachments:
+                    for idx, attachment in enumerate(supporting_attachments):
+                        try:
+                            if not isinstance(attachment, dict):
+                                continue
+                            datas = attachment.get('data')
+                            if not datas:
+                                continue
+                            name = attachment.get('filename') or attachment.get('name') or f'supporting-document-{idx + 1}'
+                            mimetype = attachment.get('mimetype') or attachment.get('content_type') or 'application/octet-stream'
+                            attachment_payload = {
+                                'name': name,
+                                'datas': datas,
+                                'res_model': 'hr.leave',
+                                'res_id': leave_id,
+                                'type': 'binary',
+                                'mimetype': mimetype,
+                            }
+                            print(f"DEBUG: Uploading supporting document '{name}' for leave {leave_id}")
+                            att_success, att_id = self._make_odoo_request_stateless('ir.attachment', 'create', {
+                                'args': [attachment_payload],
+                                'kwargs': {}
+                            }, session_id=session_id, user_id=user_id, username=username, password=password)
+
+                            if att_success and isinstance(att_id, int):
+                                attachment_ids.append(att_id)
+                            else:
+                                print(f"DEBUG: Failed to create attachment for '{name}': {att_id}")
+                        except Exception as attachment_error:
+                            print(f"DEBUG: Exception uploading attachment {idx}: {attachment_error}")
+
+                    if attachment_ids:
+                        print(f"DEBUG: Linking {len(attachment_ids)} attachments to supported_attachment_ids")
+                        link_args = {
+                            'args': [[leave_id], {'supported_attachment_ids': [(6, 0, attachment_ids)]}],
+                            'kwargs': {}
+                        }
+                        link_success, link_resp = self._make_odoo_request_stateless('hr.leave', 'write', link_args,
+                            session_id=session_id, user_id=user_id, username=username, password=password)
+                        if not link_success:
+                            print(f"DEBUG: Failed to link supporting attachments: {link_resp}")
+
+                return True, {
+                    'leave_id': leave_id,
+                    'message': f"Leave request #{leave_id} submitted successfully and is pending approval."
+                }
+            else:
+                print(f"DEBUG: Leave request creation failed: {data}")
+                return False, data
+
+        except Exception as e:
+            print(f"DEBUG: Exception during leave request submission: {e}")
+            import traceback
+            traceback.print_exc()
+            return False, f"Error submitting leave request: {str(e)}"
+
     def _make_odoo_request(self, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
         """Make authenticated request to Odoo using web session"""
         try:
@@ -379,7 +488,42 @@ class TimeOffService:
                 
         except Exception as e:
             return False, f"Request error: {str(e)}"
-    
+
+    def _make_odoo_request_stateless(self, model: str, method: str, params: Dict,
+                                     session_id: str, user_id: int,
+                                     username: str = None, password: str = None) -> Tuple[bool, Any]:
+        """Make authenticated request to Odoo using explicit session (stateless version)"""
+        try:
+            print(f"DEBUG: _make_odoo_request_stateless - session_id: {session_id[:20] if session_id else 'None'}..., user_id: {user_id}")
+
+            result = self.odoo_service.make_authenticated_request(
+                model=model,
+                method=method,
+                args=params.get('args', []),
+                kwargs=params.get('kwargs', {}),
+                session_id=session_id,
+                user_id=user_id,
+                username=username,
+                password=password
+            )
+
+            if 'error' in result and 'result' not in result:
+                error_msg = f"Odoo API error: {result.get('error')}"
+                debug_log(f"Odoo API error: {error_msg}", "odoo_data")
+                return False, error_msg
+
+            if 'result' in result:
+                debug_log(f"Successfully parsed JSON, result type: {type(result['result'])}", "odoo_data")
+                return True, result['result']
+            else:
+                return False, "Unknown error in Odoo response"
+
+        except Exception as e:
+            print(f"DEBUG: Exception in _make_odoo_request_stateless: {e}")
+            import traceback
+            traceback.print_exc()
+            return False, f"Request error: {str(e)}"
+
     def format_leave_types_for_user(self, leave_types: List[Dict]) -> str:
         """Format leave types for user selection"""
         if not leave_types:

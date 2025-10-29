@@ -29,21 +29,22 @@ class OdooService:
         except Exception:
             self.http = requests
     
-    def authenticate(self, username: str, password: str) -> Tuple[bool, str]:
+    def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
         """
-        Authenticate user with Odoo
-        
+        Authenticate user with Odoo (stateless - returns session data instead of storing)
+
         Args:
             username: Odoo username
             password: Odoo password
-            
+
         Returns:
-            Tuple of (success: bool, message: str)
+            Tuple of (success: bool, message: str, session_data: dict or None)
+            session_data contains: {'session_id', 'user_id', 'username', 'password'}
         """
         try:
             # Odoo authentication endpoint
             auth_url = f"{self.odoo_url}/web/session/authenticate"
-            
+
             # Prepare authentication data
             auth_data = {
                 "jsonrpc": "2.0",
@@ -55,38 +56,47 @@ class OdooService:
                 },
                 "id": 1
             }
-            
+
             # Make authentication request
             response = self.http.post(
                 auth_url,
                 json=auth_data,
                 timeout=10
             )
-            
+
             if response.status_code == 200:
                 result = response.json()
-                
-                if 'result' in result and result['result']:
-                    # Authentication successful
-                    self.username = username
-                    self.password = password  # Store for re-authentication
-                    self.user_id = result['result'].get('uid')
-                    self.session_id = response.cookies.get('session_id')
-                    self.last_activity = time.time()
 
-                    return True, "Authentication successful"
+                if 'result' in result and result['result']:
+                    # Authentication successful - return session data without storing
+                    session_data = {
+                        'session_id': response.cookies.get('session_id'),
+                        'user_id': result['result'].get('uid'),
+                        'username': username,
+                        'password': password,  # For re-authentication
+                        'last_activity': time.time()
+                    }
+
+                    # Deprecated: Keep for backward compatibility during migration
+                    self.username = username
+                    self.password = password
+                    self.user_id = session_data['user_id']
+                    self.session_id = session_data['session_id']
+                    self.last_activity = session_data['last_activity']
+
+                    return True, "Authentication successful", session_data
                 else:
                     # Authentication failed
-                    return False, "Invalid username or password"
+                    return False, "Invalid username or password", None
             else:
-                return False, f"Connection error: {response.status_code}"
-                
+                return False, f"Connection error: {response.status_code}", None
+
         except requests.exceptions.Timeout:
-            return False, "Connection timeout. Please check your internet connection."
+            return False, "Connection timeout. Please check your internet connection.", None
         except requests.exceptions.ConnectionError:
-            return False, "Unable to connect to Odoo server. Please check the URL."
+            return False, "Unable to connect to Odoo server. Please check the URL.", None
         except Exception as e:
-            return False, f"Authentication error: {str(e)}"
+            return False, f"Authentication error: {str(e)}", None
     
     def is_authenticated(self) -> bool:
         """Check if user is currently authenticated"""
@@ -287,3 +297,118 @@ class OdooService:
             ok, _ = self._renew_session()
             cookies = {'session_id': self.session_id} if self.session_id else {}
             return client.post(url, json=json, cookies=cookies, timeout=timeout)
+
+    # ========== NEW STATELESS METHODS ==========
+
+    def test_session_validity_with_session(self, session_id: str, user_id: int) -> Tuple[bool, str]:
+        """Test if an Odoo session is valid (stateless version)"""
+        try:
+            if not session_id or not user_id:
+                return False, "Missing session_id or user_id"
+
+            url = f"{self.odoo_url}/web/dataset/call_kw"
+            test_data = {
+                "jsonrpc": "2.0",
+                "method": "call",
+                "params": {
+                    "model": "res.users",
+                    "method": "read",
+                    "args": [[user_id]],
+                    "kwargs": {"fields": ["name", "login"]}
+                },
+                "id": 1
+            }
+
+            cookies = {'session_id': session_id}
+
+            response = self.http.post(
+                url,
+                json=test_data,
+                cookies=cookies,
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if 'result' in result and result['result']:
+                    return True, "Session is valid"
+                else:
+                    return False, "Session expired or invalid"
+            else:
+                return False, f"HTTP error: {response.status_code}"
+
+        except Exception as e:
+            return False, f"Session test error: {str(e)}"
+
+    def renew_session_with_credentials(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
+        """Renew session by re-authenticating (stateless version)"""
+        print(f"DEBUG: Renewing Odoo session for user {username}")
+        return self.authenticate(username, password)
+
+    def make_authenticated_request(self, model: str, method: str, args: list, kwargs: dict,
+                                   session_id: str, user_id: int,
+                                   username: Optional[str] = None, password: Optional[str] = None) -> Dict:
+        """
+        Make an authenticated Odoo API request (stateless version)
+
+        Args:
+            model: Odoo model name (e.g., 'hr.employee')
+            method: Method to call (e.g., 'search_read', 'create')
+            args: Positional arguments for the method
+            kwargs: Keyword arguments for the method
+            session_id: Odoo session ID
+            user_id: Odoo user ID
+            username: Username for session renewal (optional)
+            password: Password for session renewal (optional)
+
+        Returns:
+            Response dict from Odoo API
+        """
+        url = f"{self.odoo_url}/web/dataset/call_kw"
+        request_data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "model": model,
+                "method": method,
+                "args": args,
+                "kwargs": kwargs
+            },
+            "id": 1
+        }
+
+        cookies = {'session_id': session_id}
+        client = getattr(self, 'http', requests)
+
+        try:
+            response = client.post(url, json=request_data, cookies=cookies, timeout=20)
+
+            # Check for auth errors and retry with renewal if credentials provided
+            if response.status_code in (401, 403) and username and password:
+                print(f"DEBUG: Session expired (HTTP {response.status_code}), attempting renewal...")
+                success, msg, new_session_data = self.renew_session_with_credentials(username, password)
+                if success and new_session_data:
+                    cookies = {'session_id': new_session_data['session_id']}
+                    response = client.post(url, json=request_data, cookies=cookies, timeout=20)
+
+            # Check for Odoo session expiry errors
+            if response.status_code == 200:
+                result = response.json()
+                err = result.get('error') if isinstance(result, dict) else None
+                if isinstance(err, dict) and username and password:
+                    name = str(err.get('data', {}).get('name') or err.get('name') or '').lower()
+                    msg = str(err.get('data', {}).get('message') or err.get('message') or '').lower()
+                    session_expired = 'session expired' in msg or 'sessionexpiredexception' in name
+
+                    if session_expired:
+                        print("DEBUG: Odoo session expired error detected, attempting renewal...")
+                        success, msg, new_session_data = self.renew_session_with_credentials(username, password)
+                        if success and new_session_data:
+                            cookies = {'session_id': new_session_data['session_id']}
+                            response = client.post(url, json=request_data, cookies=cookies, timeout=20)
+
+            return response.json() if response.status_code == 200 else {'error': f'HTTP {response.status_code}'}
+
+        except Exception as e:
+            print(f"DEBUG: Exception in make_authenticated_request: {e}")
+            return {'error': str(e)}
