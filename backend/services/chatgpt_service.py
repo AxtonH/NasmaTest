@@ -41,9 +41,10 @@ class ChatGPTService:
         self.reimbursement_service = None
         self.metrics_service = None
 
-        # Per-request Odoo session data (set before processing each message)
-        self.current_odoo_session = None
-        
+        # Thread-local storage for per-request Odoo session data
+        # This prevents race conditions when multiple users submit simultaneously
+        self._local = threading.local()
+
         # Leave types that require the user to pick between full days vs custom hours
         self.leave_mode_config = {
             'Sick Leave': {
@@ -63,7 +64,17 @@ class ChatGPTService:
         # Disable conversation storage
         # if not os.path.exists(self.storage_dir):
         #     os.makedirs(self.storage_dir)
-    
+
+    @property
+    def current_odoo_session(self):
+        """Get thread-local Odoo session data (prevents race conditions)"""
+        return getattr(self._local, 'odoo_session', None)
+
+    @current_odoo_session.setter
+    def current_odoo_session(self, value):
+        """Set thread-local Odoo session data (isolated per request thread)"""
+        self._local.odoo_session = value
+
     def set_services(
         self,
         timeoff_service,
