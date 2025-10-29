@@ -713,24 +713,20 @@ class ReimbursementService:
         Returns: response dict or None if not a reimbursement request
         """
         try:
-            # Enforce single active flow per thread: block if another flow is active
-            try:
-                active_any = self.session_manager.get_session(thread_id) if thread_id else None
-                if active_any and active_any.get('type') not in (None, 'reimbursement') and active_any.get('state') in ['started', 'active']:
-                    other = active_any.get('type', 'another')
-                    return {
-                        'message': f"You're currently in an active {other} request. Please complete it or type 'cancel' to end it before starting a reimbursement.",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-            except Exception:
-                pass
             # Check for active reimbursement session first
             active_session = self.session_manager.get_session(thread_id) if self.session_manager else None
 
             if active_session and active_session.get('type') == 'reimbursement':
                 # Continue existing session
                 return self._continue_reimbursement_session(message, thread_id, active_session, employee_data)
+
+            # CRITICAL: Block if another flow is active (BEFORE intent detection)
+            # This prevents reimbursement from interrupting active timeoff/overtime flows
+            if active_session and active_session.get('type') not in (None, 'reimbursement') and active_session.get('state') in ['started', 'active']:
+                other_flow = active_session.get('type', 'another')
+                self._log(f"Blocking reimbursement - active {other_flow} flow detected on thread {thread_id}", "bot_logic")
+                # Return None to let the active flow handle the message
+                return None
 
             # Detect new reimbursement intent
             is_reimbursement, confidence, extracted_data = self.detect_reimbursement_intent(message)
