@@ -321,7 +321,8 @@ class OdooService:
 
             cookies = {'session_id': session_id}
 
-            response = self.http.post(
+            # Use requests directly to avoid shared session pollution
+            response = requests.post(
                 url,
                 json=test_data,
                 cookies=cookies,
@@ -378,10 +379,11 @@ class OdooService:
         }
 
         cookies = {'session_id': session_id}
-        client = getattr(self, 'http', requests)
+        # Use requests directly (not self.http) to avoid shared session cookie pollution
+        # self.http is a shared Session object that can cache cookies from other users
 
         try:
-            response = client.post(url, json=request_data, cookies=cookies, timeout=20)
+            response = requests.post(url, json=request_data, cookies=cookies, timeout=20)
 
             # Check for auth errors and retry with renewal if credentials provided
             if response.status_code in (401, 403) and username and password:
@@ -389,7 +391,7 @@ class OdooService:
                 success, msg, new_session_data = self.renew_session_with_credentials(username, password)
                 if success and new_session_data:
                     cookies = {'session_id': new_session_data['session_id']}
-                    response = client.post(url, json=request_data, cookies=cookies, timeout=20)
+                    response = requests.post(url, json=request_data, cookies=cookies, timeout=20)
 
             # Check for Odoo session expiry errors
             if response.status_code == 200:
@@ -405,7 +407,7 @@ class OdooService:
                         success, msg, new_session_data = self.renew_session_with_credentials(username, password)
                         if success and new_session_data:
                             cookies = {'session_id': new_session_data['session_id']}
-                            response = client.post(url, json=request_data, cookies=cookies, timeout=20)
+                            response = requests.post(url, json=request_data, cookies=cookies, timeout=20)
 
             return response.json() if response.status_code == 200 else {'error': f'HTTP {response.status_code}'}
 
