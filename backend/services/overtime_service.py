@@ -307,20 +307,16 @@ class OvertimeService:
                     }
                 return self._continue_overtime(message, thread_id, active, employee_data)
 
+            # CRITICAL: Block if another flow is active (BEFORE intent detection)
+            if active and active.get('type') not in (None, 'overtime') and active.get('state') in ['started', 'active']:
+                other_flow = active.get('type', 'another')
+                self._log(f"Blocking overtime - active {other_flow} flow detected on thread {thread_id}")
+                return None  # Let the active flow handle the message
+
             # Detect new intent
             is_ot, conf = self.detect_intent(message)
             if not is_ot:
                 return None
-
-            # If user is trying to start overtime while another flow is active, block
-            active_any = self.session_manager.get_session(thread_id)
-            if active_any and active_any.get('state') in ['started', 'active'] and active_any.get('type') not in (None, 'overtime'):
-                other = active_any.get('type', 'another')
-                return {
-                    'message': f"You're currently in an active {other} request. Please complete it or type 'cancel' to end it before starting overtime.",
-                    'thread_id': thread_id,
-                    'session_handled': True
-                }
 
             # Initialize new overtime session
             company_name = self._get_company_name(employee_data) or 'Company'
