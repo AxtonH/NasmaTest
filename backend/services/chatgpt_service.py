@@ -201,9 +201,25 @@ class ChatGPTService:
         except Exception:
             return False
 
-    def _reset_timeoff_sessions(self, thread_id, reason=''):
-        """Force-remove any lingering time-off sessions so a fresh flow can start."""
+    def _reset_timeoff_sessions(self, thread_id, reason='', employee_data=None):
+        """
+        Force-remove lingering time-off sessions for the CURRENT USER only.
+
+        CRITICAL: This now only clears sessions belonging to the same employee
+        to support concurrent timeoff requests from multiple users.
+
+        Args:
+            thread_id: Current thread ID to clear
+            reason: Reason for clearing
+            employee_data: Current user's employee data (to identify their sessions)
+        """
         try:
+            # Get current user's employee ID for filtering
+            current_employee_id = None
+            if employee_data and isinstance(employee_data, dict):
+                current_employee_id = employee_data.get('id')
+
+            # Clear the current thread's session
             if thread_id:
                 try:
                     if reason:
@@ -214,28 +230,69 @@ class ChatGPTService:
                     self.session_manager.clear_session(thread_id)
                 except Exception:
                     pass
-            try:
-                for tid, sess in list(getattr(self.session_manager, 'sessions', {}).items()):
-                    if tid == thread_id:
-                        continue
-                    if isinstance(sess, dict) and sess.get('type') == 'timeoff':
-                        try:
-                            self.session_manager.clear_session(tid)
-                        except Exception:
+
+            # CRITICAL CHANGE: Only clear OTHER sessions belonging to the SAME employee
+            # This prevents clearing sessions from other concurrent users
+            if current_employee_id:
+                debug_log(f"Clearing other timeoff sessions for employee {current_employee_id}", "bot_logic")
+                try:
+                    for tid, sess in list(getattr(self.session_manager, 'sessions', {}).items()):
+                        if tid == thread_id:
                             continue
-            except Exception:
-                pass
-            try:
-                for tid, sess in self.session_manager.find_active_timeoff_sessions():
-                    if thread_id and tid == thread_id:
-                        continue
-                    try:
-                        self.session_manager.clear_session(tid)
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-        except Exception:
+                        if isinstance(sess, dict) and sess.get('type') == 'timeoff':
+                            # Check if this session belongs to the same employee
+                            sess_employee_id = None
+                            try:
+                                sess_employee_data = sess.get('data', {}).get('employee_data', {})
+                                if not sess_employee_data:
+                                    sess_employee_data = sess.get('employee_data', {})
+                                sess_employee_id = sess_employee_data.get('id')
+                            except Exception:
+                                pass
+
+                            # Only clear if it's the same employee
+                            if sess_employee_id == current_employee_id:
+                                debug_log(f"Clearing session {tid} for same employee {current_employee_id}", "bot_logic")
+                                try:
+                                    self.session_manager.clear_session(tid)
+                                except Exception:
+                                    continue
+                            else:
+                                debug_log(f"Keeping session {tid} - belongs to different employee {sess_employee_id}", "bot_logic")
+                except Exception as e:
+                    debug_log(f"Error in session filtering: {e}", "general")
+                    pass
+
+                try:
+                    for tid, sess in self.session_manager.find_active_timeoff_sessions():
+                        if thread_id and tid == thread_id:
+                            continue
+                        # Check if this session belongs to the same employee
+                        sess_employee_id = None
+                        try:
+                            sess_employee_data = sess.get('data', {}).get('employee_data', {})
+                            if not sess_employee_data:
+                                sess_employee_data = sess.get('employee_data', {})
+                            sess_employee_id = sess_employee_data.get('id')
+                        except Exception:
+                            pass
+
+                        # Only clear if it's the same employee
+                        if sess_employee_id == current_employee_id:
+                            debug_log(f"Clearing active session {tid} for same employee {current_employee_id}", "bot_logic")
+                            try:
+                                self.session_manager.clear_session(tid)
+                            except Exception:
+                                continue
+                        else:
+                            debug_log(f"Keeping active session {tid} - belongs to different employee {sess_employee_id}", "bot_logic")
+                except Exception as e:
+                    debug_log(f"Error in active session filtering: {e}", "general")
+                    pass
+            else:
+                debug_log("No employee_id provided - skipping multi-user session cleanup for safety", "bot_logic")
+        except Exception as e:
+            debug_log(f"Error in _reset_timeoff_sessions: {e}", "general")
             pass
 
     def _restart_timeoff_flow(self, message: str, thread_id: str, employee_data: dict, reason: str = '') -> dict:
@@ -248,7 +305,7 @@ class ChatGPTService:
         except Exception:
             extracted_payload = {}
 
-        self._reset_timeoff_sessions(thread_id, reason or 'User requested new time-off flow')
+        self._reset_timeoff_sessions(thread_id, reason or 'User requested new time-off flow', employee_data)
         return self._start_timeoff_session(message, thread_id, extracted_payload, employee_data)
 
     def _persist_timeoff_context(self, thread_id: str, session: dict, **fields) -> None:
@@ -406,7 +463,7 @@ class ChatGPTService:
                         except Exception:
                             detected = (False, 0.0, {})
                         extracted_payload = detected[2] if detected[0] else {}
-                        self._reset_timeoff_sessions(thread_id, 'User requested new time-off flow')
+                        self._reset_timeoff_sessions(thread_id, 'User requested new time-off flow', employee_data)
                         debug_log("Fresh time-off start detected. Starting new session.", "bot_logic")
                         return self._start_timeoff_session(message, thread_id, extracted_payload, employee_data)
 
@@ -877,7 +934,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
             # If the user explicitly restarts while a session exists, wipe and start fresh
             if start_phrase:
                 debug_log("Restart phrase detected during active flow; resetting session.", "bot_logic")
-                self._reset_timeoff_sessions(thread_id, 'User restarted time-off flow mid-session')
+                self._reset_timeoff_sessions(thread_id, 'User restarted time-off flow mid-session', employee_data)
                 return self._start_timeoff_session(message, thread_id, extracted_data if is_timeoff else {}, employee_data)
 
             # If this is a new time-off request (high confidence)
@@ -887,7 +944,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 # Always start a fresh time-off flow on explicit start phrases to avoid bleeding states
                 debug_log(f"High confidence time-off intent detected ({confidence:.2f}); forcing a clean start.", "bot_logic")
                 try:
-                    self._reset_timeoff_sessions(thread_id, 'New time-off request detected - force fresh session')
+                    self._reset_timeoff_sessions(thread_id, 'New time-off request detected - force fresh session', employee_data)
                 except Exception:
                     try:
                         if active_session:
@@ -1278,7 +1335,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         payload = detected[2] or {}
                 except Exception:
                     payload = {}
-                self._reset_timeoff_sessions(thread_id, 'User restarted time-off flow during continuation')
+                self._reset_timeoff_sessions(thread_id, 'User restarted time-off flow during continuation', employee_data)
                 return self._start_timeoff_session(message, thread_id, payload, employee_data)
 
             # Require supporting document upload (if pending) before moving on
@@ -1477,7 +1534,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
         # Validate that we still have leave types
         if not leave_types:
             debug_log("No leave types found in session data; forcing a fresh start.", "bot_logic")
-            self._reset_timeoff_sessions(thread_id, 'Missing leave types')
+            self._reset_timeoff_sessions(thread_id, 'Missing leave types', employee_data)
             restarted = self._start_timeoff_session("time off", thread_id, {}, employee_data)
             if restarted:
                 return restarted
