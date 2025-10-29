@@ -2582,7 +2582,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
             # Use stateless version if session data provided, otherwise fall back to old method
             if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
                 print(f"DEBUG: Using stateless submit with session_id: {odoo_session_data.get('session_id')[:20]}...")
-                success, result = self.timeoff_service.submit_leave_request_stateless(
+                success, result, renewed_session = self.timeoff_service.submit_leave_request_stateless(
                     employee_id=employee_id,
                     leave_type_id=leave_type_id,
                     start_date=start_date,
@@ -2595,6 +2595,18 @@ Be thorough and informative while maintaining clarity and accuracy."""
                     username=odoo_session_data.get('username'),
                     password=odoo_session_data.get('password')
                 )
+
+                # CRITICAL: If session was renewed, update Flask session
+                if renewed_session:
+                    print(f"DEBUG: Updating Flask session with renewed Odoo session_id")
+                    try:
+                        from flask import session as flask_session
+                        flask_session['odoo_session_id'] = renewed_session['session_id']
+                        flask_session['user_id'] = renewed_session['user_id']
+                        flask_session.modified = True
+                        print(f"DEBUG: Flask session updated successfully with new session_id: {renewed_session['session_id'][:20]}...")
+                    except Exception as session_update_error:
+                        print(f"DEBUG: Failed to update Flask session: {session_update_error}")
             else:
                 print("DEBUG: Using legacy submit (no session data provided)")
                 success, result = self.timeoff_service.submit_leave_request(

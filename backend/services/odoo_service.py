@@ -364,6 +364,7 @@ class OdooService:
 
         Returns:
             Response dict from Odoo API
+            If session was renewed, includes '_renewed_session' key with new session data
         """
         url = f"{self.odoo_url}/web/dataset/call_kw"
         request_data = {
@@ -379,6 +380,7 @@ class OdooService:
         }
 
         cookies = {'session_id': session_id}
+        renewed_session_data = None
         # Use requests directly (not self.http) to avoid shared session cookie pollution
         # self.http is a shared Session object that can cache cookies from other users
 
@@ -390,8 +392,10 @@ class OdooService:
                 print(f"DEBUG: Session expired (HTTP {response.status_code}), attempting renewal...")
                 success, msg, new_session_data = self.renew_session_with_credentials(username, password)
                 if success and new_session_data:
+                    renewed_session_data = new_session_data
                     cookies = {'session_id': new_session_data['session_id']}
                     response = requests.post(url, json=request_data, cookies=cookies, timeout=20)
+                    print(f"DEBUG: Session renewed successfully, new session_id: {new_session_data['session_id'][:20]}...")
 
             # Check for Odoo session expiry errors
             if response.status_code == 200:
@@ -406,10 +410,19 @@ class OdooService:
                         print("DEBUG: Odoo session expired error detected, attempting renewal...")
                         success, msg, new_session_data = self.renew_session_with_credentials(username, password)
                         if success and new_session_data:
+                            renewed_session_data = new_session_data
                             cookies = {'session_id': new_session_data['session_id']}
                             response = requests.post(url, json=request_data, cookies=cookies, timeout=20)
+                            print(f"DEBUG: Session renewed successfully, new session_id: {new_session_data['session_id'][:20]}...")
 
-            return response.json() if response.status_code == 200 else {'error': f'HTTP {response.status_code}'}
+            final_result = response.json() if response.status_code == 200 else {'error': f'HTTP {response.status_code}'}
+
+            # CRITICAL: Include renewed session data so caller can update Flask session
+            if renewed_session_data:
+                final_result['_renewed_session'] = renewed_session_data
+                print(f"DEBUG: Returning response with renewed session data")
+
+            return final_result
 
         except Exception as e:
             print(f"DEBUG: Exception in make_authenticated_request: {e}")

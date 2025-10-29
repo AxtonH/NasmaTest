@@ -320,14 +320,19 @@ class TimeOffService:
                            extra_fields: Optional[Dict] = None,
                            supporting_attachments: Optional[List[Dict[str, Any]]] = None,
                            session_id: str = None, user_id: int = None,
-                           username: str = None, password: str = None) -> Tuple[bool, Any]:
-        """Submit a leave request to Odoo (stateless version with explicit session)"""
+                           username: str = None, password: str = None) -> Tuple[bool, Any, Optional[Dict]]:
+        """
+        Submit a leave request to Odoo (stateless version with explicit session)
+
+        Returns:
+            Tuple[bool, Any, Optional[Dict]]: (success, result_data, renewed_session_data)
+        """
         try:
             print(f"DEBUG: submit_leave_request_stateless - employee_id: {employee_id}, session_id: {session_id[:20] if session_id else 'None'}..., user_id: {user_id}")
 
             if not session_id or not user_id:
                 print(f"DEBUG: Missing session_id or user_id")
-                return False, "Session data missing"
+                return False, "Session data missing", None
 
             # Prepare leave request data
             leave_data = {
@@ -352,7 +357,7 @@ class TimeOffService:
             }
 
             print(f"DEBUG: Making Odoo request to create leave")
-            success, data = self._make_odoo_request_stateless(
+            success, data, renewed_session = self._make_odoo_request_stateless(
                 'hr.leave', 'create', params,
                 session_id=session_id,
                 user_id=user_id,
@@ -361,6 +366,8 @@ class TimeOffService:
             )
 
             print(f"DEBUG: Odoo request result - Success: {success}, Data: {data}")
+            if renewed_session:
+                print(f"DEBUG: Session was renewed during submission")
 
             if success:
                 leave_id = data
@@ -413,16 +420,16 @@ class TimeOffService:
                 return True, {
                     'leave_id': leave_id,
                     'message': f"Leave request #{leave_id} submitted successfully and is pending approval."
-                }
+                }, renewed_session
             else:
                 print(f"DEBUG: Leave request creation failed: {data}")
-                return False, data
+                return False, data, renewed_session
 
         except Exception as e:
             print(f"DEBUG: Exception during leave request submission: {e}")
             import traceback
             traceback.print_exc()
-            return False, f"Error submitting leave request: {str(e)}"
+            return False, f"Error submitting leave request: {str(e)}", None
 
     def _make_odoo_request(self, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
         """Make authenticated request to Odoo using web session"""
@@ -491,8 +498,14 @@ class TimeOffService:
 
     def _make_odoo_request_stateless(self, model: str, method: str, params: Dict,
                                      session_id: str, user_id: int,
-                                     username: str = None, password: str = None) -> Tuple[bool, Any]:
-        """Make authenticated request to Odoo using explicit session (stateless version)"""
+                                     username: str = None, password: str = None) -> Tuple[bool, Any, Optional[Dict]]:
+        """
+        Make authenticated request to Odoo using explicit session (stateless version)
+
+        Returns:
+            Tuple[bool, Any, Optional[Dict]]: (success, result_data, renewed_session_data)
+            renewed_session_data is None if session wasn't renewed, otherwise contains new session info
+        """
         try:
             print(f"DEBUG: _make_odoo_request_stateless - session_id: {session_id[:20] if session_id else 'None'}..., user_id: {user_id}")
 
@@ -507,22 +520,25 @@ class TimeOffService:
                 password=password
             )
 
+            # Check if session was renewed
+            renewed_session = result.pop('_renewed_session', None) if isinstance(result, dict) else None
+
             if 'error' in result and 'result' not in result:
                 error_msg = f"Odoo API error: {result.get('error')}"
                 debug_log(f"Odoo API error: {error_msg}", "odoo_data")
-                return False, error_msg
+                return False, error_msg, renewed_session
 
             if 'result' in result:
                 debug_log(f"Successfully parsed JSON, result type: {type(result['result'])}", "odoo_data")
-                return True, result['result']
+                return True, result['result'], renewed_session
             else:
-                return False, "Unknown error in Odoo response"
+                return False, "Unknown error in Odoo response", renewed_session
 
         except Exception as e:
             print(f"DEBUG: Exception in _make_odoo_request_stateless: {e}")
             import traceback
             traceback.print_exc()
-            return False, f"Request error: {str(e)}"
+            return False, f"Request error: {str(e)}", None
 
     def format_leave_types_for_user(self, leave_types: List[Dict]) -> str:
         """Format leave types for user selection"""
