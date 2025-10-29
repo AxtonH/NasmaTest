@@ -1,0 +1,189 @@
+{
+  "session_id": "timeoff_1759149270",
+  "type": "timeoff",
+  "state": "completed",
+  "step": 3,
+  "created_at": "2025-09-29T15:34:30.626116",
+  "data": {
+    "extracted_data": {},
+    "employee_data": {
+      "id": 159,
+      "name": "Omar Basem Elhasan",
+      "job_title": "Junior AI Architect",
+      "work_email": "omar.elhasan@prezlab.com",
+      "work_phone": false,
+      "department_id": [
+        49,
+        "AI"
+      ],
+      "mobile_phone": false,
+      "identification_id": "9981008223",
+      "gender": "male",
+      "birthday": "1998-02-23",
+      "address_id": [
+        9,
+        "Prezlab FZ LLC - Regional Office"
+      ],
+      "work_location_id": false,
+      "parent_id": [
+        149,
+        "Sanad Feras Khaleel Zaqtan"
+      ],
+      "coach_id": [
+        149,
+        "Sanad Feras Khaleel Zaqtan"
+      ],
+      "job_id": [
+        110,
+        "Junior AI Architect"
+      ],
+      "resource_calendar_id": [
+        21,
+        "JO & KSA | Sun - Thu | Day Shift"
+      ],
+      "tz": "Asia/Amman",
+      "category_ids": [
+        2
+      ],
+      "marital": "single",
+      "company_id": [
+        4,
+        "Prezlab FZ LLC - Regional Office"
+      ],
+      "planning_role_ids": [],
+      "department_id_details": {
+        "id": 49,
+        "name": "AI"
+      },
+      "parent_id_details": {
+        "id": 149,
+        "name": "Sanad Feras Khaleel Zaqtan",
+        "job_title": "AI Solutions Architect"
+      },
+      "coach_id_details": {
+        "id": 149,
+        "name": "Sanad Feras Khaleel Zaqtan",
+        "job_title": "AI Solutions Architect"
+      },
+      "address_id_details": {
+        "id": 9,
+        "city": false,
+        "country_id": [
+          112,
+          "Jordan"
+        ]
+      },
+      "company_id_details": {
+        "id": 4,
+        "name": "Prezlab FZ LLC - Regional Office"
+      },
+      "job_id_details": {
+        "id": 110,
+        "name": "Junior AI Architect"
+      },
+      "resource_calendar_id_details": {
+        "id": 21,
+        "name": "JO & KSA | Sun - Thu | Day Shift"
+      }
+    }
+  },
+  "completed_steps": [
+    1,
+    2
+  ],
+  "leave_types": [
+    {
+      "id": 1,
+      "name": "Annual Leave",
+      "active": true
+    },
+    {
+      "id": 2,
+      "name": "Sick Leave",
+      "active": true
+    },
+    {
+      "id": 6,
+      "name": "Maternity Leave",
+      "active": true
+    },
+    {
+      "id": 7,
+      "name": "Paternity Leave",
+      "active": true
+    },
+    {
+      "id": 8,
+      "name": "Compassionate Leave",
+      "active": true
+    },
+    {
+      "id": "halfday_1",
+      "name": "Custom Hours",
+      "active": true,
+      "special_code": "halfday",
+      "base_leave_type_id": 1
+    },
+    {
+      "id": 9,
+      "name": "Work From Home",
+      "active": true
+    },
+    {
+      "id": 3,
+      "name": "Compensatory Days",
+      "active": true
+    },
+    {
+      "id": 14,
+      "name": "PL Maternity Leave",
+      "active": true
+    },
+    {
+      "id": 10,
+      "name": "Rest Days",
+      "active": true
+    },
+    {
+      "id": 12,
+      "name": "Public Holiday",
+      "active": true
+    },
+    {
+      "id": 13,
+      "name": "PrezHoliday",
+      "active": true
+    }
+  ],
+  "main_leave_types": [
+    {
+      "id": 1,
+      "name": "Annual Leave",
+      "active": true
+    },
+    {
+      "id": 2,
+      "name": "Sick Leave",
+      "active": true
+    },
+    {
+      "id": "halfday_1",
+      "name": "Custom Hours",
+      "active": true,
+      "special_code": "halfday",
+      "base_leave_type_id": 1
+    }
+  ],
+  "selected_leave_type": {
+    "id": 1,
+    "name": "Annual Leave",
+    "active": true
+  },
+  "start_date": "2025-10-05",
+  "end_date": "2025-10-06",
+  "completed_at": "2025-09-29T15:34:43.113495",
+  "result": {
+    "submitted": false,
+    "error": "Odoo API error: {'code': 200, 'message': 'Odoo Server Error', 'data': {'name': 'odoo.exceptions.ValidationError', 'debug': 'Traceback (most recent call last):\\n  File \"/home/odoo/src/odoo/odoo/http.py\", line 1971, in _serve_db\\n    return service_model.retrying(self._serve_ir_http, self.env)\\n  File \"/home/odoo/src/odoo/odoo/service/model.py\", line 152, in retrying\\n    result = func()\\n  File \"/home/odoo/src/odoo/odoo/http.py\", line 1999, in _serve_ir_http\\n    response = self.dispatcher.dispatch(rule.endpoint, args)\\n  File \"/home/odoo/src/odoo/odoo/http.py\", line 2203, in dispatch\\n    result = self.request.registry[\\'ir.http\\']._dispatch(endpoint)\\n  File \"/home/odoo/src/odoo/addons/website/models/ir_http.py\", line 235, in _dispatch\\n    response = super()._dispatch(endpoint)\\n  File \"/home/odoo/src/odoo/odoo/addons/base/models/ir_http.py\", line 221, in _dispatch\\n    result = endpoint(**request.params)\\n  File \"/home/odoo/src/odoo/odoo/http.py\", line 786, in route_wrapper\\n    result = endpoint(self, *args, **params_ok)\\n  File \"/home/odoo/src/odoo/addons/web/controllers/dataset.py\", line 25, in call_kw\\n    return self._call_kw(model, method, args, kwargs)\\n  File \"/home/odoo/src/odoo/addons/web/controllers/dataset.py\", line 21, in _call_kw\\n    return call_kw(Model, method, args, kwargs)\\n  File \"/home/odoo/src/odoo/odoo/api.py\", line 482, in call_kw\\n    result = _call_kw_model_create(method, model, args, kwargs)\\n  File \"/home/odoo/src/odoo/odoo/api.py\", line 460, in _call_kw_model_create\\n    result = method(recs, *args, **kwargs)\\n  File \"<decorator-gen-878>\", line 2, in create\\n  File \"/home/odoo/src/odoo/odoo/api.py\", line 430, in _model_create_multi\\n    return create(self, [arg])\\n  File \"/home/odoo/src/odoo/addons/base_automation/models/base_automation.py\", line 742, in create\\n    records = create.origin(self.with_env(automations.env), vals_list, **kw)\\n  File \"<decorator-gen-351>\", line 2, in create\\n  File \"/home/odoo/src/odoo/odoo/api.py\", line 431, in _model_create_multi\\n    return create(self, arg)\\n  File \"/home/odoo/src/odoo/addons/hr_work_entry_holidays/models/hr_leave.py\", line 174, in create\\n    return super().create(vals_list)\\n  File \"<decorator-gen-295>\", line 2, in create\\n  File \"/home/odoo/src/odoo/odoo/api.py\", line 431, in _model_create_multi\\n    return create(self, arg)\\n  File \"/home/odoo/src/odoo/addons/hr_holidays_attendance/models/hr_leave.py\", line 26, in create\\n    res = super().create(vals_list)\\n  File \"<decorator-gen-239>\", line 2, in create\\n  File \"/home/odoo/src/odoo/odoo/api.py\", line 431, in _model_create_multi\\n    return create(self, arg)\\n  File \"/home/odoo/src/odoo/addons/hr_holidays/models/hr_leave.py\", line 963, in create\\n    holidays = super(HolidaysRequest, self.with_context(mail_create_nosubscribe=True)).create(vals_list)\\n  File \"<decorator-gen-141>\", line 2, in create\\n  File \"/home/odoo/src/odoo/odoo/api.py\", line 431, in _model_create_multi\\n    return create(self, arg)\\n  File \"/home/odoo/src/odoo/addons/mail/models/mail_thread.py\", line 259, in create\\n    threads = super(MailThread, self).create(vals_list)\\n  File \"<decorator-gen-12>\", line 2, in create\\n  File \"/home/odoo/src/odoo/odoo/api.py\", line 431, in _model_create_multi\\n    return create(self, arg)\\n  File \"/home/odoo/src/odoo/odoo/models.py\", line 4655, in create\\n    records = self._create(data_list)\\n  File \"/home/odoo/src/odoo/odoo/models.py\", line 4917, in _create\\n    records._validate_fields(name for data in data_list for name in data[\\'stored\\'])\\n  File \"/home/odoo/src/odoo/odoo/models.py\", line 1468, in _validate_fields\\n    check(self)\\n  File \"/home/odoo/src/odoo/addons/hr_holidays/models/hr_leave.py\", line 717, in _check_date\\n    (\\'date_from\\', \\'<\\', max(self.mapped(\\'date_to\\'))),\\n  File \"/home/odoo/src/odoo/odoo/models.py\", line 6141, in mapped\\n    recs = recs._fields[name].mapped(recs)\\n  File \"/home/odoo/src/odoo/odoo/fields.py\", line 1282, in mapped\\n    self.recompute(records)\\n  File \"/home/odoo/src/odoo/odoo/fields.py\", line 1379, in recompute\\n    apply_except_missing(self.compute_value, recs)\\n  File \"/home/odoo/src/odoo/odoo/fields.py\", line 1352, in apply_except_missing\\n    func(records)\\n  File \"/home/odoo/src/odoo/odoo/fields.py\", line 1401, in compute_value\\n    records._compute_field_value(self)\\n  File \"/home/odoo/src/odoo/addons/base_automation/models/base_automation.py\", line 799, in _compute_field_value\\n    _compute_field_value.origin(self, field)\\n  File \"/home/odoo/src/odoo/addons/mail/models/mail_thread.py\", line 424, in _compute_field_value\\n    return super()._compute_field_value(field)\\n  File \"/home/odoo/src/odoo/odoo/models.py\", line 4927, in _compute_field_value\\n    self.filtered(\\'id\\')._validate_fields(fnames)\\n  File \"/home/odoo/src/odoo/odoo/models.py\", line 1468, in _validate_fields\\n    check(self)\\n  File \"/home/odoo/src/odoo/addons/hr_holidays/models/hr_leave.py\", line 760, in _check_date\\n    raise ValidationError(_(\"\"\"\\\\\\nodoo.exceptions.ValidationError: You\\'ve already booked time off which overlaps with this period:\\nfrom 05/10/2025 to 06/10/2025 - Second Approval\\nAttempting to double-book your time off won\\'t magically make your vacation 2x better!\\n\\n', 'message': \"You've already booked time off which overlaps with this period:\\nfrom 05/10/2025 to 06/10/2025 - Second Approval\\nAttempting to double-book your time off won't magically make your vacation 2x better!\\n\", 'arguments': [\"You've already booked time off which overlaps with this period:\\nfrom 05/10/2025 to 06/10/2025 - Second Approval\\nAttempting to double-book your time off won't magically make your vacation 2x better!\\n\"], 'context': {}}}"
+  }
+}

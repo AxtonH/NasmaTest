@@ -1,0 +1,120 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows
+AppData/
+NTUSER.DAT*
+ntuser.dat*
+*.ini
+*.log
+
+# Cache and temporary files
+.cache/
+.prezlab_cache/
+*.tmp
+*.temp
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Node modules (if any)
+node_modules/
+
+# Rust (if any)
+target/
+Cargo.lock
+
+# Docker
+.docker/
+
+# Railway
+.railway/
+
+# Streamlit
+.streamlit/
+
+# Other system files
+.cargo/
+.claude.json*
+.codex/
+.config/
+.cursor/
+.dotnet/
+.fx/
+.gitconfig
+.lesshst
+.matplotlib/
+.node_repl_history
+.python_history
+.rustup/
+.wdm/
+.bash_history
+.cache/
+.claude.json
+.claude.json.backup
+.codex/
+.config/
+.cursor/
+.docker/
+.dotnet/
+.fx/
+.gitconfig
+.lesshst
+.matplotlib/
+.node_repl_history
+.python_history
+.rustup/
+.streamlit/
+.wdm/
+# Secrets
+.env
+.env.*

@@ -1,0 +1,3456 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <link crossorigin="" href="https://fonts.gstatic.com/" rel="preconnect"/>
+    <link as="style" href="https://fonts.googleapis.com/css2?display=swap&amp;family=Noto+Sans%3Awght%40400%3B500%3B700%3B900&amp;family=Space+Grotesk%3Awght%40400%3B500%3B700" onload="this.rel='stylesheet'" rel="stylesheet"/>
+    <link as="style" href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&display=swap" onload="this.rel='stylesheet'" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"/>
+    <title>{{ brand_name or 'Nasma - AI Assistant' }}</title>
+    <link href="/Nasma-Avatar.svg" rel="icon" type="image/svg+xml"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <style type="text/tailwindcss">
+        :root {
+            --primary-color: #8A6EC4;
+            --background-color: #f0f2f5;
+            --glass-color: rgba(255, 255, 255, 0.6);
+            --border-color: rgba(255, 255, 255, 0.8);
+            --text-primary: #111318;
+            --text-secondary: #616f89;
+            /* Gradient from #FF6666 to a slightly lighter tint */
+            --primary-gradient: linear-gradient(135deg, #FF6666 0%, #FF9999 100%);
+            /* Global UI scale (tweak to 0.85 if you want it smaller) */
+            --ui-scale: 0.90;
+        }
+        body {
+            font-family: 'Poppins', 'Space Grotesk', sans-serif;
+            font-weight: 500; /* Poppins:Medium */
+        }
+        .glass-effect {
+            background-color: var(--glass-color);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+        }
+        .material-symbols-outlined {
+            font-variation-settings:
+            'FILL' 0,
+            'wght' 400,
+            'GRAD' 0,
+            'opsz' 24
+        }
+        
+        /* Transition animations */
+        .state-transition {
+            transition: all 1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+
+        .blur-transition {
+            filter: blur(0px);
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            transition: filter 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                       opacity 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                       transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+
+        .blur-transition.blurred {
+            filter: blur(8px);
+            opacity: 0;
+            transform: scale(0.97) translateY(-10px);
+        }
+
+        .fade-in {
+            animation: fadeIn 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        }
+
+        .fade-out {
+            animation: fadeOut 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.96);
+                filter: blur(3px);
+            }
+            50% {
+                opacity: 0.7;
+                transform: translateY(10px) scale(0.98);
+                filter: blur(1px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0px);
+            }
+        }
+
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0px);
+            }
+            50% {
+                opacity: 0.3;
+                transform: translateY(-10px) scale(0.98);
+                filter: blur(2px);
+            }
+            to {
+                opacity: 0;
+                transform: translateY(-30px) scale(0.96);
+                filter: blur(3px);
+            }
+        }
+        
+         /* State-specific styles */
+         .initial-state {
+             background: transparent;
+         }
+         
+         .conversation-state {
+             background: transparent;
+         }
+        
+        /* Hide states initially */
+        .state-hidden {
+            display: none !important;
+        }
+
+         /* Avatar loading styles */
+         .avatar-loading {
+             opacity: 0;
+             transition: opacity 0.3s ease-in-out;
+         }
+
+         .avatar-loaded {
+             opacity: 1;
+         }
+
+         /* Hide scrollbar from textarea */
+         .no-scrollbar {
+             scrollbar-width: none; /* Firefox */
+             -ms-overflow-style: none; /* IE and Edge */
+         }
+
+         .no-scrollbar::-webkit-scrollbar {
+             display: none; /* Chrome, Safari and Opera */
+         }
+
+         /* Custom scrollbar for sidebar chat history */
+         .overflow-y-auto::-webkit-scrollbar,
+         .new-sidebar-content::-webkit-scrollbar {
+             width: 6px;
+         }
+
+         .overflow-y-auto::-webkit-scrollbar-track,
+         .new-sidebar-content::-webkit-scrollbar-track {
+             background: transparent;
+         }
+
+         .overflow-y-auto::-webkit-scrollbar-thumb,
+         .new-sidebar-content::-webkit-scrollbar-thumb {
+             background: rgba(0, 0, 0, 0.2);
+             border-radius: 3px;
+         }
+
+         .overflow-y-auto::-webkit-scrollbar-thumb:hover,
+         .new-sidebar-content::-webkit-scrollbar-thumb:hover {
+             background: rgba(0, 0, 0, 0.3);
+         }
+
+         /* Prompt cards and input bar (initial + bottom area) */
+         .card {
+             background-color: rgba(240, 235, 248, 0.85);
+             border-radius: calc(20px * var(--ui-scale));
+             padding: calc(15px * var(--ui-scale)) calc(29px * var(--ui-scale));
+             width: calc(295px * var(--ui-scale));
+             height: calc(90px * var(--ui-scale));
+             display: flex;
+             align-items: center;
+             justify-content: center;
+             border: 1px solid transparent;
+             transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, border-color 0.2s ease;
+             will-change: transform;
+         }
+
+         .card:hover {
+             opacity: 1;
+             transform: translateY(-2px);
+             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+             background-color: rgba(240, 235, 248, 1);
+             border-color: #FF6666; /* subtle orange border */
+         }
+
+         /* Ensure suggestions row allows hover lift without clipping */
+         .suggestion-row {
+             overflow: visible !important;
+         }
+
+         .card-content {
+             display: flex;
+             align-items: center;
+             gap: calc(20px * var(--ui-scale));
+         }
+
+         .icon {
+             width: calc(40px * var(--ui-scale));
+             height: calc(40px * var(--ui-scale));
+             background-color: transparent;
+             border-radius: 0;
+             display: flex;
+             align-items: center;
+             justify-content: center;
+         }
+
+        .label p {
+            font-family: 'Poppins', sans-serif;
+            font-weight: 500; /* Medium */
+            font-size: calc(18.21px * var(--ui-scale));
+            line-height: 1.2;
+            margin: 0;
+            color: #291C48;
+        }
+
+        /* Conversation history list */
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .history-item {
+            width: 100%;
+            text-align: left;
+            border: 1px solid transparent;
+            border-radius: calc(16px * var(--ui-scale));
+            background: rgba(255, 255, 255, 0.65);
+            padding: calc(12px * var(--ui-scale)) calc(14px * var(--ui-scale));
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            transition: all 0.2s ease;
+        }
+        .history-item:hover {
+            border-color: rgba(255, 102, 102, 0.45);
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+        }
+        .history-item.active {
+            border-color: #FF6666;
+            background: rgba(255, 102, 102, 0.12);
+        }
+        .history-item-title {
+            font-weight: 600;
+            color: #291C48;
+            font-size: calc(15px * var(--ui-scale));
+        }
+        .history-item-meta {
+            font-size: calc(12px * var(--ui-scale));
+            color: #616f89;
+        }
+        .history-item-preview {
+            font-size: calc(13px * var(--ui-scale));
+            color: #3b3b3b;
+            line-height: 1.3;
+        }
+        .history-empty {
+            font-size: calc(13px * var(--ui-scale));
+            color: #616f89;
+            margin-top: calc(8px * var(--ui-scale));
+        }
+
+         /* Compact suggestion chips for conversation state */
+         .suggestion-chip {
+             background-color: rgba(240, 235, 248, 0.85);
+             color: #291C48;
+             border: 1px solid transparent;
+             border-radius: calc(16px * var(--ui-scale));
+             padding: calc(13px * var(--ui-scale)) calc(19px * var(--ui-scale));
+             font-family: 'Poppins', sans-serif;
+             font-weight: 500;
+             font-size: calc(16px * var(--ui-scale));
+             line-height: 1;
+             white-space: nowrap;
+             transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+         }
+
+         .suggestion-chip:hover {
+             border-color: #FF6666;
+             background-color: rgba(240, 235, 248, 1);
+             transform: translateY(-1px);
+         }
+
+         /* Solid color buttons */
+         .btn-gradient {
+             background-color: #8A6EC4;
+             background-image: none;
+             color: #fff !important;
+         }
+         .btn-gradient:hover {
+             background-color: #7A5EB4;
+         }
+
+        .input-bar {
+            background-color: #F0EBF8;
+            border-radius: calc(20px * var(--ui-scale));
+            padding: calc(10px * var(--ui-scale)) calc(16px * var(--ui-scale));
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 75vw;
+            max-width: 100%;
+            min-width: 280px;
+            height: calc(70px * var(--ui-scale));
+            box-sizing: border-box;
+            gap: calc(12px * var(--ui-scale));
+            border: 1px solid transparent;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+             will-change: transform;
+         }
+
+        @media (max-width: 768px) {
+            .input-bar {
+                width: 95vw;
+                max-width: 100%;
+                min-width: 0;
+                height: calc(64px * var(--ui-scale));
+            }
+        }
+
+         .input-bar:hover,
+         .input-bar:focus-within {
+             border-color: #FF6666;
+             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+             transform: translateY(-1px);
+             background-color: rgba(240, 235, 248, 1);
+         }
+
+         .message-input {
+             background: transparent;
+             border: none;
+             outline: none;
+             width: 100%;
+             font-family: 'Poppins', sans-serif;
+             font-weight: 500; /* Medium */
+             font-size: calc(20.29px * var(--ui-scale));
+             color: rgba(41, 28, 72, 0.85);
+             resize: none;
+         }
+
+         .message-input:focus,
+         .message-input:focus-visible {
+             outline: none !important;
+             box-shadow: none !important;
+         }
+
+         .message-input::placeholder {
+             color: #291C48;
+         }
+
+         .send-icon {
+             width: calc(32px * var(--ui-scale));
+             height: calc(32px * var(--ui-scale));
+             background-color: transparent;
+             border-radius: 50%;
+             display: flex;
+             align-items: center;
+             justify-content: center;
+         }
+
+         /* Sidebar styles */
+         .sidebar {
+             transform: translateX(-100%);
+             transition: transform 0.3s ease-in-out;
+         }
+
+         .sidebar.expanded {
+             transform: translateX(0);
+         }
+
+         .sidebar-overlay {
+             opacity: 0;
+             visibility: hidden;
+             transition: opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
+         }
+
+         .sidebar-overlay.active {
+             opacity: 1;
+             visibility: visible;
+         }
+
+         /* New Sidebar Styles from conversation chat */
+         .new-sidebar {
+             position: fixed;
+             top: 0;
+             left: 0;
+             width: 320px;
+             height: 100vh;
+             background: rgba(255, 255, 255, 0.95);
+             backdrop-filter: blur(20px);
+             border-right: 1px solid rgba(255, 255, 255, 0.8);
+             box-shadow: 0 0 50px rgba(0, 0, 0, 0.1);
+             transform: translateX(-100%);
+             transition: transform 0.3s ease;
+             z-index: 100;
+             display: flex;
+             flex-direction: column;
+             pointer-events: none;
+             margin: 0;
+             padding: 0;
+         }
+
+         /* Hide smooth chat sidebar when in conversation state */
+         .conversation-state .new-sidebar {
+             display: none !important;
+         }
+
+         /* Hide conversation sidebar when in initial state */
+         .initial-state #conversationSidebar {
+             display: none !important;
+         }
+
+         .new-sidebar.open {
+             transform: translateX(0);
+             pointer-events: auto;
+         }
+
+        /* Ensure inner fixed panel responds to wrapper open state */
+        #newSidebar.open > div {
+            transform: translateX(0) !important;
+            pointer-events: auto !important;
+        }
+
+        .new-sidebar-overlay {
+             position: fixed;
+             top: 0;
+             left: 0;
+             width: 100vw;
+             height: 100vh;
+            background: rgba(0, 0, 0, 0.2);
+             opacity: 0;
+             visibility: hidden;
+             transition: opacity 0.3s ease, visibility 0.3s ease;
+             z-index: 99;
+             pointer-events: none;
+             margin: 0;
+             padding: 0;
+         }
+
+         .new-sidebar-overlay.active {
+             opacity: 1;
+             visibility: visible;
+             pointer-events: auto;
+         }
+
+        /* Ensure inner fixed overlay becomes interactive when active */
+        #newSidebarOverlay.active > div {
+            opacity: 1 !important;
+            visibility: visible !important;
+            pointer-events: auto !important;
+        }
+
+        /* Do not darken the sidebar area when open */
+        #newSidebar.open ~ #newSidebarOverlay > div,
+        #newSidebar.open + #newSidebarOverlay > div {
+            left: 320px !important;
+            width: calc(100vw - 320px) !important;
+        }
+
+        /* Normalize overlay shade regardless of inline styles */
+        #newSidebarOverlay > div {
+            background: rgba(0, 0, 0, 0.2) !important;
+        }
+
+         .new-sidebar-header {
+             display: flex;
+             justify-content: center;
+             align-items: center;
+             padding: 2rem;
+             border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+         }
+
+         .new-sidebar-header button {
+             background: none;
+             border: none;
+             cursor: pointer;
+             transition: opacity 0.3s ease;
+         }
+
+
+         .sidebar-logo {
+             width: 80px;
+             height: 80px;
+             object-fit: contain;
+         }
+
+         .new-sidebar-content {
+             flex: 1;
+             padding: 1.5rem;
+             overflow-y: auto;
+         }
+
+         .new-sidebar-content h2 {
+             font-size: 1.25rem;
+             font-weight: bold;
+             color: #374151;
+             margin-bottom: 1rem;
+         }
+
+         .no-chats {
+             color: #9CA3AF;
+             font-size: 0.875rem;
+         }
+
+         .new-sidebar-footer {
+             padding: 1.5rem;
+             border-top: 1px solid rgba(0, 0, 0, 0.1);
+             display: flex;
+             flex-direction: column;
+             gap: 0.75rem;
+         }
+
+         .new-chat-btn, .logout-btn {
+             width: 100%;
+             display: flex;
+             align-items: center;
+             justify-content: center;
+             gap: 0.5rem;
+             padding: 0.75rem 1rem;
+             border: none;
+             border-radius: 0.5rem;
+             font-family: inherit;
+             font-size: 1rem;
+             cursor: pointer;
+             transition: all 0.2s ease;
+             z-index: 101;
+             position: relative;
+         }
+
+         .new-chat-btn {
+             background-color: #8A6EC4;
+             background-image: none;
+             color: white;
+         }
+
+         .new-chat-btn:hover {
+             background-color: #7A5EB4;
+             transform: translateY(-1px);
+         }
+
+         .logout-btn {
+             background-color: #8A6EC4;
+             background-image: none;
+             color: white;
+         }
+
+         .logout-btn:hover {
+             background-color: #7A5EB4;
+             transform: translateY(-1px);
+         }
+
+
+         .nasma-avatar-header {
+             transition: opacity 0.3s ease-in-out;
+         }
+
+         .nasma-avatar-header.hidden {
+             opacity: 0;
+             pointer-events: none;
+         }
+
+
+         /* Background image styling */
+         .nasma-background {
+             background-image: url('/static/Nasma-main-background.png');
+             background-size: cover;
+             background-position: center;
+             background-repeat: no-repeat;
+             position: relative;
+         }
+
+
+         .nasma-background > * {
+             position: relative;
+             z-index: 2;
+         }
+
+        /* Ensure flatpickr overlays above UI and doesn't affect bubble size */
+        .flatpickr-calendar {
+            z-index: 999999 !important;
+            position: fixed !important;
+        }
+        
+        /* Override Flatpickr blue colors with purple */
+        .flatpickr-day.selected,
+        .flatpickr-day.startRange,
+        .flatpickr-day.endRange,
+        .flatpickr-day.selected.inRange,
+        .flatpickr-day.startRange.inRange,
+        .flatpickr-day.endRange.inRange,
+        .flatpickr-day.selected:focus,
+        .flatpickr-day.startRange:focus,
+        .flatpickr-day.endRange:focus,
+        .flatpickr-day.selected:hover,
+        .flatpickr-day.startRange:hover,
+        .flatpickr-day.endRange:hover,
+        .flatpickr-day.selected.prevMonthDay,
+        .flatpickr-day.selected.nextMonthDay,
+        .flatpickr-day.startRange.prevMonthDay,
+        .flatpickr-day.startRange.nextMonthDay,
+        .flatpickr-day.endRange.prevMonthDay,
+        .flatpickr-day.endRange.nextMonthDay {
+            background: #8A6EC4 !important;
+            border-color: #8A6EC4 !important;
+        }
+        
+        .flatpickr-day.inRange {
+            background: rgba(138, 110, 196, 0.3) !important;
+            border-color: rgba(138, 110, 196, 0.4) !important;
+            box-shadow: -5px 0 0 rgba(138, 110, 196, 0.5), 5px 0 0 rgba(138, 110, 196, 0.5) !important;
+        }
+        
+        /* When using static positioning, keep calendar above surrounding content */
+        .flatpickr-calendar.inline, .flatpickr-calendar.static {
+            position: fixed !important;
+            z-index: 999999 !important;
+        }
+        /* Additional specificity for calendar overlay */
+        .flatpickr-calendar.open {
+            z-index: 999999 !important;
+            position: fixed !important;
+        }
+        
+        /* Prevent chat bubbles from expanding to fit calendar */
+        .glass-effect {
+            overflow: visible !important;
+        }
+        /* Ensure calendar appears above footer and all other elements */
+        footer {
+            z-index: 1000 !important;
+        }
+        /* Override any potential Tailwind z-index classes */
+        .flatpickr-calendar,
+        .flatpickr-calendar.inline,
+        .flatpickr-calendar.static,
+        .flatpickr-calendar.open {
+            z-index: 2147483647 !important;
+            position: fixed !important;
+        }
+
+        /* Approval button styles - pill-shaped and same size */
+        .approval-button {
+            width: 70px !important;
+            height: 32px !important;
+            border-radius: 16px !important;
+            border: 2px solid !important;
+            font-size: 12px !important;
+            font-weight: 600 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            cursor: pointer !important;
+            transition: all 0.2s ease !important;
+            padding: 0 8px !important;
+            text-align: center !important;
+            line-height: 1 !important;
+        }
+
+        .approval-button:hover {
+            transform: scale(1.05) !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+        }
+
+        .approval-button:active {
+            transform: scale(0.95) !important;
+        }
+    </style>
+</head>
+<body class="initial-state state-transition nasma-background">
+
+    <!-- Initial State -->
+    <div id="initialState" class="blur-transition">
+         <div class="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden" style='font-family: "Space Grotesk", "Noto Sans", sans-serif;'>
+            <div class="layout-container flex h-full grow flex-col">
+                <header class="flex items-center justify-between whitespace-nowrap px-6 py-4">
+                    <div class="flex items-center gap-2 text-[var(--text-primary)]">
+                        <button id="initialSidebarToggle" class="flex items-center justify-center size-14 rounded-full hover:bg-white/60 transition-colors">
+                            <span class="material-symbols-outlined text-2xl">menu</span>
+                        </button>
+                        <h1 class="text-xl font-bold"><span style="color: #2b1b4c;">{{ brand_name or 'NasmaPL' }}</span><span style="color: #ff6666;">.</span></h1>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <button id="newChatButtonInitial" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors">
+                            <span class="material-symbols-outlined text-[var(--text-primary)]">add</span>
+                        </button>
+                        <button id="logoutButton" class="avatar-loading w-[44px] h-[44px] rounded-full border border-gray-200 shadow-sm overflow-hidden" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuByAlk1xd1gFxpcyF2YjgQgOqziFQnVkG18tRDUlP29ZRlgzShVuTeWX8ew1gKajYuD9KU7sn9ehtTzszONEGhnFL0SEwEKIFkpX9KxTIIrHfx2cLbjRqUowfV2tf-zjGo_k1HxYOo1r3j7_9LDMeIELganfPwV6_q-JEVeaMYRuR_ekBjo9GBBpT8pJSQpL2sF4qaL2mqKWke0fkV8VOo-MUf0r7m07yQ_-kcvvkiYgPcGhyeFrNfL-FKfHi1fd-75jmV81QcxKWFz"); background-size: cover; background-position: center;'></button>
+                    </div>
+                </header>
+                <main class="flex-1 flex flex-col items-center justify-center px-4 py-8">
+                    <div class="w-full max-w-4xl text-center">
+                        <div class="flex justify-center mb-10">
+                            <div class="nasma-avatar-hover">
+                                <img src="/Nasma-Avatar.svg" onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEwIiBoZWlnaHQ9IjExNCIgdmlld0JveD0iMCAwIDExMCAxMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yNS4wNSA4Ni44NjQ0QzE4LjYyIDg2Ljg2NDQgMTMuMTcgODUuMTM0NCA4Ljc4OTk4IDgxLjY3NDRDMy45MTM0NCA3Ny43MDQ2IDAuNzk1MzY1IDcxLjk3NSAwLjEwOTk4NSA2NS43MjQ0VjY1LjM5NDRWNjUuMDY0NEMwLjEwOTk4NSA1OC4zMTQ0IDIuNCA1Mi41MDQ0IDYuNzUgNDguMjU0NEMxNC4xMSA0MS4wNjQ0IDI0LjY2IDQwLjg5NDQgMjYuMzYgNDAuOTE0NEgzOC40OVY1Ny40NjQ0SDI2LjFDMjQuNjggNTcuNDY0NCAyMC40NCA1Ny45NjQ0IDE4LjI5IDYwLjExNDRDMTcuNzQxNCA2MC43MDExIDE3LjMxNjMgNjEuMzkyIDE3LjAzOTcgNjIuMTQ2MUMxNi43NjMyIDYyLjkwMDIgMTYuNjQwOSA2My43MDIyIDE2LjY4IDY0LjUwNDRDMTYuOTk4NiA2Ni4xNTA1IDE3Ljg3ODcgNjcuNjM0OSAxOS4xNyA2OC43MDQ0QzIxLjY3IDcwLjU5NDQgMjUuODUgNzAuNDE0NCAyOC45MiA2OS45MjQ0QzMzLjk3IDY5LjEzNDQgMzguOTIgNjUuMDc0NCA0NC42NSA2MC4zODQ0QzU2Ljg5IDUwLjM4NDQgNzMuNjUgMzYuNjM0NCAxMDQuMzEgNDcuMTQ0NEw5OC45MyA2Mi44MzQ0Qzc3LjAyIDU1LjMxNDQgNjYuOTMgNjMuNjE0NCA1NS4xNiA3My4yMTQ0QzQ4LjE2IDc4LjkxNDQgNDEgODQuODE0NCAzMS41IDg2LjMwNDRDMjkuMzY4MiA4Ni42NjE2IDI3LjIxMTQgODYuODQ4OCAyNS4wNSA4Ni44NjQ0WiIgZmlsbD0iIzI5MUM0OCIvPgo8cGF0aCBkPSJNODMuODcgMTEzLjY1NEg3MS41M1Y5Ny4wNzQ0SDgzLjlDODUuMzIgOTcuMDc0NCA4OS41NiA5Ni41NjQ0IDkxLjcxIDk0LjQyNDRDOTIuMzYgOTMuNzc0NCA5My4yMiA5Mi42MjQ0IDkzLjMyIDkwLjAyNDRDOTIuOTk3NiA4OC4zODI1IDkyLjExODEgODYuOTAyNCA5MC44MyA4NS44MzQ0Qzg4LjMzIDgzLjk0NDQgODQuMTUgODQuMTI0NCA4MS4wOCA4NC42MTQ0Qzc2LjAzIDg1LjQwNDQgNzEuMDggODkuNDU0NCA2NS4zNSA5NC4xNTQ0QzU2LjIyIDEwMS42MjQgNDQuNTYgMTExLjE1NCAyNi41MSAxMTEuMTU0QzE5LjQwODkgMTExLjA2MiAxMi4zNzI4IDEwOS43ODggNS42OSAxMDcuMzg0TDExLjA3IDkxLjY5NDRDMzIuOTggOTkuMjE0NCA0My4wNyA5MC45MTQ0IDU0Ljg0IDgxLjMxNDRDNjEuODQgNzUuNjE0NCA2OSA2OS43MTQ0IDc4LjUgNjguMjI0NEM4Ny43OSA2Ni43NTQ0IDk1LjQzIDY4LjMyNDQgMTAxLjIgNzIuODg0NEMxMDYuMDgyIDc2Ljg1MSAxMDkuMjA0IDgyLjU4MTYgMTA5Ljg5IDg4LjgzNDRWODkuMTY0NFY4OS40NjQ0QzEwOS44OSA5Ni4yMTQ0IDEwNy42IDEwMi4wMjQgMTAzLjI1IDEwNi4yNzRDOTYuMTcgMTEzLjI1NCA4Ni4wOSAxMTMuNjU0IDgzLjg3IDExMy42NTRaIiBmaWxsPSIjMjkxQzQ4Ii8+CjxwYXRoIGQ9Ik01Mi4zOCAyLjQ2NDM5QzUxLjI2MjggMS42OTkwNCA0OS45OTk2IDEuMTcyNTUgNDguNjY5NSAwLjkxNzg4MkM0Ny4zMzkzIDAuNjYzMjE4IDQ1Ljk3MSAwLjY4NTg1OSA0NC42NSAwLjk4NDM4QzQ0LjQ0IDAuOTg0MzggNDQuMjQgMS4wOTQzOSA0NC4wMyAxLjE1NDM5QzQzLjAxODUgMS4xMDc4NSA0Mi4wMTI4IDEuMzMxNTkgNDEuMTE2NSAxLjgwMjYyQzQwLjIyMDEgMi4yNzM2NCAzOS40NjU0IDIuOTc0OTQgMzguOTMgMy44MzQzOUMzOC44MiA0LjAyNDM5IDM4LjcxIDQuMjI0MzkgMzguNjEgNC40MzQzOUMzOC4xODgyIDQuNDM0MDMgMzcuNzY4MSA0LjQ4NzgxIDM3LjM2IDQuNTk0NEMzNC4wNSA1LjQwNDQgMzEuNDIgOC43MDQzOSAzMi4yNiAxMi4yNDQ0QzMzLjU0IDE3LjU3NDQgMzguMzQgMjEuOTQ0NCA0NC4wMiAyMS43OTQ0QzQ2LjkwNTQgMjEuNzEzNiA0OS42NjM1IDIwLjU4ODUgNTEuNzgyMSAxOC42MjhDNTMuOTAwOCAxNi42Njc2IDU1LjIzNiAxNC4wMDQ5IDU1LjU0IDExLjEzNDRDNTUuOSA4LjA5NDQgNTUgNC4zMDQzOSA1Mi4zOCAyLjQ2NDM5WiIgZmlsbD0iI0ZGNjY2NiIvPgo8cGF0aCBkPSJNODIuNzUgNy41ODQzN0M4Mi43NSA3LjQ1NDM3IDgyLjc1IDcuMzI0MzggODIuNzUgNy4xOTQzOEM4Mi44NCA0LjYxNDM4IDgxLjE3IDEuMTk0MzYgNzguMzcgMC42NDQzNjRDNzYuMzMyNyAwLjA5NTQzNSA3NC4xODA1IDAuMTQ0MDQ4IDcyLjE3IDAuNzg0Mzc5QzcwLjE5NTggMS40OTEyNyA2OC40NjIyIDIuNzQyOSA2Ny4xNyA0LjM5NDM2QzY1Ljk2OTEgNS44OTM0OSA2NS4yMjExIDcuNzA0MjYgNjUuMDEzOSA5LjYxMzg1QzY0LjgwNjYgMTEuNTIzNCA2NS4xNDg3IDEzLjQ1MjUgNjYgMTUuMTc0NEM2OS41NiAyMS45MjQ0IDc5LjU1IDIyLjQ3NDQgODMuOSAxNi4yNTQ0Qzg0Ljc4OSAxNC45MTQ0IDg1LjE2MjMgMTMuMjk3OCA4NC45NTA4IDExLjcwMzdDODQuNzM5NCAxMC4xMDk3IDgzLjk1NzUgOC42NDYyNCA4Mi43NSA3LjU4NDM3WiIgZmlsbD0iI0ZGNjY2NiIvPgo8L3N2Zz4K';" alt="Nasma" class="avatar-normal w-36 h-36 object-contain" />
+                            </div>
+                        </div>
+                        <h1 class="text-4xl font-semibold text-gray-900 tracking-tighter mb-4" style="font-family: 'Poppins', sans-serif; font-size:24pt;">
+                            Hey <span id="greetingName">Prezlaber</span>!<br>
+                            <span class="font-medium">What can I do for you today?</span>
+                        </h1>
+                        <div class="hidden grid grid-cols-1 md:grid-cols-2 {% if is_manager %}lg:grid-cols-5{% else %}lg:grid-cols-4{% endif %} gap-3">
+                            {% if is_manager %}
+                            <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="show me my team members">
+                                <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
+                                <div class="relative">
+                                    <h3 class="text-lg font-semibold text-gray-800">Show my team</h3>
+                                    <p class="text-sm text-gray-500 mt-2">Preview your direct reports</p>
+                                    <div class="mt-4 flex justify-center">
+                                        <img src="/static/Show-my-team.svg" alt="Show my team" class="w-12 h-12" />
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                            <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="i want time off">
+                                <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
+                                <div class="relative">
+                                    <h3 class="text-lg font-semibold text-gray-800">Ask for time off</h3>
+                                    <p class="text-sm text-gray-500 mt-1">Plan your next vacation</p>
+                                </div>
+                            </div>
+                            <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="Generate letters">
+                                <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
+                                <div class="relative">
+                                    <h3 class="text-lg font-semibold text-gray-800">Generate letters</h3>
+                                    <p class="text-sm text-gray-500 mt-1">Create documents</p>
+                                </div>
+                            </div>
+                            <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="Ask for overtime">
+                                <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
+                                <div class="relative">
+                                    <h3 class="text-lg font-semibold text-gray-800">Ask for overtime</h3>
+                                    <p class="text-sm text-gray-500 mt-1">Request extra hours</p>
+                                </div>
+                            </div>
+                            <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="i want to request a reimbursement">
+                                <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
+                                <div class="relative">
+                                    <h3 class="text-lg font-semibold text-gray-800">Ask for reimbursement</h3>
+                                    <p class="text-sm text-gray-500 mt-1">Request expense reimbursement</p>
+                                </div>
+                            </div>
+                            {% if is_manager %}
+                            <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="show me my team members">
+                                <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
+                                <div class="relative">
+                                    <h3 class="text-lg font-semibold text-gray-800">Show my team</h3>
+                                    <p class="text-sm text-gray-500 mt-1">View team members</p>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </main>
+                <footer class="px-10 py-4 pb-4">
+                    <div class="flex items-center justify-center gap-6 mb-4 overflow-x-auto -mx-2 px-2 suggestion-row" id="initialSuggestionRow">
+                        {% if is_manager %}
+                        <button class="suggestion-card card" data-suggestion="show me my team members">
+                            <div class="card-content">
+                                <div class="icon"><img src="/static/Show-my-team.svg" alt="Show my team" class="w-10 h-10"/></div>
+                                <div class="label"><p>Show my team</p></div>
+                            </div>
+                        </button>
+                        {% endif %}
+                        <button class="suggestion-card card" data-suggestion="i want time off">
+                            <div class="card-content">
+                                <div class="icon"><img src="/static/Timeoff.svg" alt="Time off" class="w-10 h-10"/></div>
+                                <div class="label"><p>Ask for time off</p></div>
+                            </div>
+                        </button>
+                        <button class="suggestion-card card" data-suggestion="Generate letters">
+                            <div class="card-content">
+                                <div class="icon"><img src="/static/Template.svg" alt="Ask for a document" class="w-10 h-10"/></div>
+                                <div class="label"><p>Ask for a document</p></div>
+                            </div>
+                        </button>
+                        <button class="suggestion-card card" data-suggestion="Ask for overtime">
+                            <div class="card-content">
+                                <div class="icon"><img src="/static/Overtime.svg" alt="Ask for overtime" class="w-10 h-10"/></div>
+                                <div class="label"><p>Ask for overtime</p></div>
+                            </div>
+                        </button>
+                        <button class="suggestion-card card" data-suggestion="i want to request a reimbursement">
+                            <div class="card-content">
+                                <div class="icon"><img src="/static/Reimbursement.svg" alt="Ask for reimbursement" class="w-10 h-10"/></div>
+                                <div class="label"><p>Ask for reimbursement</p></div>
+                            </div>
+                        </button>
+                    </div>
+                    <div class="flex justify-center">
+                        <div class="input-bar shadow-lg" id="initialInputBar">
+                            <input id="initialMessageInput" class="message-input" placeholder="Type your message here..." type="text" onkeydown="handleInitialKeyPress(event)" />
+                            <button id="initialSendButton" onclick="startConversation()" class="send-icon">
+                                <img src="/static/Send-button.svg" alt="Send" class="w-8 h-8" />
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex justify-center mt-4">
+                        <div class="flex items-center gap-2 text-sm text-gray-600">
+                            <span>Fast drafts, not final files. always review with your designer's eye</span>
+                            <img src="/static/Nasma-Avatar.svg" alt="Nasma avatar" class="w-6 h-6"/>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    </div>
+
+    <!-- Conversation State -->
+    <div id="conversationState" class="state-hidden">
+        <!-- Sidebar -->
+        <div id="conversationSidebar" class="sidebar fixed top-0 left-0 h-full w-80 bg-white/90 backdrop-blur-lg border-r border-gray-200/80 shadow-xl" style="z-index: 2147483647 !important; pointer-events: auto !important;">
+            <div class="flex flex-col h-full">
+                <div class="flex items-center justify-center p-8 border-b border-gray-200/50">
+                    <button id="conversationSidebarClose">
+                        <img src="/Nasma-Avatar.svg" onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEwIiBoZWlnaHQ9IjExNCIgdmlld0JveD0iMCAwIDExMCAxMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yNS4wNSA4Ni44NjQ0QzE4LjYyIDg2Ljg2NDQgMTMuMTcgODUuMTM0NCA4Ljc4OTk4IDgxLjY3NDRDMy45MTM0NCA3Ny43MDQ2IDAuNzk1MzY1IDcxLjk3NSAwLjEwOTk4NSA2NS43MjQ0VjY1LjM5NDRWNjUuMDY0NEMwLjEwOTk4NSA1OC4zMTQ0IDIuNCA1Mi41MDQ0IDYuNzUgNDguMjU0NEMxNC4xMSA0MS4wNjQ0IDI0LjY2IDQwLjg5NDQgMjYuMzYgNDAuOTE0NEgzOC40OVY1Ny40NjQ0SDI2LjFDMjQuNjggNTcuNDY0NCAyMC40NCA1Ny45NjQ0IDE4LjI5IDYwLjExNDRDMTcuNzQxNCA2MC43MDExIDE3LjMxNjMgNjEuMzkyIDE3LjAzOTcgNjIuMTQ2MUMxNi43NjMyIDYyLjkwMDIgMTYuNjQwOSA2My43MDIyIDE2LjY4IDY0LjUwNDRDMTYuOTk4NiA2Ni4xNTA1IDE3Ljg3ODcgNjcuNjM0OSAxOS4xNyA2OC43MDQ0QzIxLjY3IDcwLjU5NDQgMjUuODUgNzAuNDE0NCAyOC45MiA2OS45MjQ0QzMzLjk3IDY5LjEzNDQgMzguOTIgNjUuMDc0NCA0NC42NSA2MC4zODQ0QzU2Ljg5IDUwLjM4NDQgNzMuNjUgMzYuNjM0NCAxMDQuMzEgNDcuMTQ0NEw5OC45MyA2Mi44MzQ0Qzc3LjAyIDU1LjMxNDQgNjYuOTMgNjMuNjE0NCA1NS4xNiA3My4yMTQ0QzQ4LjE2IDc4LjkxNDQgNDEgODQuODE0NCAzMS41IDg2LjMwNDRDMjkuMzY4MiA4Ni42NjE2IDI3LjIxMTQgODYuODQ4OCAyNS4wNSA4Ni44NjQ0WiIgZmlsbD0iIzI5MUM0OCIvPgo8cGF0aCBkPSJNODMuODcgMTEzLjY1NEg3MS41M1Y5Ny4wNzQ0SDgzLjlDODUuMzIgOTcuMDc0NCA4OS41NiA5Ni41NjQ0IDkxLjcxIDk0LjQyNDRDOTIuMzYgOTMuNzc0NCA5My4yMiA5Mi42MjQ0IDkzLjMyIDkwLjAyNDRDOTIuOTk3NiA4OC4zODI1IDkyLjExODEgODYuOTAyNCA5MC44MyA4NS44MzQ0Qzg4LjMzIDgzLjk0NDQgODQuMTUgODQuMTI0NCA4MS4wOCA4NC42MTQ0Qzc2LjAzIDg1LjQwNDQgNzEuMDggODkuNDU0NCA2NS4zNSA5NC4xNTQ0QzU2LjIyIDEwMS42MjQgNDQuNTYgMTExLjE1NCAyNi41MSAxMTEuMTU0QzE5LjQwODkgMTExLjA2MiAxMi4zNzI4IDEwOS43ODggNS42OSAxMDcuMzg0TDExLjA3IDkxLjY5NDRDMzIuOTggOTkuMjE0NCA0My4wNyA5MC45MTQ0IDU0Ljg0IDgxLjMxNDRDNjEuODQgNzUuNjE0NCA2OSA2OS43MTQ0IDc4LjUgNjguMjI0NEM4Ny43OSA2Ni43NTQ0IDk1LjQzIDY4LjMyNDQgMTAxLjIgNzIuODg0NEMxMDYuMDgyIDc2Ljg1MSAxMDkuMjA0IDgyLjU4MTYgMTA5Ljg5IDg4LjgzNDRWODkuMTY0NFY4OS40NjQ0QzEwOS44OSA5Ni4yMTQ0IDEwNy42IDEwMi4wMjQgMTAzLjI1IDEwNi4yNzRDOTYuMTcgMTEzLjI1NCA4Ni4wOSAxMTMuNjU0IDgzLjg3IDExMy42NTRaIiBmaWxsPSIjMjkxQzQ4Ii8+CjxwYXRoIGQ9Ik01Mi4zOCAyLjQ2NDM5QzUxLjI2MjggMS42OTkwNCA0OS45OTk2IDEuMTcyNTUgNDguNjY5NSAwLjkxNzg4MkM0Ny4zMzkzIDAuNjYzMjE4IDQ1Ljk3MSAwLjY4NTg1OSA0NC42NSAwLjk4NDM4QzQ0LjQ0IDAuOTg0MzggNDQuMjQgMS4wOTQzOSA0NC4wMyAxLjE1NDM5QzQzLjAxODUgMS4xMDc4NSA0Mi4wMTI4IDEuMzMxNTkgNDEuMTE2NSAxLjgwMjYyQzQwLjIyMDEgMi4yNzM2NCAzOS40NjU0IDIuOTc0OTQgMzguOTMgMy44MzQzOUMzOC44MiA0LjAyNDM5IDM4LjcxIDQuMjI0MzkgMzguNjEgNC40MzQzOUMzOC4xODgyIDQuNDM0MDMgMzcuNzY4MSA0LjQ4NzgxIDM3LjM2IDQuNTk0NEMzNC4wNSA1LjQwNDQgMzEuNDIgOC43MDQzOSAzMi4yNiAxMi4yNDQ0QzMzLjU0IDE3LjU3NDQgMzguMzQgMjEuOTQ0NCA0NC4wMiAyMS43OTQ0QzQ2LjkwNTQgMjEuNzEzNiA0OS42NjM1IDIwLjU4ODUgNTEuNzgyMSAxOC42MjhDNTMuOTAwOCAxNi42Njc2IDU1LjIzNiAxNC4wMDQ5IDU1LjU0IDExLjEzNDRDNTUuOSA4LjA5NDQgNTUgNC4zMDQzOSA1Mi4zOCAyLjQ2NDM5WiIgZmlsbD0iI0ZGNjY2NiIvPgo8cGF0aCBkPSJNODIuNzUgNy41ODQzN0M4Mi43NSA3LjQ1NDM3IDgyLjc1IDcuMzI0MzggODIuNzUgNy4xOTQzOEM4Mi44NCA0LjYxNDM4IDgxLjE3IDEuMTk0MzYgNzguMzcgMC42NDQzNjRDNzYuMzMyNyAwLjA5NTQzNSA3NC4xODA1IDAuMTQ0MDQ4IDcyLjE3IDAuNzg0Mzc5QzcwLjE5NTggMS40OTEyNyA2OC40NjIyIDIuNzQyOSA2Ny4xNyA0LjM5NDM2QzY1Ljk2OTEgNS44OTM0OSA2NS4yMjExIDcuNzA0MjYgNjUuMDEzOSA5LjYxMzg1QzY0LjgwNjYgMTEuNTIzNCA2NS4xNDg3IDEzLjQ1MjUgNjYgMTUuMTc0NEM2OS41NiAyMS45MjQ0IDc5LjU1IDIyLjQ3NDQgODMuOSAxNi4yNTQ0Qzg0Ljc4OSAxNC45MTQ0IDg1LjE2MjMgMTMuMjk3OCA4NC45NTA4IDExLjcwMzdDODQuNzM5NCAxMC4xMDk3IDgzLjk1NzUgOC42NDYyNCA4Mi43NSA3LjU4NDM3WiIgZmlsbD0iI0ZGNjY2NiIvPgo8L3N2Zz4K';" alt="Nasma" class="w-24 h-24 object-contain" />
+                    </button>
+                </div>
+                <div class="flex-1 p-6 overflow-y-auto">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Chat History</h2>
+                    <div id="conversationHistoryList" class="history-list"></div>
+                    <div id="conversationHistoryEmpty" class="history-empty text-sm">No conversations yet.</div>
+                </div>
+                <div class="p-6 border-t border-gray-200/50 space-y-3" style="position: relative !important; z-index: 2147483647 !important; pointer-events: auto !important;">
+                    <button onclick="fetch('/api/auth/logout', {method: 'POST', headers: {'Content-Type': 'application/json'}}).then(() => {localStorage.removeItem('nasma_remember_me_token'); sessionStorage.setItem('just_logged_out', 'true'); window.location.href='/login';}).catch(() => {localStorage.removeItem('nasma_remember_me_token'); sessionStorage.setItem('just_logged_out', 'true'); window.location.href='/login';});" class="logout-btn" style="
+                        width: 100%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 0.5rem;
+                        padding: 0.75rem 1rem;
+                        border: none;
+                        border-radius: 0.5rem;
+                        font-family: inherit;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        z-index: 2147483647;
+                        position: relative;
+                        pointer-events: auto;
+                        margin-bottom: 0.75rem;
+                    ">
+                        <span class="material-symbols-outlined">logout</span>
+                        <span>Log Out</span>
+                    </button>
+                    <button onclick="window.location.href='/';" class="new-chat-btn" style="
+                        width: 100%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 0.5rem;
+                        padding: 0.75rem 1rem;
+                        border: none;
+                        border-radius: 0.5rem;
+                        font-family: inherit;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        z-index: 2147483647;
+                        position: relative;
+                        pointer-events: auto;
+                    ">
+                        <span class="material-symbols-outlined">add</span>
+                        <span>New Chat</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar overlay -->
+        <div id="conversationSidebarOverlay" class="sidebar-overlay fixed inset-0 bg-black/20 z-40"></div>
+
+        <div class="flex h-screen w-full flex-col">
+            <header class="flex items-center justify-between whitespace-nowrap px-6 py-4">
+                <div class="flex items-center gap-2 text-[var(--text-primary)]">
+                    <button id="conversationSidebarToggle" class="nasma-avatar-header flex items-center justify-center size-14 rounded-full hover:bg-white/60 transition-colors">
+                        <span class="material-symbols-outlined text-2xl">menu</span>
+                    </button>
+                    <h1 class="text-xl font-bold"><span style="color: #2b1b4c;">{{ brand_name or 'NasmaPL' }}</span><span style="color: #ff6666;">.</span></h1>
+                </div>
+                <div class="flex items-center gap-4">
+                    <button id="newChatButton" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors">
+                        <span class="material-symbols-outlined text-[var(--text-primary)]">add</span>
+                    </button>
+                    <button id="conversationLogoutButton" class="avatar-loading w-[44px] h-[44px] rounded-full border border-gray-200 shadow-sm overflow-hidden" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDhwW5-wPcfNiUcpFsTkT6y9M8_0qlwWaACSajKEttxrB_8x_HYum0NPwqQDg-OMN_PJ6m4yDP3wRShiqCC5VYloTvlVgh-t0feReJLOzXvTqUAyaPFr1mkRtYsASdB_O-BM14d7n5qzlKpo1ypb0_0EoIQprHzisHUIa90V6fVLCZGr8yrBo6Vj2myu8q4tT7IB4NnpnCtIBfnB8TmtvoLEKn6zXup_9oTIZWrCTLYuJbS51DSmKVEYrvargYZktcRikgYRIApRhX8"); background-size: cover; background-position: center;'></button>
+                </div>
+            </header>
+            <main class="flex-1 flex flex-col items-center overflow-y-auto px-4 pt-8 pb-60">
+                <div class="w-full max-w-4xl space-y-8" id="chatContainer">
+                    <!-- Chat messages will be dynamically added here -->
+                </div>
+            </main>
+            <footer class="fixed bottom-0 left-0 right-0 flex justify-center p-4 pb-4" style="background: transparent;">
+                <div class="w-full relative">
+                    <!-- Manager-specific prompts are shown inline in the bottom bar now -->
+
+                    <!-- All Prompts Section (manager + standard) inline in bottom bar -->
+                    <div class="flex items-center justify-center gap-2 overflow-x-auto no-scrollbar pb-3 -mx-2 px-2 suggestion-row">
+                        {% if is_manager %}
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="show me my team members">Show my team</button>
+                        {% endif %}
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want time off">Ask for time off</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="Generate letters">Generate letters</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="Request Overtime">Ask for overtime</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want to request a reimbursement">Ask for reimbursement</button>
+                    </div>
+                    <div class="flex justify-center">
+                        <div class="input-bar shadow-lg" id="conversationInputBar">
+                            <input id="messageInput" class="message-input" placeholder="Type your message here..." type="text" onkeydown="handleKeyPress(event)" />
+                            <button id="sendButton" onclick="sendMessage()" class="send-icon">
+                                <img src="/static/Send-button.svg" alt="Send" class="w-8 h-8" />
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex justify-center mt-4">
+                        <div class="flex items-center gap-2 text-sm text-gray-600">
+                            <span>Fast drafts, not final files. always review with your designer's eye</span>
+                            <img src="/static/Nasma-Avatar.svg" alt="Nasma avatar" class="w-6 h-6"/>
+                        </div>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        let conversationHistory = [];
+        let currentState = 'initial';
+        let userAvatarUrl = null; // Cache for user avatar
+        let currentThreadId = null; // Persist backend thread for flows
+        // Fetch user's first name for greeting
+        (async function () {
+            try {
+                const resp = await fetch('/api/odoo/employee/current');
+                const data = await resp.json();
+                const fullName = data && data.success && data.data && data.data.name ? String(data.data.name) : '';
+                const firstName = fullName.split(' ').filter(Boolean)[0] || '';
+                if (firstName) {
+                    const el = document.getElementById('greetingName');
+                    if (el) el.textContent = firstName;
+                }
+            } catch (e) {
+                // Keep default greeting on failure
+            }
+        })();
+
+        // Smooth scroll to bottom function
+        function scrollToBottom() {
+            // The main element is the actual scroll container
+            const scrollContainer = document.querySelector('#conversationState main');
+            if (scrollContainer && currentState === 'conversation') {
+                // Use requestAnimationFrame for smooth scrolling
+                requestAnimationFrame(() => {
+                    // Try modern scrollTo first
+                    try {
+                        scrollContainer.scrollTo({
+                            top: scrollContainer.scrollHeight,
+                            behavior: 'smooth'
+                        });
+                    } catch (e) {
+                        // Fallback for older browsers
+                        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+                    }
+                });
+            }
+        }
+
+        // Fetch user avatar from Odoo
+        async function fetchUserAvatar() {
+            try {
+                const response = await fetch('/api/user/avatar');
+                const data = await response.json();
+
+                if (data.success && data.image_data) {
+                    userAvatarUrl = `data:${data.content_type};base64,${data.image_data}`;
+                }
+            } catch (error) {
+                console.log('Could not fetch user avatar:', error);
+                // Keep using placeholder avatars
+            } finally {
+                // Always update elements to show them (with user image or fallback)
+                updateAvatarElements();
+            }
+        }
+
+        // Update all avatar elements with user's image
+        function updateAvatarElements() {
+            // Update header avatars
+            const headerAvatars = document.querySelectorAll('#logoutButton, #conversationLogoutButton');
+            headerAvatars.forEach(avatar => {
+                if (userAvatarUrl) {
+                    avatar.style.backgroundImage = `url(${userAvatarUrl})`;
+                }
+                // Remove loading class and add loaded class for smooth fade-in
+                avatar.classList.remove('avatar-loading');
+                avatar.classList.add('avatar-loaded');
+            });
+
+            // Update any existing user message avatars in chat
+            const chatAvatars = document.querySelectorAll('.user-avatar');
+            chatAvatars.forEach(avatar => {
+                if (userAvatarUrl) {
+                    avatar.src = userAvatarUrl;
+                }
+                avatar.classList.remove('avatar-loading');
+                avatar.classList.add('avatar-loaded');
+            });
+        }
+
+        // State transition function
+        function transitionToConversation() {
+            const body = document.body;
+            const initialState = document.getElementById('initialState');
+            const conversationState = document.getElementById('conversationState');
+
+            // Start the blur transition on initial state
+            initialState.classList.add('blurred');
+
+            // Start showing conversation state with slight delay for overlap
+            setTimeout(() => {
+                conversationState.classList.remove('state-hidden');
+                conversationState.classList.add('fade-in');
+            }, 200);
+
+            // Complete the transition
+            setTimeout(() => {
+                // Change background
+                body.classList.remove('initial-state');
+                body.classList.add('conversation-state');
+
+                // Hide initial state
+                initialState.classList.add('state-hidden');
+
+                // Ensure both sidebars are closed when entering conversation
+                ensureConversationSidebarClosed();
+                closeNewSidebar(); // Close the smooth chat sidebar
+
+                currentState = 'conversation';
+                // Aggressively sync conversation input width to initial cached width
+                try {
+                    const convBar = document.getElementById('conversationInputBar') || document.querySelector('#conversationState .input-bar');
+                    const widthPx = computeInputBarTargetWidth();
+                    if (widthPx) {
+                        window.__initialInputBarWidth = widthPx;
+                    }
+                    if (convBar && widthPx) {
+                        convBar.style.width = widthPx + 'px';
+                    }
+                } catch (_) {}
+            }, 600);
+        }
+
+        // Transition back to initial state
+        function transitionToInitial() {
+            const body = document.body;
+            const initialState = document.getElementById('initialState');
+            const conversationState = document.getElementById('conversationState');
+
+            // Start the fade out of conversation state
+            conversationState.classList.add('fade-out');
+
+            // Start showing initial state with slight delay for overlap
+            setTimeout(() => {
+                initialState.classList.remove('state-hidden', 'blurred');
+            }, 200);
+
+            // Complete the transition
+            setTimeout(() => {
+                // Change background
+                body.classList.remove('conversation-state');
+                body.classList.add('initial-state');
+
+                // Hide conversation state
+                conversationState.classList.add('state-hidden');
+                conversationState.classList.remove('fade-in', 'fade-out');
+
+                // Clear chat
+                document.getElementById('chatContainer').innerHTML = '';
+                conversationHistory = [];
+                document.getElementById('initialMessageInput').value = '';
+
+                // Ensure both sidebars are closed when returning to initial state
+                ensureConversationSidebarClosed(); // Close conversation sidebar
+                closeNewSidebar(); // Close the smooth chat sidebar
+
+                currentState = 'initial';
+                historyState.selectedThreadId = null;
+                setActiveHistoryItem(null);
+            }, 600);
+        }
+
+        // Auto-resize textarea
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+        }
+
+        // Handle initial state key press
+        function handleInitialKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                startConversation();
+            }
+        }
+
+        // Handle conversation state key press
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // Handle suggestion card clicks
+        document.querySelectorAll('.suggestion-card').forEach(card => {
+            card.addEventListener('click', function() {
+                const suggestion = this.getAttribute('data-suggestion');
+                document.getElementById('initialMessageInput').value = suggestion;
+                startConversation();
+            });
+        });
+
+        // Handle suggestion button clicks in conversation state
+        document.querySelectorAll('.suggestion-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const suggestion = this.getAttribute('data-suggestion');
+                document.getElementById('messageInput').value = suggestion;
+                sendMessage();
+            });
+        });
+
+        // Start conversation from initial state
+        function startConversation() {
+            const messageInput = document.getElementById('initialMessageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+            historyState.selectedThreadId = null;
+            setActiveHistoryItem(null);
+            
+            // Transition to conversation state
+            transitionToConversation();
+            
+            // Wait for transition to complete, then send message
+            setTimeout(() => {
+                addMessageToChat(message, true);
+                conversationHistory.push({role: 'user', content: message});
+                sendToBackend(message);
+                // Ensure scroll after transition (longer delay to ensure DOM is ready)
+                setTimeout(scrollToBottom, 300);
+            }, 800);
+        }
+
+        // Render markdown formatting
+        function renderMarkdown(text) {
+            // First escape HTML to prevent XSS
+            let escaped = escapeHtml(text);
+
+            // Then convert **text** to bold
+            escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+            // Convert *text* to italic
+            escaped = escaped.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+            // Convert line breaks to <br> tags
+            escaped = escaped.replace(/\n/g, '<br>');
+
+            return escaped;
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function convertSimpleMarkdownToHtml(text) {
+            if (!text) return '';
+            // Escape HTML first to prevent XSS
+            let escaped = escapeHtml(text);
+            // Convert **bold** to <strong>
+            escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            // Convert *italic* to <em>
+            escaped = escaped.replace(/\*(.+?)\*/g, '<em>$1</em>');
+            return escaped;
+        }
+
+        const historyState = {
+            threads: [],
+            selectedThreadId: null,
+            containers: {
+                conversation: null,
+                global: null,
+            },
+            empty: {
+                conversation: null,
+                global: null,
+            },
+            loading: false,
+            initialized: false,
+        };
+
+        function ensureHistoryContainers() {
+            if (!historyState.containers.conversation) {
+                historyState.containers.conversation = document.getElementById('conversationHistoryList');
+            }
+            if (!historyState.empty.conversation) {
+                historyState.empty.conversation = document.getElementById('conversationHistoryEmpty');
+            }
+            if (!historyState.containers.global) {
+                historyState.containers.global = document.getElementById('globalHistoryList');
+            }
+            if (!historyState.empty.global) {
+                historyState.empty.global = document.getElementById('globalHistoryEmpty');
+            }
+        }
+
+        function truncateText(text, maxLength = 80) {
+            const value = (text || '').trim();
+            if (!value) return '';
+            if (value.length <= maxLength) return value;
+            return value.slice(0, maxLength - 1).trimEnd() + '…';
+        }
+
+        function formatRelativeTime(isoString) {
+            if (!isoString) return '';
+            try {
+                const target = new Date(isoString);
+                if (Number.isNaN(target.getTime())) {
+                    return '';
+                }
+                const diffSeconds = Math.round((target.getTime() - Date.now()) / 1000);
+                const absSeconds = Math.abs(diffSeconds);
+                const rtfAvailable = typeof Intl !== 'undefined' && typeof Intl.RelativeTimeFormat === 'function';
+                if (!rtfAvailable) {
+                    return target.toLocaleString();
+                }
+                const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+                const units = [
+                    { limit: 60, divisor: 1, unit: 'second' },
+                    { limit: 3600, divisor: 60, unit: 'minute' },
+                    { limit: 86400, divisor: 3600, unit: 'hour' },
+                    { limit: 604800, divisor: 86400, unit: 'day' },
+                    { limit: 2629800, divisor: 604800, unit: 'week' },
+                    { limit: 31557600, divisor: 2629800, unit: 'month' },
+                ];
+                for (const { limit, divisor, unit } of units) {
+                    if (absSeconds < limit) {
+                        const value = Math.round(diffSeconds / divisor);
+                        return rtf.format(value, unit);
+                    }
+                }
+                const years = Math.round(diffSeconds / 31557600);
+                return rtf.format(years, 'year');
+            } catch (_) {
+                return '';
+            }
+        }
+
+        function setActiveHistoryItem(threadId) {
+            historyState.selectedThreadId = threadId || null;
+            document.querySelectorAll('.history-item').forEach((node) => {
+                if (threadId && node.dataset && node.dataset.threadId === threadId) {
+                    node.classList.add('active');
+                } else {
+                    node.classList.remove('active');
+                }
+            });
+        }
+
+        function renderHistoryListElement(listEl, emptyEl, threads) {
+            if (!listEl || !emptyEl) return;
+            listEl.innerHTML = '';
+            if (!threads || threads.length === 0) {
+                listEl.style.display = 'none';
+                emptyEl.style.display = 'block';
+                return;
+            }
+
+            emptyEl.style.display = 'none';
+            listEl.style.display = 'flex';
+
+            threads.forEach((thread) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'history-item';
+                button.dataset.threadId = thread.thread_id;
+
+                const title = truncateText(thread.title || thread.last_message_preview || 'Conversation', 60);
+                const preview = truncateText(thread.last_message_preview || '', 90);
+                const relative = formatRelativeTime(thread.last_message_at);
+                const senderLabel = thread.last_sender === 'user' ? 'You' : '';
+                const metaParts = [];
+                if (relative) metaParts.push(relative);
+                if (senderLabel) metaParts.push(senderLabel);
+                const metaText = metaParts.join(' • ');
+
+                button.innerHTML = `
+                    <div class="history-item-title">${escapeHtml(title)}</div>
+                    ${metaText ? `<div class="history-item-meta">${escapeHtml(metaText)}</div>` : ''}
+                    ${preview ? `<div class="history-item-preview">${convertSimpleMarkdownToHtml(preview)}</div>` : ''}
+                `;
+
+                button.addEventListener('click', () => {
+                    openConversationFromHistory(thread);
+                });
+
+                listEl.appendChild(button);
+            });
+
+            setActiveHistoryItem(historyState.selectedThreadId);
+        }
+
+        function renderConversationHistories(threads) {
+            ensureHistoryContainers();
+            const convoList = historyState.containers.conversation;
+            const convoEmpty = historyState.empty.conversation;
+            const globalList = historyState.containers.global;
+            const globalEmpty = historyState.empty.global;
+
+            if (convoList && convoEmpty) {
+                renderHistoryListElement(convoList, convoEmpty, threads);
+            }
+            if (globalList && globalEmpty) {
+                renderHistoryListElement(globalList, globalEmpty, threads);
+            }
+        }
+
+        async function refreshConversationHistory(forceRefresh = false) {
+            if (historyState.loading && !forceRefresh) {
+                return;
+            }
+            historyState.loading = true;
+            try {
+                const response = await fetch('/api/conversations');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch conversations');
+                }
+                const data = await response.json();
+                const threads = Array.isArray(data?.threads) ? data.threads : [];
+                historyState.threads = threads;
+                if (currentThreadId && threads.some(t => t.thread_id === currentThreadId)) {
+                    historyState.selectedThreadId = currentThreadId;
+                } else if (!currentThreadId && historyState.selectedThreadId && !threads.some(t => t.thread_id === historyState.selectedThreadId)) {
+                    historyState.selectedThreadId = null;
+                }
+                renderConversationHistories(threads);
+            } catch (error) {
+                console.error('Failed to load conversation history', error);
+                renderConversationHistories(historyState.threads || []);
+            } finally {
+                historyState.loading = false;
+            }
+        }
+
+        function ensureConversationStateReady() {
+            return new Promise((resolve) => {
+                if (currentState === 'conversation') {
+                    resolve();
+                    return;
+                }
+                transitionToConversation();
+                setTimeout(resolve, 700);
+            });
+        }
+
+        async function openConversationFromHistory(thread) {
+            if (!thread || !thread.thread_id) {
+                return;
+            }
+            historyState.selectedThreadId = thread.thread_id;
+            setActiveHistoryItem(thread.thread_id);
+            try {
+                await ensureConversationStateReady();
+                ensureConversationSidebarClosed();
+                closeNewSidebar();
+
+                const response = await fetch(`/api/conversations/${encodeURIComponent(thread.thread_id)}/messages`);
+                if (!response.ok) {
+                    throw new Error('Failed to load conversation');
+                }
+                const data = await response.json();
+                const messages = Array.isArray(data?.messages) ? data.messages : [];
+                const sortedMessages = messages.slice().sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
+                const chatContainer = document.getElementById('chatContainer');
+                if (chatContainer) {
+                    chatContainer.innerHTML = '';
+                }
+                conversationHistory = [];
+
+                sortedMessages.forEach((msg) => {
+                    const role = msg.role || 'assistant';
+                    const content = msg.content || '';
+                    if (!content) {
+                        return;
+                    }
+                    const isUser = role === 'user';
+                    addMessageToChat(content, isUser);
+                    if (role === 'user' || role === 'assistant') {
+                        conversationHistory.push({ role, content });
+                    }
+                });
+
+                currentThreadId = thread.thread_id;
+                setActiveHistoryItem(thread.thread_id);
+                setTimeout(scrollToBottom, 100);
+            } catch (error) {
+                console.error('Failed to open conversation from history', error);
+            } finally {
+                refreshConversationHistory(true);
+            }
+        }
+
+        async function initializeConversationHistory() {
+            if (historyState.initialized) {
+                refreshConversationHistory(true);
+                return;
+            }
+            ensureHistoryContainers();
+            historyState.initialized = true;
+            await refreshConversationHistory(true);
+        }
+
+        function renderNewUserUploadBubble() {
+            const chatContainer = document.getElementById('chatContainer');
+            if (!chatContainer) {
+                console.warn('renderNewUserUploadBubble: chat container missing');
+                return;
+            }
+            const wid = `nu_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+            const fileId = `${wid}_file`;
+            const chooseId = `${wid}_choose`;
+            const nameId = `${wid}_name`;
+            const uploadId = `${wid}_upload`;
+            const uploadHtml = `
+                <div class=\"flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center\">\n                    <img src=\"/Nasma-Avatar.svg\" alt=\"Nasma\" class=\"w-[28px] h-[28px] object-contain\" />\n                </div>
+                <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm">
+                    <div class="message-content text-gray-800">Let's set up new users!<br/>Please share with me the Excel file to create new users.</div>
+                    <div class="mt-3 flex items-center gap-3">
+                        <input type="file" id="${fileId}" accept=".xlsx,.xls" class="hidden" />
+                        <button id="${chooseId}" class="h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-[var(--text-primary)] hover:bg-white/90 transition-colors border border-gray-300">Choose file</button>
+                        <span id="${nameId}" class="text-sm text-gray-600 truncate max-w-[200px]">No file chosen</span>
+                        <button id="${uploadId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Upload</button>
+                    </div>
+                </div>`;
+            const extraDiv = document.createElement('div');
+            extraDiv.className = 'flex items-start gap-4 mt-3';
+            extraDiv.innerHTML = uploadHtml;
+            chatContainer.appendChild(extraDiv);
+            setTimeout(() => {
+                const btn = extraDiv.querySelector(`#${uploadId}`);
+                const input = extraDiv.querySelector(`#${fileId}`);
+                const choose = extraDiv.querySelector(`#${chooseId}`);
+                const fileName = extraDiv.querySelector(`#${nameId}`);
+                if (choose && input && fileName) {
+                    choose.addEventListener('click', () => input.click());
+                    input.addEventListener('change', () => {
+                        fileName.textContent = input.files && input.files.length ? input.files[0].name : 'No file chosen';
+                    });
+                }
+                if (btn && input) {
+                    btn.addEventListener('click', async () => {
+                        if (!input.files || input.files.length === 0) return;
+                        const fd = new FormData();
+                        fd.append('file', input.files[0]);
+                        try {
+                            const resp = await fetch('/api/new-users/upload', { method: 'POST', body: fd });
+                            const data = await resp.json();
+                            if (!data.success) {
+                                addMessageToChat('File parse failed: ' + (data.message || 'Unknown error'), false);
+                                return;
+                            }
+                            // Build a readable confirmation table bubble
+                            const rows = Array.isArray(data.rows) ? data.rows : [];
+                            const labelize = (k) => {
+                                return k
+                                  .replace(/^x_studio_/, '')
+                                  .replace(/_/g, ' ')
+                                  .replace(/\b\w/g, c => c.toUpperCase());
+                            };
+                            const formatVal = (k, v) => {
+                                if (v == null) return '';
+                                const s = String(v);
+                                if (k === 'bank_account_id') {
+                                    const digits = s.replace(/\D/g, '');
+                                    return digits.length >= 4 ? `•••• ${digits.slice(-4)}` : s;
+                                }
+                                if (/^https?:\/\//i.test(s)) return 'Attached';
+                                return s;
+                            };
+                            const baseId = `cf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                            const PRIMARY_KEYS = ['name','x_studio_employee_arabic_name','birthday','job_id','work_email'];
+                            const buildTableFor = (record, idx) => {
+                                const keys = Object.keys(record || {});
+                                const secondary = keys.filter(k => !PRIMARY_KEYS.includes(k));
+                                const primaryPresent = PRIMARY_KEYS.filter(k => keys.includes(k));
+                                const viewKey = `${baseId}_${idx}`;
+                                const companyAssigned = !!record.company_name;
+                                const companyLabel = record.company_name ? ` (Company: ${escapeHtml(record.company_name)})` : '';
+                                const rowHtml = (k, v) => `
+                                    <tr class="border-t">
+                                        <td class="px-3 py-2 align-top text-sm text-gray-700 font-semibold">${labelize(k)}</td>
+                                        <td class="px-3 py-2 text-sm text-gray-900 break-words break-all">${formatVal(k, v)}</td>
+                                    </tr>`;
+                                const primaryBody = primaryPresent.map(k => rowHtml(k, record[k]));
+                                const secondaryBody = secondary.map(k => rowHtml(k, record[k]));
+                                // Save full table HTML for modal full view
+                                try {
+                                    window.__lastNewUsersConfirm = window.__lastNewUsersConfirm || {};
+                                    const rowsHtml = primaryBody.join('') + secondaryBody.join('') + (record.company_name ? `\n<tr class=\"border-t\"><td class=\"px-4 py-3 text-left text-sm font-semibold text-gray-800\">Company</td><td class=\"px-4 py-3 text-left text-sm text-gray-900\">${escapeHtml(record.company_name)}</td></tr>` : '');
+                                    window.__lastNewUsersConfirm[viewKey] = `
+                                        <table class=\"min-w-full\">\n\
+                                            <thead class=\"bg-gray-50\"><tr><th class=\"px-4 py-3 text-left text-sm font-semibold text-gray-800\">Field</th><th class=\"px-4 py-3 text-left text-sm font-semibold text-gray-800\">Value</th></tr></thead>\n\
+                                            <tbody>${rowsHtml}</tbody>\n\
+                                        </table>`;
+                                } catch (e) {}
+                                const companyDropdownId = `${viewKey}_company_select`;
+                                const companyAssignBtnId = `${viewKey}_company_assign`;
+                                const companyReassignBtnId = `${viewKey}_company_reassign`;
+                                const companyOptions = [
+                                    'Prezlab FZ LLC',
+                                    'Prezlab Advanced Design Company',
+                                    'Prezlab FZ LLC - Regional Office',
+                                    'Prezlab Digital Design Firm L.L.C. - O.P.C',
+                                    'ALOROD AL TAQADAMIAH LEL TASMEM CO'
+                                ];
+                                const companyControls = `
+                                    <div class=\"mt-2 flex items-center gap-2\">\n\
+                                        <select id=\"${companyDropdownId}\" class=\"h-10 px-3 rounded-full border border-gray-300 shadow-sm min-w-[220px]\">\n\
+                                            ${companyOptions.map(c => `<option value=\"${c}\" ${record.company_name===c?'selected':''}>${c}</option>`).join('')}\n\
+                                        </select>\n\
+                                        <button id=\"${companyAssigned ? companyReassignBtnId : companyAssignBtnId}\" class=\"h-10 px-4 rounded-full text-sm font-medium btn-gradient\">${companyAssigned ? 'Reassign company' : 'Assign company'}</button>\n\
+                                    </div>`;
+                                const controlsHtml = `
+                                    <div class=\"flex items-center justify-between mb-1\">${rows.length > 1 ? `<div class=\\\"text-xs text-gray-500\\\">Record ${idx + 1}${companyLabel}</div>` : `<div class=\\\"text-xs text-gray-500\\\">${companyLabel}</div>`}<button class=\"text-sm text-[var(--primary-color)] hover:underline font-medium\" onclick=\"openFullNewUsersConfirmKey('${viewKey}')\">Full view</button></div>`;
+                                return `
+                                    <div class=\"mb-4\">\n\
+                                        ${controlsHtml}\n\
+                                        <table class=\"w-full bg-white/70 rounded-lg overflow-hidden\">\n\
+                                            <thead class=\"bg-gray-50/80\">\n\
+                                                <tr><th class=\"px-3 py-2 text-left text-sm font-semibold text-gray-700\">Field</th><th class=\"px-3 py-2 text-left text-sm font-semibold text-gray-700\">Value</th></tr>\n\
+                                            </thead>\n\
+                                            <tbody>${primaryBody.join('')}</tbody>\n\
+                                        </table>\n\
+                                        ${companyControls}\n\
+                                    </div>`;
+                            };
+                            const allTablesHtml = rows.length ? rows.map((r, i) => buildTableFor(r, i)).join('') : buildTableFor({}, 0);
+                            const confirmWid = `nc_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                            const confirmId = `${confirmWid}_ok`;
+                            const cancelId = `${confirmWid}_cancel`;
+                            const allHaveCompany = Array.isArray(rows) ? rows.every(r => r && r.company_name) : false;
+                            const bubble = document.createElement('div');
+                            bubble.className = 'flex items-start gap-4 mt-3';
+                            bubble.innerHTML = `
+                                <div class="flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center">
+                                    <img src="/Nasma-Avatar.svg" alt="Nasma" class="w-[28px] h-[28px] object-contain" />
+                                </div>
+                                <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm w-full">
+                                    <div class="text-gray-800 mb-2">Please review and confirm the new user details:</div>
+                                    <div class="overflow-y-auto max-h-[420px] pr-1">${allTablesHtml}</div>
+                                    ${allHaveCompany ? `
+                                    <div class=\"mt-3 flex items-center gap-2\">\n\
+                                        <button id=\"${confirmId}\" class=\"h-10 px-4 rounded-full text-sm font-medium btn-gradient\">Confirm</button>\n\
+                                        <button id=\"${cancelId}\" class=\"h-10 px-4 rounded-full text-sm font-medium btn-gradient\">Cancel</button>\n\
+                                    </div>` : ''}
+                                </div>`;
+                            document.getElementById('chatContainer').appendChild(bubble);
+                            setTimeout(() => {
+                                const okBtn = bubble.querySelector(`#${confirmId}`);
+                                const cancelBtn = bubble.querySelector(`#${cancelId}`);
+                                if (okBtn) okBtn.addEventListener('click', () => sendToBackend('new_user_upload_confirm'));
+                                if (cancelBtn) cancelBtn.addEventListener('click', () => sendToBackend('new_user_upload_cancel'));
+                                // Wire assign company actions per record
+                                rows.forEach((r, i) => {
+                                    const viewKey = `${baseId}_${i}`;
+                                    const dd = bubble.querySelector(`#${viewKey}_company_select`);
+                                    const assignBtn = bubble.querySelector(`#${viewKey}_company_assign`) || bubble.querySelector(`#${viewKey}_company_reassign`);
+                                    if (dd && assignBtn) {
+                                        assignBtn.addEventListener('click', () => {
+                                            const label = dd.value;
+                                            sendToBackend(`assign_company:${i}:${label}`);
+                                        });
+                                    }
+                                });
+                                setTimeout(scrollToBottom, 50);
+                            }, 0);
+                        } catch (e) {
+                            addMessageToChat('Upload error: ' + e, false);
+                        }
+                    });
+                }
+                setTimeout(scrollToBottom, 50);
+            }, 0);
+        }
+
+        // Render/refresh the New User confirmation bubble (tables + company controls)
+        function renderNewUserConfirmBubble(rows) {
+            try {
+                const chatContainer = document.getElementById('chatContainer');
+                const baseId = `cf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                const PRIMARY_KEYS = ['name','x_studio_employee_arabic_name','birthday','job_id','work_email'];
+
+                const buildTableFor = (record, idx) => {
+                    const keys = Object.keys(record || {});
+                    const primaryPresent = PRIMARY_KEYS.filter(k => keys.includes(k));
+                    const secondary = keys.filter(k => !PRIMARY_KEYS.includes(k) && !String(k).startsWith('_') && !['company_id','company_name'].includes(k));
+                    const labelize = (k) => String(k)
+                        .replace(/^x_studio_/, '')
+                        .replace(/_/g, ' ')
+                        .replace(/\b\w/g, c => c.toUpperCase());
+                    const viewKey = `${baseId}_${idx}`;
+                    const companyAssigned = !!record.company_name;
+                    const companyLabel = record.company_name ? ` (Company: ${escapeHtml(record.company_name)})` : '';
+                    const rowHtml = (k, v) => `
+                        <tr class="border-t">
+                            <td class="px-3 py-2 align-top text-sm text-gray-700 font-semibold">${labelize(k)}</td>
+                            <td class="px-3 py-2 text-sm text-gray-900 break-words break-all">${escapeHtml(String(v ?? ''))}</td>
+                        </tr>`;
+                    const primaryBody = primaryPresent.map(k => rowHtml(k, record[k]));
+                    const secondaryBody = secondary.map(k => rowHtml(k, record[k]));
+                    // Persist full-view HTML with company for this record
+                    try {
+                        window.__lastNewUsersConfirm = window.__lastNewUsersConfirm || {};
+                        const rowsHtml = primaryBody.join('') + secondaryBody.join('') + (record.company_name ? `\n<tr class=\"border-t\"><td class=\"px-4 py-3 text-left text-sm font-semibold text-gray-800\">Company</td><td class=\"px-4 py-3 text-left text-sm text-gray-900\">${escapeHtml(record.company_name)}</td></tr>` : '');
+                        window.__lastNewUsersConfirm[viewKey] = `
+                            <table class=\"min-w-full\">\n\
+                                <thead class=\"bg-gray-50\"><tr><th class=\"px-4 py-3 text-left text-sm font-semibold text-gray-800\">Field</th><th class=\"px-4 py-3 text-left text-sm font-semibold text-gray-800\">Value</th></tr></thead>\n\
+                                <tbody>${rowsHtml}</tbody>\n\
+                            </table>`;
+                    } catch (e) {}
+
+                    const companyDropdownId = `${viewKey}_company_select`;
+                    const companyActionBtnId = `${viewKey}_company_action`;
+                    const previewBtnId = `${viewKey}_preview`;
+                    const companyOptions = [
+                        'Prezlab FZ LLC',
+                        'Prezlab Advanced Design Company',
+                        'Prezlab FZ LLC - Regional Office',
+                        'Prezlab Digital Design Firm L.L.C. - O.P.C',
+                        'ALOROD AL TAQADAMIAH LEL TASMEM CO'
+                    ];
+                    const previewButtonHtml = companyAssigned ? `<button id="${previewBtnId}" class="h-10 px-4 rounded-full text-sm font-medium bg-white/80 border border-gray-300 text-[var(--primary-color)] hover:bg-white">Preview</button>` : '';
+                    const companyControls = `
+                        <div class="mt-2 flex flex-col gap-2">
+                            <select id="${companyDropdownId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm min-w-[220px]">
+                                ${companyOptions.map(c => `<option value="${c}" ${record.company_name===c?'selected':''}>${c}</option>`).join('')}
+                            </select>
+                            <div class="flex items-center gap-2">
+                                <button id="${companyActionBtnId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient">${companyAssigned ? 'Reassign company' : 'Assign company'}</button>
+                                ${previewButtonHtml}
+                            </div>
+                        </div>`;
+                    const controlsHtml = `
+                        <div class="flex items-center justify-between mb-1">${rows.length > 1 ? `<div class=\"text-xs text-gray-500\">Record ${idx + 1}${companyLabel}</div>` : `<div class=\"text-xs text-gray-500\">${companyLabel}</div>`}<button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullNewUsersConfirmKey('${viewKey}')">Full view</button></div>`;
+                    return `
+                        <div class="mb-4">
+                            ${controlsHtml}
+                            <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                <thead class="bg-gray-50/80">
+                                    <tr><th class="px-3 py-2 text-left text-sm font-semibold text-gray-700">Field</th><th class="px-3 py-2 text-left text-sm font-semibold text-gray-700">Value</th></tr>
+                                </thead>
+                                <tbody>${primaryBody.join('')}</tbody>
+                            </table>
+                            ${companyControls}
+                        </div>`;
+                };
+
+                const allTablesHtml = (Array.isArray(rows) ? rows : []).map((r, i) => buildTableFor(r, i)).join('');
+
+                const container = document.createElement('div');
+                container.className = 'flex items-start gap-4 mt-3';
+                const confirmId = `${baseId}_ok`;
+                const cancelId = `${baseId}_cancel`;
+                const allHaveCompany = (Array.isArray(rows) ? rows : []).every(r => r && r.company_name);
+                container.innerHTML = `
+                    <div class="flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center">
+                        <img src="/Nasma-Avatar.svg" alt="Nasma" class="w-[28px] h-[28px] object-contain" />
+                    </div>
+                    <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm w-full">
+                        <div class="text-gray-800 mb-2">Please review and confirm the new user details:</div>
+                        <div class="overflow-y-auto max-h-[420px] pr-1">${allTablesHtml}</div>
+                        ${allHaveCompany ? `
+                        <div class=\"mt-3 flex items-center gap-2\">\n\
+                            <button id=\"${confirmId}\" class=\"h-10 px-4 rounded-full text-sm font-medium btn-gradient\">Confirm</button>\n\
+                            <button id=\"${cancelId}\" class=\"h-10 px-4 rounded-full text-sm font-medium btn-gradient\">Cancel</button>\n\
+                        </div>` : ''}
+                    </div>`;
+                chatContainer.appendChild(container);
+
+                // Wire events
+                setTimeout(() => {
+                    const okBtn = container.querySelector(`#${confirmId}`);
+                    const cancelBtn = container.querySelector(`#${cancelId}`);
+                    if (okBtn) okBtn.addEventListener('click', () => sendToBackend('new_user_upload_confirm'));
+                    if (cancelBtn) cancelBtn.addEventListener('click', () => sendToBackend('new_user_upload_cancel'));
+
+                    (Array.isArray(rows) ? rows : []).forEach((_, i) => {
+                        const viewKey = `${baseId}_${i}`;
+                        const dd = container.querySelector(`#${viewKey}_company_select`);
+                        const assignBtn = container.querySelector(`#${viewKey}_company_action`);
+                        const previewBtn = container.querySelector(`#${viewKey}_preview`);
+                        if (dd && assignBtn) {
+                            assignBtn.addEventListener('click', () => {
+                                const label = dd.value;
+                                sendToBackend(`assign_company:${i}:${label}`);
+                            });
+                        }
+                        if (previewBtn) {
+                            previewBtn.addEventListener('click', async () => {
+                                try {
+                                    const record = Array.isArray(rows) && rows[i] ? rows[i] : {};
+                                    const dd = container.querySelector(`#${viewKey}_company_select`);
+                                    const companyName = dd ? dd.value : (record.company_name || '');
+                                    const payload = {
+                                        name: record.name || '',
+                                        company_name: companyName,
+                                        private_street: record['private_street'] || record['Private Street'] || ''
+                                    };
+                                    const resp = await fetch('/api/new-users/preview-service', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify(payload)
+                                    });
+                                    const data = await resp.json();
+                                    if (data && data.success && data.attachment && data.attachment.file_url) {
+                                        const a = document.createElement('a');
+                                        a.href = data.attachment.file_url;
+                                        a.download = data.attachment.file_name || 'Service_Agreement.docx';
+                                        a.style.display = 'none';
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                    } else {
+                                        alert(data && data.message ? data.message : 'Preview failed');
+                                    }
+                                } catch (e) {
+                                    alert('Preview error: ' + e);
+                                }
+                            });
+                        }
+                    });
+                    setTimeout(scrollToBottom, 50);
+                }, 0);
+            } catch (e) {
+                console.error('renderNewUserConfirmBubble error', e);
+            }
+        }
+
+        function renderHardwareAssignBubble(options, promptOverride) {
+            try {
+                const prompt = promptOverride || 'Would you like to assign the new Prezlabers hardware?';
+                const buttons = (Array.isArray(options) ? options : []).map(opt => {
+                    const firstName = (opt && opt.first_name) ? opt.first_name : ((opt && opt.name) ? String(opt.name).split(' ')[0] : 'user');
+                    const id = opt && opt.employee_id != null ? opt.employee_id : '';
+                    return {
+                        text: `Assign ${firstName}`,
+                        value: `assign_hardware:${id}`,
+                        type: 'action'
+                    };
+                }).filter(btn => btn.value && btn.value.includes(':'));
+                buttons.push({ text: 'No', value: 'new_user_assign_hardware_no', type: 'action' });
+                addMessageToChat(prompt, false, buttons);
+                conversationHistory.push({ role: 'assistant', content: prompt });
+            } catch (e) {
+                console.error('renderHardwareAssignBubble error', e);
+            }
+        }
+
+        // Add message to chat
+        function addMessageToChat(message, isUser = true, buttons = null, attachments = null) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+
+            if (isUser) {
+                messageDiv.className = 'flex items-start gap-4 justify-end';
+                const avatarSrc = userAvatarUrl || 'https://lh3.googleusercontent.com/aida-public/AB6AXuBNBRa80Kej5RP4i7wVzLkewz_eJ0D31dEMA0uHJ8seS4Ec8bwPEXj4__SG3o9KYfomI1pknEnfcMHdnbXXONBEDPDV3Q3caWJRWVsk2A1NwCaUiD7ZxUiTK-d_4OI6e3mnEXnfvDb9-T_MuU6SLELv4lVnAQ2O2alIOkmjAvGisnSwuPEDiFRwnSQKwss3DfkvWdQs3d96lCFOVqdwH06OIQjMhgv_161eSLkCDDjQOWSRTttrfjS0MGxqLPkmHH4Z6DoLH9jzknuY';
+                const avatarClass = userAvatarUrl ? 'user-avatar avatar-loaded w-[44px] h-[44px] rounded-full border border-gray-200 shadow-sm object-contain' : 'user-avatar avatar-loading w-[44px] h-[44px] rounded-full border border-gray-200 shadow-sm object-contain';
+                messageDiv.innerHTML = `
+                    <div class="glass-effect rounded-2xl rounded-tr-none p-4 max-w-xl shadow-sm">
+                        <p class="text-gray-800">${renderMarkdown(message)}</p>
+                    </div>
+                    <img alt="User avatar" class="${avatarClass}" src="${avatarSrc}"/>
+                `;
+            } else {
+                messageDiv.className = 'flex items-start gap-4';
+                let buttonsHtml = '';
+                let widgetsHtml = '';
+                let attachmentsHtml = '';
+
+                if (buttons && Array.isArray(buttons) && buttons.length > 0) {
+                    buttonsHtml = `
+                        <div class="flex flex-wrap justify-start gap-2 mt-3">
+                            ${buttons.map(button => `
+                                <button class="timeoff-button btn-gradient h-10 px-4 rounded-full text-white transition-colors text-sm shadow-sm min-w-[72px] flex items-center justify-center"
+                                        data-value="${escapeHtml(button.value || button.text)}"
+                                        data-type="${escapeHtml(button.type || '')}"
+                                        data-label="${escapeHtml(button.text || '')}">
+                                    ${escapeHtml(button.text)}
+                                </button>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+
+                // Date range picker widget support
+                if (buttons && buttons.widgets && buttons.widgets.date_range_picker) {
+                    const wid = `nsw_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const rangeId = `${wid}_range`;
+                    const applyId = `${wid}_apply`;
+                    widgetsHtml = `
+                        <div class="mt-3 flex items-center justify-start gap-3">
+                            <input type="text" id="${rangeId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" placeholder="Select date range" />
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const fp = window.flatpickr && window.flatpickr(`#${rangeId}`, {
+                            mode: 'range',
+                            dateFormat: 'd/m/Y',
+                            static: false,
+                            appendTo: document.body,
+                            onOpen: function() {
+                                setTimeout(() => {
+                                    const cal = document.querySelector('.flatpickr-calendar');
+                                    if (cal) {
+                                        cal.style.zIndex = '2147483647';
+                                        cal.style.position = 'fixed';
+                                    }
+                                    // Scroll to give calendar more space
+                                    const chatContainer = document.querySelector('#conversationState main');
+                                    if (chatContainer) {
+                                        chatContainer.scrollTo({
+                                            top: chatContainer.scrollHeight,
+                                            behavior: 'smooth'
+                                        });
+                                    }
+                                }, 10);
+                            }
+                        });
+                        const applyBtn = document.getElementById(applyId);
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const input = document.getElementById(rangeId);
+                                const val = input ? input.value.trim() : '';
+                                if (!val) {
+                                    return;
+                                }
+
+                                // Handle single date selection - convert to range format
+                                let finalValue = val;
+                                if (val.indexOf(' to ') === -1) {
+                                    // Single date selected, convert to range format
+                                    finalValue = `${val} to ${val}`;
+                                }
+
+                                document.getElementById('messageInput').value = finalValue;
+                                sendMessage();
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.single_date_picker) {
+                    // Single date picker widget support (Half Days)
+                    const wid = `nsw_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const singleId = `${wid}_single`;
+                    const applyId = `${wid}_apply`;
+                    widgetsHtml = `
+                        <div class="mt-3 flex items-center justify-start gap-3">
+                            <input type="text" id="${singleId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" placeholder="Select a date" />
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const fp = window.flatpickr && window.flatpickr(`#${singleId}`, {
+                            dateFormat: 'd/m/Y',
+                            static: false,
+                            appendTo: document.body,
+                            onChange: (selectedDates) => {
+                                const input = document.getElementById(singleId);
+                                if (!input) return;
+                                if (Array.isArray(selectedDates) && selectedDates.length > 0) {
+                                    const d = selectedDates[0];
+                                    const dd = String(d.getDate()).padStart(2,'0');
+                                    const mm = String(d.getMonth()+1).padStart(2,'0');
+                                    const yyyy = d.getFullYear();
+                                    input.value = `${dd}/${mm}/${yyyy}`;
+                                }
+                            },
+                            onOpen: function() {
+                                setTimeout(() => {
+                                    const cal = document.querySelector('.flatpickr-calendar');
+                                    if (cal) {
+                                        cal.style.zIndex = '2147483647';
+                                        cal.style.position = 'fixed';
+                                    }
+                                    // Scroll to give calendar more space
+                                    const chatContainer = document.querySelector('#conversationState main');
+                                    if (chatContainer) {
+                                        chatContainer.scrollTo({
+                                            top: chatContainer.scrollHeight,
+                                            behavior: 'smooth'
+                                        });
+                                    }
+                                }, 10);
+                            }
+                        });
+                        const applyBtn = document.getElementById(applyId);
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const input = document.getElementById(singleId);
+                                const val = input ? input.value.trim() : '';
+                                if (!val) {
+                                    return;
+                                }
+                                // Submit as same-day range for backend compatibility
+                                const finalValue = `${val} to ${val}`;
+                                document.getElementById('messageInput').value = finalValue;
+                                sendMessage();
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.hour_range_picker) {
+                    // Hour range picker widget support (Half Days)
+                    const wid = `nsw_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const fromId = `${wid}_hour_from`;
+                    const toId = `${wid}_hour_to`;
+                    const applyId = `${wid}_apply`;
+                    const hours = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
+                    const optsHtml = hours.map(o => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('');
+                    widgetsHtml = `
+                        <div class="mt-3 flex items-center justify-start gap-3">
+                            <select id="${fromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] min-w-[100px]">
+                                ${optsHtml}
+                            </select>
+                            <span class="text-gray-600">to</span>
+                            <select id="${toId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] min-w-[100px]">
+                                ${optsHtml}
+                            </select>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const applyBtn = document.getElementById(applyId);
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const fromEl = document.getElementById(fromId);
+                                const toEl = document.getElementById(toId);
+                                const vFrom = fromEl ? fromEl.value : '';
+                                const vTo = toEl ? toEl.value : '';
+                                if (!vFrom || !vTo) return;
+                                // Send a user-friendly string; backend can parse natural hours
+                                const labelFrom = fromEl.options[fromEl.selectedIndex]?.text || '';
+                                const labelTo = toEl.options[toEl.selectedIndex]?.text || '';
+                                const finalValue = `${labelFrom} to ${labelTo}`;
+                                document.getElementById('messageInput').value = finalValue;
+                                sendMessage();
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.supporting_document_upload) {
+                    const meta = buttons.widgets.supporting_document_upload || {};
+                    const wid = `nsw_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const fileId = `${wid}_support_file`;
+                    const chooseId = `${wid}_support_choose`;
+                    const labelId = `${wid}_support_label`;
+                    const uploadId = `${wid}_support_upload`;
+                    const acceptAttr = meta.accept ? `accept="${meta.accept}"` : '';
+                    widgetsHtml = `
+                        <div class="mt-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                            <input type="file" id="${fileId}" ${acceptAttr} class="hidden" />
+                            <div class="flex items-center gap-3">
+                                <button id="${chooseId}" class="h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-[var(--text-primary)] hover:bg-white/90 transition-colors border border-gray-300">Choose file</button>
+                                <span id="${labelId}" class="text-sm text-gray-600 truncate max-w-[200px]">No file chosen</span>
+                            </div>
+                            <button id="${uploadId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Upload</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const fileInput = document.getElementById(fileId);
+                        const chooseBtn = document.getElementById(chooseId);
+                        const uploadBtn = document.getElementById(uploadId);
+                        const nameLabel = document.getElementById(labelId);
+
+                        if (chooseBtn && fileInput) {
+                            chooseBtn.addEventListener('click', () => fileInput.click());
+                        }
+                        if (fileInput && nameLabel) {
+                            fileInput.addEventListener('change', () => {
+                                const file = fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+                                nameLabel.textContent = file ? file.name : 'No file chosen';
+                            });
+                        }
+                        if (uploadBtn && fileInput) {
+                            uploadBtn.addEventListener('click', async () => {
+                                const file = fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+                                if (!file) {
+                                    if (nameLabel) nameLabel.textContent = 'Please choose a file first';
+                                    return;
+                                }
+                                if (!currentThreadId) {
+                                    addMessageToChat('I could not find the active request. Please try again in a moment.', false);
+                                    return;
+                                }
+                                uploadBtn.disabled = true;
+                                const originalText = uploadBtn.textContent;
+                                uploadBtn.textContent = 'Uploading...';
+                                try {
+                                    const fd = new FormData();
+                                    fd.append('file', file);
+                                    fd.append('thread_id', currentThreadId);
+                                    const resp = await fetch('/api/timeoff/supporting-document', {
+                                        method: 'POST',
+                                        body: fd
+                                    });
+                                    const data = await resp.json();
+                                    if (!resp.ok || !data.success) {
+                                        const msg = data && data.message ? data.message : 'Upload failed';
+                                        addMessageToChat(`Upload failed: ${msg}`, false);
+                                    } else {
+                                        addMessageToChat('Supporting document uploaded.', true);
+                                        conversationHistory.push({ role: 'user', content: 'Supporting document uploaded.' });
+                                        await sendToBackend('supporting_document_uploaded');
+                                        if (uploadBtn) uploadBtn.disabled = true;
+                                        if (chooseBtn) chooseBtn.disabled = true;
+                                    }
+                                } catch (e) {
+                                    console.error('Supporting document upload error', e);
+                                    addMessageToChat('Upload failed due to a network error. Please try again.', false);
+                                } finally {
+                                    if (uploadBtn) {
+                                        uploadBtn.textContent = originalText;
+                                        if (!uploadBtn.disabled) {
+                                            uploadBtn.disabled = false;
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.select_dropdown) {
+                    // Generic select dropdown (e.g., embassy country selection)
+                    const wid = `nsw_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const selectId = `${wid}_select`;
+                    const applyId = `${wid}_apply`;
+                    const options = Array.isArray(buttons.widgets.options) ? buttons.widgets.options : [];
+                    const placeholder = buttons.widgets.placeholder || 'Select an option';
+                    const optsHtml = [`<option value="" disabled selected>${escapeHtml(placeholder)}</option>`]
+                        .concat(options.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`))
+                        .join('');
+                    widgetsHtml = `
+                        <div class="mt-3 flex items-center justify-start gap-3">
+                            <select id="${selectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] min-w-[220px]">
+                                ${optsHtml}
+                            </select>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-blue-700 transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const applyBtn = document.getElementById(applyId);
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const sel = document.getElementById(selectId);
+                                const val = sel ? sel.value : '';
+                                const label = sel && sel.options && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].text : '';
+                                if (!val) return;
+                                const ctxKey = buttons.widgets && buttons.widgets.context_key ? String(buttons.widgets.context_key) : '';
+                                const outgoing = ctxKey ? `${ctxKey}=${val}` : val;
+                                // Show user-friendly label in chat
+                                addMessageToChat(label || val, true);
+                                conversationHistory.push({role: 'user', content: label || val});
+                                // Send internal value silently
+                                sendToBackend(outgoing);
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.hardware_assign) {
+                    const hw = buttons.widgets.hardware_assign || {};
+                    const wid = `nsw_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const selectId = `${wid}_hardware_select`;
+                    const confirmId = `${wid}_hardware_confirm`;
+                    const cancelId = `${wid}_hardware_cancel`;
+                    const options = Array.isArray(hw.options) ? hw.options : [];
+                    const selectOpts = ['<option value="">Select hardware</option>']
+                        .concat(options.map(o => `<option value="${escapeHtml(String(o.value))}">${escapeHtml(String(o.label || 'Unnamed hardware'))}</option>`))
+                        .join('');
+                    widgetsHtml = `
+                        <div class="mt-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                            <select id="${selectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] min-w-[220px]">
+                                ${selectOpts}
+                            </select>
+                            <div class="flex items-center gap-2">
+                                <button id="${confirmId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Confirm</button>
+                                <button id="${cancelId}" class="h-10 px-4 rounded-full text-sm font-medium bg-white/80 border border-gray-300 text-[var(--primary-color)] hover:bg-white transition-colors">Cancel</button>
+                            </div>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const selectEl = document.getElementById(selectId);
+                        const confirmBtn = document.getElementById(confirmId);
+                        const cancelBtn = document.getElementById(cancelId);
+                        if (confirmBtn && selectEl) {
+                            confirmBtn.addEventListener('click', () => {
+                                const selectedVal = selectEl.value;
+                                if (!selectedVal) {
+                                    alert('Please choose a hardware item to continue.');
+                                    return;
+                                }
+                                sendToBackend(`hardware_assign_confirm:${hw.employee_id}:${selectedVal}`);
+                            });
+                        }
+                        if (cancelBtn) {
+                            cancelBtn.addEventListener('click', () => {
+                                sendToBackend('hardware_assign_cancel');
+                            });
+                        }
+                    }, 0);
+                }
+
+                // Render attachments if provided
+                if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+                    attachmentsHtml = '<div class="mt-3 flex flex-col items-start gap-2">' +
+                        attachments.map(att => {
+                            const fileUrl = att.file_url || att.url || '#';
+                            const fileName = att.file_name || 'Download';
+                            return `
+                                <a href="${fileUrl}" download="${escapeHtml(fileName)}" class="h-10 px-4 rounded-full text-sm font-medium inline-flex items-center justify-center btn-gradient"
+                                   style="color: white; border: none; cursor: pointer; text-decoration: none;">
+                                    Download ${escapeHtml(fileName)}
+                                </a>
+                            `;
+                        }).join('') +
+                    '</div>';
+                }
+
+                // Optional main_overview + team_overview + overtime table widgets
+                let tableHtml = '';
+                if (buttons && buttons.widgets && (buttons.widgets.main_overview || buttons.widgets.team_overview || buttons.widgets.overtime_overview || buttons.widgets.new_user_confirm_rows)) {
+                    if (buttons.widgets.new_user_confirm_rows) {
+                        try {
+                            const rows = Array.isArray(buttons.widgets.new_user_confirm_rows) ? buttons.widgets.new_user_confirm_rows : [];
+                            // Rebuild confirmation bubble UI (same as after upload)
+                            const baseId = `cf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                            const PRIMARY_KEYS = ['name','x_studio_employee_arabic_name','birthday','job_id','work_email'];
+                            const buildTableFor = (record, idx) => {
+                                const keys = Object.keys(record || {});
+                                const secondary = keys.filter(k => !PRIMARY_KEYS.includes(k));
+                                const primaryPresent = PRIMARY_KEYS.filter(k => keys.includes(k));
+                                const viewKey = `${baseId}_${idx}`;
+                                const companyAssigned = !!record.company_name;
+                                const companyLabel = record.company_name ? ` (Company: ${escapeHtml(record.company_name)})` : '';
+                                const rowHtml = (k, v) => `
+                                    <tr class="border-t">
+                                        <td class="px-3 py-2 align-top text-sm text-gray-700 font-semibold">${escapeHtml(k)}</td>
+                                        <td class="px-3 py-2 text-sm text-gray-900 break-words break-all">${escapeHtml(String(v ?? ''))}</td>
+                                    </tr>`;
+                                const primaryBody = primaryPresent.map(k => rowHtml(k, record[k]));
+                                const companyDropdownId = `${viewKey}_company_select`;
+                                const companyAssignBtnId = `${viewKey}_company_assign`;
+                                const companyReassignBtnId = `${viewKey}_company_reassign`;
+                                const companyOptions = [
+                                    'Prezlab FZ LLC',
+                                    'Prezlab Advanced Design Company',
+                                    'Prezlab FZ LLC - Regional Office',
+                                    'Prezlab Digital Design Firm L.L.C. - O.P.C',
+                                    'ALOROD AL TAQADAMIAH LEL TASMEM CO'
+                                ];
+                                const companyControls = `
+                                    <div class="mt-2 flex items-center gap-2">
+                                        <select id="${companyDropdownId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm min-w-[220px]">
+                                            ${companyOptions.map(c => `<option value="${c}" ${record.company_name===c?'selected':''}>${c}</option>`).join('')}
+                                        </select>
+                                        <button id="${companyAssigned ? companyReassignBtnId : companyAssignBtnId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient">${companyAssigned ? 'Reassign company' : 'Assign company'}</button>
+                                    </div>`;
+                                const controlsHtml = `
+                                    <div class="flex items-center justify-between mb-1">${rows.length > 1 ? `<div class=\"text-xs text-gray-500\">Record ${idx + 1}${companyLabel}</div>` : `<div class=\"text-xs text-gray-500\">${companyLabel}</div>`}<button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullNewUsersConfirmKey('${viewKey}')">Full view</button></div>`;
+                                return `
+                                    <div class="mb-4">
+                                        ${controlsHtml}
+                                        <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                            <thead class="bg-gray-50/80">
+                                                <tr><th class="px-3 py-2 text-left text-sm font-semibold text-gray-700">Field</th><th class="px-3 py-2 text-left text-sm font-semibold text-gray-700">Value</th></tr>
+                                            </thead>
+                                            <tbody>${primaryBody.join('')}</tbody>
+                                        </table>
+                                        ${companyControls}
+                                    </div>`;
+                            };
+                            const allTablesHtml = rows.length ? rows.map((r, i) => buildTableFor(r, i)).join('') : '';
+                            // Replace message with rebuilt confirmation UI only
+                            formattedMessage = '';
+                            tableHtml = `
+                                <div class="overflow-y-auto max-h-[420px] pr-1">${allTablesHtml}</div>
+                                <div class="mt-3 flex items-center gap-2">
+                                    <button class="h-10 px-4 rounded-full text-sm font-medium btn-gradient" onclick="sendToBackend('new_user_upload_confirm')">Confirm</button>
+                                    <button class="h-10 px-4 rounded-full text-sm font-medium btn-gradient" onclick="sendToBackend('new_user_upload_cancel')">Cancel</button>
+                                </div>`;
+                        } catch (e) {}
+                    }
+                    const renderTable = (data) => {
+                        const cols = Array.isArray(data?.columns) ? data.columns : [];
+                        const rows = Array.isArray(data?.rows) ? data.rows : [];
+                        const head = cols.map(c => {
+                            const isDates = c.key === 'dates';
+                            const alignClass = isDates ? 'text-center' : 'text-left';
+                            return `<th class="px-3 py-2 ${alignClass} text-sm font-semibold text-gray-700">${escapeHtml(c.label || '')}</th>`;
+                        }).join('');
+                        const body = rows.map(r => `
+                            <tr class="border-t border-gray-200/70">
+                                ${cols.map(c => {
+                                    const isDates = c.key === 'dates';
+                                    const alignClass = isDates ? 'text-center' : 'text-left';
+                                    let content = '';
+                                    if (isDates) {
+                                        content = String(r[c.key] ?? '').replace(/<br\/>/g, '<br>');
+                                    } else if (c.key === 'approval') {
+                                        content = String(r[c.key] ?? '');
+                                    } else {
+                                        content = renderMarkdown(String(r[c.key] ?? ''));
+                                    }
+                                    return `<td class="px-3 py-2 ${alignClass} text-sm text-gray-800">${content}</td>`;
+                                }).join('')}
+                            </tr>
+                        `).join('');
+                        return { cols, rows, head, body };
+                    };
+
+                    // Main overview (team + today's planning)
+                    const mainHtml = (() => {
+                        if (!buttons.widgets.main_overview) return '';
+                        const mainData = renderTable(buttons.widgets.main_overview);
+                        try { window.__lastMainOverviewTable = { columns: mainData.cols, rows: mainData.rows }; } catch (e) {}
+                        return `
+                            <div class="mt-6">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="text-sm font-semibold text-gray-700">Team overview</div>
+                                    <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullMainOverviewTable()">Full view</button>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                        <thead class="bg-gray-50/80"><tr>${mainData.head}</tr></thead>
+                                        <tbody>${mainData.body}</tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        `;
+                    })();
+
+                    const teamData = renderTable(buttons.widgets.team_overview);
+                    let otHtml = '';
+                    if (buttons.widgets.overtime_overview && Array.isArray(buttons.widgets.overtime_overview.rows) && buttons.widgets.overtime_overview.rows.length) {
+                        const otData = renderTable(buttons.widgets.overtime_overview);
+                        otHtml = `
+                            <div class="mt-6">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="text-sm font-semibold text-gray-700">Overtime</div>
+                                    <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullOvertimeTable()">Full view</button>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                        <thead class="bg-gray-50/80"><tr>${otData.head}</tr></thead>
+                                        <tbody>${otData.body}</tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        `;
+                        try { window.__lastOvertimeTable = { columns: otData.cols, rows: otData.rows }; } catch (e) {}
+                    }
+                    tableHtml = `
+                        ${mainHtml}
+                        <div class="mt-6">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-sm font-semibold text-gray-700">Time off</div>
+                                <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullTeamTable()">Full view</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                    <thead class="bg-gray-50/80"><tr>${teamData.head}</tr></thead>
+                                    <tbody>${teamData.body}</tbody>
+                                </table>
+                            </div>
+                            ${otHtml}
+                        </div>
+                    `;
+                    try { window.__lastTeamOverviewTable = { columns: teamData.cols, rows: teamData.rows }; } catch (e) {}
+                }
+
+                // Check if message contains the disclaimer text and add smiling avatar inline
+                let formattedMessage = renderMarkdown(message);
+                if (attachments && Array.isArray(attachments) && attachments.length > 0 && message.includes('I\'m fast, but not always perfect.')) {
+                    formattedMessage = formattedMessage.replace(
+                        /I'm fast, but not always perfect\./g,
+                        'I\'m fast, but not always perfect. <img src="/static/Nasma-Avatar-smile.svg" alt="Nasma smiling" style="width: 24px; height: 24px; display: inline-block; vertical-align: middle; margin-left: 4px;">'
+                    );
+                }
+
+                messageDiv.innerHTML = `
+                    <div class="flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center">
+                        <img src="/Nasma-Avatar.svg" alt="Nasma" class="w-[28px] h-[28px] object-contain" />
+                    </div>
+                    <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm">
+                        ${formattedMessage ? `<div class=\"message-content text-gray-800\">${formattedMessage}</div>` : ''}
+                        ${tableHtml}
+                        ${buttonsHtml}
+                        ${widgetsHtml}
+                        ${attachmentsHtml}
+                    </div>
+                `;
+            }
+
+            // Skip appending an empty assistant bubble
+            const isEmptyAssistant = (!message || String(message).trim() === '')
+                && (!tableHtml || tableHtml.trim() === '')
+                && (!buttonsHtml || buttonsHtml.trim() === '')
+                && (!widgetsHtml || widgetsHtml.trim() === '')
+                && (!attachmentsHtml || attachmentsHtml.trim() === '');
+
+            if (!isEmptyAssistant) {
+                chatContainer.appendChild(messageDiv);
+
+                // Add event listeners to the time-off buttons
+                if (buttons && Array.isArray(buttons) && buttons.length > 0) {
+                    const buttonElements = messageDiv.querySelectorAll('.timeoff-button');
+                    buttonElements.forEach(buttonEl => {
+                        buttonEl.addEventListener('click', function() {
+                            const value = this.getAttribute('data-value');
+                            const label = this.getAttribute('data-label') || this.textContent.trim();
+                            // Show natural user message using label
+                            addMessageToChat(label, true);
+                            conversationHistory.push({role: 'user', content: label});
+                            // Intercept local flows that don't need a backend round-trip
+                            if (value && value.toLowerCase() === 'new_user_upload') {
+                                renderNewUserUploadBubble();
+                            } else {
+                                // Send internal value to backend (without echoing it as text)
+                                sendToBackend(value);
+                            }
+                        });
+                    });
+                }
+            }
+
+                // Add upload widget in a separate assistant bubble when backend signals widget flag
+                if (buttons && buttons.widgets && buttons.widgets.new_user_upload) {
+                    const uploadHtml = `
+                        <div class=\"flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center\">\n                            <img src=\"/Nasma-Avatar.svg\" alt=\"Nasma\" class=\"w-[28px] h-[28px] object-contain\" />\n                        </div>
+                                <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm">
+                                    <div class="message-content text-gray-800">Let's set up new users!<br/>Please share with me the Excel file to create new users.</div>
+                                    <div class="mt-3 flex items-center gap-3">
+                                        <input type="file" id="newUserFile" accept=".xlsx,.xls" class="hidden" />
+                                        <button id="chooseNewUserFile" class="h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-[var(--text-primary)] hover:bg-white/90 transition-colors border border-gray-300">Choose file</button>
+                                        <span id="newUserFileName" class="text-sm text-gray-600 truncate max-w-[200px]">No file chosen</span>
+                                        <button id="uploadNewUserBtn" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Upload</button>
+                                    </div>
+                                </div>`;
+                    const container = document.getElementById('chatContainer');
+                    if (!container) {
+                        console.warn('addMessageToChat: chat container missing for new user upload widget');
+                        return;
+                    }
+                    const extraDiv = document.createElement('div');
+                    extraDiv.className = 'flex items-start gap-4 mt-3';
+                    extraDiv.innerHTML = uploadHtml;
+                    container.appendChild(extraDiv);
+                    setTimeout(() => {
+                        const btn = document.getElementById('uploadNewUserBtn');
+                        const input = document.getElementById('newUserFile');
+                        const choose = document.getElementById('chooseNewUserFile');
+                        const fileName = document.getElementById('newUserFileName');
+                        if (choose && input && fileName) {
+                            choose.addEventListener('click', () => input.click());
+                            input.addEventListener('change', () => {
+                                fileName.textContent = input.files && input.files.length ? input.files[0].name : 'No file chosen';
+                            });
+                        }
+                        if (btn && input) {
+                            btn.addEventListener('click', async () => {
+                                if (!input.files || input.files.length === 0) return;
+                                const fd = new FormData();
+                                fd.append('file', input.files[0]);
+                                try {
+                                    const resp = await fetch('/api/new-users/upload', { method: 'POST', body: fd });
+                                    const data = await resp.json();
+                                    if (!data.success) {
+                                        addMessageToChat('File parse failed: ' + (data.message || 'Unknown error'), false);
+                                        return;
+                                    }
+                                    addMessageToChat(data.confirmation_text || 'Parsed.', false, [
+                                        { text: 'Confirm', value: 'new_user_upload_confirm', type: 'action' },
+                                        { text: 'Cancel', value: 'cancel', type: 'action' }
+                                    ]);
+                                } catch (e) {
+                                    addMessageToChat('Upload error: ' + e, false);
+                                }
+                            });
+                        }
+                        setTimeout(scrollToBottom, 50);
+                    }, 0);
+                }
+
+            // Smooth auto-scroll to newest message (wait for DOM update)
+            setTimeout(scrollToBottom, 50);
+        }
+
+        // Send message function (for conversation state)
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+            
+            // Add user message to chat
+            addMessageToChat(message, true);
+            conversationHistory.push({role: 'user', content: message});
+            
+            // Clear input and reset height
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            
+            // Send message to backend
+            sendToBackend(message);
+        }
+
+        // Unified approval/refusal handler (works inside constrained iframes like Teams)
+        document.addEventListener('click', async function(ev){
+            try {
+                const el = ev.target;
+                if (!el || !el.classList || !el.classList.contains('approval-button')) return;
+                const action = el.getAttribute('data-action');
+                const model = el.getAttribute('data-model');
+                const idStr = el.getAttribute('data-id');
+                const id = idStr ? parseInt(idStr, 10) : NaN;
+                if (!action || !model || !Number.isInteger(id)) return;
+                if (action === 'note') { window.__nsSecondApprovalNote && window.__nsSecondApprovalNote(el); return; }
+                el.disabled = true;
+                const resp = await fetch('/api/odoo/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model, id, action })
+                });
+                const data = await resp.json();
+                if (!data.success) {
+                    alert((action === 'approve' ? 'Approve' : 'Deny') + ' failed: ' + (data.message || 'Unknown error'));
+                } else {
+                    const td = el.closest('td');
+                    if (td) {
+                        if (action === 'approve') td.insertAdjacentHTML('beforeend', '<div class="text-green-600 text-xs mt-1 text-center w-full">Approved</div>');
+                        if (action === 'refuse') td.insertAdjacentHTML('beforeend', '<div class="text-red-600 text-xs mt-1 text-center w-full">Denied</div>');
+                    }
+                }
+            } catch (e) {
+                alert('Action error: ' + e);
+            } finally {
+                try { ev.target.disabled = false; } catch(_) {}
+            }
+        }, true);
+
+        // Second approval handler: just annotate the cell with a note
+        window.__nsSecondApprovalNote = function(btn){
+            try {
+                if (!btn) return;
+                const td = btn.closest('td');
+                if (!td) return;
+                // Prevent duplicates
+                if (!td.querySelector('.ns-second-approval-note')){
+                    td.insertAdjacentHTML('beforeend', '<div class="ns-second-approval-note text-orange-600 text-xs mt-1 text-center w-full">Contact P&amp;C</div>');
+                }
+            } catch(e) {
+                console.error('Second approval note error', e);
+            }
+        }
+
+        // Send message to backend
+        async function sendToBackend(message) {
+            try {
+                // Generate a thread_id if we don't have one yet
+                if (!currentThreadId) {
+                    currentThreadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                }
+
+                // Add typing indicator
+                const typingDiv = document.createElement('div');
+                typingDiv.className = 'flex items-start gap-4';
+                typingDiv.id = 'typing-indicator';
+                typingDiv.innerHTML = `
+                    <div class="flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center">
+                        <img src="/Nasma-Avatar.svg" alt="Nasma" class="w-[28px] h-[28px] object-contain" />
+                    </div>
+                    <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm">
+                        <div class="text-gray-800">Typing...</div>
+                    </div>
+                `;
+                document.getElementById('chatContainer').appendChild(typingDiv);
+                setTimeout(scrollToBottom, 50);
+
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        conversation_history: conversationHistory,
+                        thread_id: currentThreadId
+                    })
+                });
+
+                // Remove typing indicator
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+
+                const data = await response.json();
+
+                // Capture/propagate thread id for session continuity
+                if (data && data.thread_id) {
+                    currentThreadId = data.thread_id;
+                }
+
+                const widgetPayload = (data && (data.widgets ||
+                    (data.buttons && data.buttons.widgets) ||
+                    (data.response && data.response.widgets))) || null;
+                let renderedUploadWidget = false;
+                if (widgetPayload && widgetPayload.new_user_upload) {
+                    try {
+                        renderNewUserUploadBubble();
+                        renderedUploadWidget = true;
+                    } catch (e) {
+                        console.error('Failed to render new user upload widget', e);
+                    }
+                }
+
+                const buttonList = Array.isArray(data?.buttons) ? [...data.buttons] : [];
+                if (widgetPayload) {
+                    buttonList.widgets = widgetPayload;
+                }
+                const extrasArg = (buttonList.length > 0 || widgetPayload) ? buttonList : null;
+                const attachmentsPayload = data?.attachments || (data?.response && data.response.attachments) || null;
+                const hardwareOptions = data?.hardware_options || null;
+                const assistantMessage = typeof data?.response === 'string'
+                    ? data.response
+                    : (typeof data?.message === 'string' ? data.message : '');
+
+                const isSuccess = (data && (data.status === 'success' || data.session_handled)) ||
+                    (widgetPayload && Object.keys(widgetPayload).length > 0);
+
+                if (isSuccess) {
+                    if (widgetPayload && widgetPayload.new_user_confirm_rows) {
+                        renderNewUserConfirmBubble(widgetPayload.new_user_confirm_rows);
+                    } else if (!renderedUploadWidget || (assistantMessage && assistantMessage.trim())) {
+                        addMessageToChat(assistantMessage, false, extrasArg, attachmentsPayload);
+                    }
+                    if (assistantMessage && assistantMessage.trim()) {
+                        conversationHistory.push({ role: 'assistant', content: assistantMessage });
+                    }
+                } else {
+                    addMessageToChat('Sorry, I encountered an error. Please try again.', false);
+                }
+
+                const hardwareMessage = data?.hardware_message;
+                if (Array.isArray(hardwareOptions)) {
+                    renderHardwareAssignBubble(hardwareOptions, hardwareMessage);
+                }
+
+                // Refresh conversation history to show the current chat in sidebar
+                setTimeout(() => {
+                    refreshConversationHistory(true);
+                }, 500);
+            } catch (error) {
+                // Remove typing indicator
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+                addMessageToChat('Sorry, I encountered an error. Please try again.', false);
+            }
+        }
+
+        // Open a modal-like full view for the latest team table
+        function openFullTeamTable() {
+            try {
+                const data = window.__lastTeamOverviewTable || { columns: [], rows: [] };
+                const cols = Array.isArray(data.columns) ? data.columns : [];
+                const rows = Array.isArray(data.rows) ? data.rows : [];
+
+                const header = cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${(c.label || '')}</th>`;
+                }).join('');
+                const body = rows.map(r => `<tr class=\"border-t\">${cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    let content = r[c.key] ?? '';
+                    if (isDates) content = String(content).replace(/<br\/>/g, '<br>');
+                    return `<td class=\"px-4 py-3 ${alignClass} text-sm text-gray-900\">${content}</td>`;
+                }).join('')}</tr>`).join('');
+
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+                overlay.style.background = 'rgba(0,0,0,0.35)';
+                overlay.style.zIndex = '2147483646';
+                overlay.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const panel = document.createElement('div');
+                panel.style.position = 'absolute';
+                panel.style.top = '50%';
+                panel.style.left = '50%';
+                panel.style.transform = 'translate(-50%, -50%)';
+                panel.style.width = '90%';
+                panel.style.maxWidth = '1000px';
+                panel.style.maxHeight = '80%';
+                panel.style.overflow = 'auto';
+                panel.style.background = 'white';
+                panel.style.borderRadius = '12px';
+                panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)';
+                panel.style.padding = '16px';
+
+                const close = document.createElement('button');
+                close.textContent = 'Close';
+                close.style.position = 'sticky';
+                close.style.top = '0';
+                close.style.float = 'right';
+                close.style.marginBottom = '8px';
+                close.style.background = 'transparent';
+                close.style.color = '#111318';
+                close.style.fontWeight = '600';
+                close.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const table = document.createElement('table');
+                table.className = 'min-w-full';
+                table.innerHTML = `<thead class=\"bg-gray-50\"><tr>${header}</tr></thead><tbody>${body}</tbody>`;
+
+                panel.appendChild(close);
+                panel.appendChild(table);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+            } catch (e) {
+                console.error('Failed to open full team table:', e);
+            }
+        }
+
+        function openFullOvertimeTable() {
+            try {
+                const data = window.__lastOvertimeTable || { columns: [], rows: [] };
+                const cols = Array.isArray(data.columns) ? data.columns : [];
+                const rows = Array.isArray(data.rows) ? data.rows : [];
+
+                const header = cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${(c.label || '')}</th>`;
+                }).join('');
+                const body = rows.map(r => `<tr class=\"border-t\">${cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    let content = r[c.key] ?? '';
+                    if (isDates) content = String(content).replace(/<br\/>/g, '<br>');
+                    return `<td class=\"px-4 py-3 ${alignClass} text-sm text-gray-900\">${content}</td>`;
+                }).join('')}</tr>`).join('');
+
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+                overlay.style.background = 'rgba(0,0,0,0.35)';
+                overlay.style.zIndex = '2147483646';
+                overlay.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const panel = document.createElement('div');
+                panel.style.position = 'absolute';
+                panel.style.top = '50%';
+                panel.style.left = '50%';
+                panel.style.transform = 'translate(-50%, -50%)';
+                panel.style.width = '90%';
+                panel.style.maxWidth = '1000px';
+                panel.style.maxHeight = '80%';
+                panel.style.overflow = 'auto';
+                panel.style.background = 'white';
+                panel.style.borderRadius = '12px';
+                panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)';
+                panel.style.padding = '16px';
+
+                const close = document.createElement('button');
+                close.textContent = 'Close';
+                close.style.position = 'sticky';
+                close.style.top = '0';
+                close.style.float = 'right';
+                close.style.marginBottom = '8px';
+                close.style.background = 'transparent';
+                close.style.color = '#111318';
+                close.style.fontWeight = '600';
+                close.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const table = document.createElement('table');
+                table.className = 'min-w-full';
+                table.innerHTML = `<thead class=\"bg-gray-50\"><tr>${header}</tr></thead><tbody>${body}</tbody>`;
+
+                panel.appendChild(close);
+                panel.appendChild(table);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+            } catch (e) {
+                console.error('Failed to open full overtime table:', e);
+            }
+        }
+
+        // Full view for new users confirmation by key (per record)
+        function openFullNewUsersConfirmKey(viewKey) {
+            try {
+                const store = window.__lastNewUsersConfirm || {};
+                const html = store[viewKey] || '<div class="p-4 text-sm text-gray-700">No data</div>';
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+                overlay.style.background = 'rgba(0,0,0,0.35)';
+                overlay.style.zIndex = '2147483646';
+                overlay.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const panel = document.createElement('div');
+                panel.style.position = 'absolute';
+                panel.style.top = '50%';
+                panel.style.left = '50%';
+                panel.style.transform = 'translate(-50%, -50%)';
+                panel.style.width = '90%';
+                panel.style.maxWidth = '1000px';
+                panel.style.maxHeight = '80%';
+                panel.style.overflow = 'auto';
+                panel.style.background = 'white';
+                panel.style.borderRadius = '12px';
+                panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)';
+                panel.style.padding = '16px';
+
+                const close = document.createElement('button');
+                close.textContent = 'Close';
+                close.style.position = 'sticky';
+                close.style.top = '0';
+                close.style.float = 'right';
+                close.style.marginBottom = '8px';
+                close.style.background = 'transparent';
+                close.style.color = '#111318';
+                close.style.fontWeight = '600';
+                close.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const container = document.createElement('div');
+                container.innerHTML = html;
+
+                panel.appendChild(close);
+                panel.appendChild(container);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+            } catch (e) {
+                console.error('Failed to open full confirmation view:', e);
+            }
+        }
+
+        function openFullMainOverviewTable() {
+            try {
+                const data = window.__lastMainOverviewTable || { columns: [], rows: [] };
+                const cols = Array.isArray(data.columns) ? data.columns : [];
+                const rows = Array.isArray(data.rows) ? data.rows : [];
+
+                const header = cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    return `<th class="px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800">${(c.label || '')}</th>`;
+                }).join('');
+                const body = rows.map(r => `<tr class="border-t">${cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    let content = r[c.key] ?? '';
+                    if (isDates) content = String(content).replace(/<br\/>/g, '<br>');
+                    return `<td class="px-4 py-3 ${alignClass} text-sm text-gray-900">${content}</td>`;
+                }).join('')}</tr>`).join('');
+
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+                overlay.style.background = 'rgba(0,0,0,0.35)';
+                overlay.style.zIndex = '2147483646';
+                overlay.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const panel = document.createElement('div');
+                panel.style.position = 'absolute';
+                panel.style.top = '50%';
+                panel.style.left = '50%';
+                panel.style.transform = 'translate(-50%, -50%)';
+                panel.style.width = '90%';
+                panel.style.maxWidth = '1000px';
+                panel.style.maxHeight = '80%';
+                panel.style.overflow = 'auto';
+                panel.style.background = 'white';
+                panel.style.borderRadius = '12px';
+                panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)';
+                panel.style.padding = '16px';
+
+                const close = document.createElement('button');
+                close.textContent = 'Close';
+                close.style.position = 'sticky';
+                close.style.top = '0';
+                close.style.float = 'right';
+                close.style.marginBottom = '8px';
+                close.style.background = 'transparent';
+                close.style.color = '#111318';
+                close.style.fontWeight = '600';
+                close.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const table = document.createElement('table');
+                table.className = 'min-w-full';
+                table.innerHTML = `<thead class=\"bg-gray-50\"><tr>${header}</tr></thead><tbody>${body}</tbody>`;
+
+                panel.appendChild(close);
+                panel.appendChild(table);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+            } catch (e) {
+                console.error('Failed to open full main overview table:', e);
+            }
+        }
+
+        // Trigger file download(s)
+        async function triggerDownload(attachments) {
+            try {
+                for (const att of attachments) {
+                    const fileUrl = att.file_url || att.url;
+                    const fileName = att.file_name || 'document.docx';
+                    if (!fileUrl) continue;
+                    try {
+                        const resp = await fetch(fileUrl);
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                        const blob = await resp.blob();
+                        const objectUrl = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = objectUrl;
+                        a.download = fileName;
+                        a.style.display = 'none';
+                        document.body.appendChild(a);
+                        a.click();
+                        setTimeout(() => {
+                            document.body.removeChild(a);
+                            window.URL.revokeObjectURL(objectUrl);
+                        }, 0);
+                    } catch (e) {
+                        const a = document.createElement('a');
+                        a.href = fileUrl;
+                        a.download = fileName;
+                        a.target = '_blank';
+                        a.style.display = 'none';
+                        document.body.appendChild(a);
+                        a.click();
+                        setTimeout(() => {
+                            document.body.removeChild(a);
+                        }, 0);
+                    }
+                }
+            } catch (err) {
+                console.error('Auto-download failed:', err);
+            }
+        }
+
+         // New chat buttons
+        document.getElementById('newChatButton').addEventListener('click', function() {
+            transitionToInitial();
+            // Reset thread to start fresh flow
+            currentThreadId = null;
+        });
+
+        document.getElementById('newChatButtonInitial').addEventListener('click', function() {
+             // Clear the input and reset to fresh state
+             document.getElementById('initialMessageInput').value = '';
+            currentThreadId = null;
+         });
+
+        // Logout buttons
+        document.getElementById('logoutButton').addEventListener('click', function() {
+            fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }).then(() => {
+                // Clear remember me token from localStorage
+                localStorage.removeItem('nasma_remember_me_token');
+                // Set flag to prevent auto-login after logout
+                sessionStorage.setItem('just_logged_out', 'true');
+                window.location.href = '/login';
+            }).catch(() => {
+                // Even if logout fails, clear tokens and redirect
+                localStorage.removeItem('nasma_remember_me_token');
+                sessionStorage.setItem('just_logged_out', 'true');
+                window.location.href = '/login';
+            });
+        });
+
+        document.getElementById('conversationLogoutButton').addEventListener('click', function() {
+            fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }).then(() => {
+                // Clear remember me token from localStorage
+                localStorage.removeItem('nasma_remember_me_token');
+                // Set flag to prevent auto-login after logout
+                sessionStorage.setItem('just_logged_out', 'true');
+                window.location.href = '/login';
+            }).catch(() => {
+                // Even if logout fails, clear tokens and redirect
+                localStorage.removeItem('nasma_remember_me_token');
+                sessionStorage.setItem('just_logged_out', 'true');
+                window.location.href = '/login';
+            });
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeConversationHistory();
+        });
+
+        // Function to ensure conversation sidebar is closed
+        function ensureConversationSidebarClosed() {
+            const sidebar = document.getElementById('conversationSidebar');
+            const overlay = document.getElementById('conversationSidebarOverlay');
+            const headerAvatar = document.querySelector('#conversationState .nasma-avatar-header');
+
+            if (sidebar && overlay && headerAvatar) {
+                sidebar.classList.remove('expanded');
+                overlay.classList.remove('active');
+                headerAvatar.classList.remove('hidden');
+            }
+        }
+
+        // Sidebar functionality for conversation state
+        function toggleConversationSidebar() {
+            const sidebar = document.getElementById('conversationSidebar');
+            const overlay = document.getElementById('conversationSidebarOverlay');
+            const headerAvatar = document.querySelector('#conversationState .nasma-avatar-header');
+
+            const isExpanded = sidebar.classList.contains('expanded');
+
+            if (isExpanded) {
+                // Close sidebar
+                sidebar.classList.remove('expanded');
+                overlay.classList.remove('active');
+                headerAvatar.classList.remove('hidden');
+            } else {
+                // Open sidebar
+                sidebar.classList.add('expanded');
+                overlay.classList.add('active');
+                headerAvatar.classList.add('hidden');
+            }
+        }
+
+        // Additional prompts toggle functionality
+        // Removed additional prompts toggle; all prompts are inline in the bottom bar now
+        let additionalPromptsVisible = false;
+
+        function toggleAdditionalPrompts() {
+            const additionalPrompts = null;
+            const toggleArrow = document.getElementById('toggleArrow');
+
+            if (false && !additionalPromptsVisible) {
+                // Show additional prompts - slide them down from above
+                const innerDiv = null;
+                const targetHeight = innerDiv ? innerDiv.offsetHeight : 60; // fallback height
+
+                // no-op
+
+                toggleArrow.textContent = 'expand_less'; // Arrow pointing up
+                additionalPromptsVisible = true;
+            } else {
+                // Hide additional prompts - slide them up and fade out
+                // no-op
+
+                toggleArrow.textContent = 'expand_more'; // Arrow pointing down
+                additionalPromptsVisible = false;
+            }
+        }
+
+        // Initialize user avatar when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchUserAvatar();
+
+            // Cache initial state's input bar width for later use in conversation
+            try {
+                const updateInitialWidthCache = () => {
+                    const widthPx = computeInputBarTargetWidth();
+                    if (widthPx) {
+                        window.__initialInputBarWidth = widthPx;
+                    }
+                };
+                updateInitialWidthCache();
+                window.addEventListener('resize', () => {
+                    if (document.body.classList.contains('initial-state')) {
+                        updateInitialWidthCache();
+                    }
+                });
+                try {
+                    if (window.visualViewport) {
+                        window.visualViewport.addEventListener('resize', updateInitialWidthCache);
+                    }
+                } catch (_) {}
+            } catch (_) {}
+
+            // Swap Nasma avatar to smile on hover
+            try {
+                const smileSrc = '/static/Nasma-Avatar-smile.svg';
+                // Preload smile image to avoid flicker
+                const __preloadSmile = new Image();
+                __preloadSmile.src = smileSrc;
+                const nasmaImgs = document.querySelectorAll('img[src="/Nasma-Avatar.svg"], .nasma-avatar-hover img');
+                nasmaImgs.forEach(img => {
+                    const originalSrc = img.getAttribute('src');
+                    img.addEventListener('mouseenter', () => { img.src = smileSrc; });
+                    img.addEventListener('mouseleave', () => { img.src = originalSrc; });
+                });
+            } catch (e) { /* no-op */ }
+
+            // Force conversation input bar to mirror the initial state's input bar width
+            function syncConversationBar() {
+                syncBars();
+            }
+            // Initial syncs
+            syncConversationBar();
+            let __resizeTimer;
+            window.addEventListener('resize', () => {
+                clearTimeout(__resizeTimer);
+                __resizeTimer = setTimeout(syncConversationBar, 100);
+            });
+            try { if (window.visualViewport) { window.visualViewport.addEventListener('resize', syncConversationBar); } } catch (_) {}
+            // Observe the initial input bar for dynamic changes (fonts/layout)
+            try {
+                const ib = document.getElementById('initialInputBar') || document.querySelector('#initialState .input-bar');
+                if (ib && window.ResizeObserver) {
+                    const ro = new ResizeObserver(() => syncConversationBar());
+                    ro.observe(ib);
+                }
+            } catch (_) {}
+            // Re-sync after load for layout shifts
+            const __postloadSync = () => {
+                syncConversationBar();
+                setTimeout(syncConversationBar, 150);
+                setTimeout(syncConversationBar, 400);
+            };
+            window.addEventListener('load', __postloadSync);
+
+            // Setup additional prompts toggle (only for managers)
+            // Removed toggle button handler
+            const additionalPromptsToggle = null;
+            if (false && additionalPromptsToggle) {
+                additionalPromptsToggle.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleAdditionalPrompts();
+                });
+            }
+
+            // Keepalive ping to keep Odoo session from idling out while user is active
+            try {
+                if (window.__keepalive) clearInterval(window.__keepalive);
+                window.__keepalive = setInterval(async () => {
+                    try { await fetch('/api/ping', { method: 'GET', cache: 'no-store' }); } catch (e) {}
+                }, 120000);
+            } catch (e) {}
+
+            // Setup sidebar event listeners for conversation state
+            const sidebarToggle = document.getElementById('conversationSidebarToggle');
+            const sidebarClose = document.getElementById('conversationSidebarClose');
+            const sidebarOverlay = document.getElementById('conversationSidebarOverlay');
+
+            if (sidebarToggle) {
+                sidebarToggle.addEventListener('click', toggleConversationSidebar);
+            }
+            if (sidebarClose) {
+                sidebarClose.addEventListener('click', toggleConversationSidebar);
+            }
+            if (sidebarOverlay) {
+                sidebarOverlay.addEventListener('click', toggleConversationSidebar);
+            }
+
+            // Setup sidebar button functionality
+            const sidebarNewChatButton = document.getElementById('conversationSidebarNewChatButton');
+            const sidebarLogoutButton = document.getElementById('conversationSidebarLogoutButton');
+
+            if (sidebarNewChatButton) {
+                sidebarNewChatButton.addEventListener('click', function() {
+                    transitionToInitial();
+                    currentThreadId = null;
+                });
+            }
+
+            if (sidebarLogoutButton) {
+                sidebarLogoutButton.addEventListener('click', function() {
+                    fetch('/api/auth/logout', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    }).then(() => {
+                        localStorage.removeItem('nasma_remember_me_token');
+                        sessionStorage.setItem('just_logged_out', 'true');
+                        window.location.href = '/login';
+                    }).catch(() => {
+                        localStorage.removeItem('nasma_remember_me_token');
+                        sessionStorage.setItem('just_logged_out', 'true');
+                        window.location.href = '/login';
+                    });
+                });
+            }
+        });
+
+        // New Sidebar functionality for all states
+        function toggleNewSidebar() {
+            const sidebarWrap = document.getElementById('newSidebar');
+            const overlayWrap = document.getElementById('newSidebarOverlay');
+            const panel = sidebarWrap ? sidebarWrap.firstElementChild : null;
+            const overlayInner = overlayWrap ? overlayWrap.firstElementChild : null;
+            if (!sidebarWrap || !overlayWrap) return;
+            const isOpen = sidebarWrap.classList.contains('open');
+            if (isOpen) {
+                sidebarWrap.classList.remove('open');
+                overlayWrap.classList.remove('active');
+                // Explicitly reset inline styles to avoid stale states
+                if (panel) {
+                    panel.style.transform = 'translateX(-100%)';
+                    panel.style.pointerEvents = 'none';
+                }
+                if (overlayInner) {
+                    overlayInner.style.left = '0px';
+                    overlayInner.style.width = '100vw';
+                    overlayInner.style.background = 'rgba(0,0,0,0.2)';
+                    overlayInner.style.pointerEvents = 'none';
+                }
+            } else {
+                sidebarWrap.classList.add('open');
+                overlayWrap.classList.add('active');
+                // Ensure visibility and clickability immediately
+                if (panel) {
+                    panel.style.transform = 'translateX(0)';
+                    panel.style.pointerEvents = 'auto';
+                }
+                if (overlayInner) {
+                    overlayInner.style.left = '320px';
+                    overlayInner.style.width = 'calc(100vw - 320px)';
+                    overlayInner.style.background = 'rgba(0,0,0,0.2)';
+                    overlayInner.style.pointerEvents = 'auto';
+                }
+            }
+        }
+
+        // Function to close new sidebar
+        function closeNewSidebar() {
+            const sidebarWrap = document.getElementById('newSidebar');
+            const overlayWrap = document.getElementById('newSidebarOverlay');
+            if (sidebarWrap) sidebarWrap.classList.remove('open');
+            if (overlayWrap) overlayWrap.classList.remove('active');
+        }
+
+        // Add event listeners for new sidebar
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initial state sidebar toggle
+            const initialSidebarToggle = document.getElementById('initialSidebarToggle');
+            if (initialSidebarToggle) {
+                initialSidebarToggle.addEventListener('click', toggleNewSidebar);
+            }
+
+            // Header sidebar toggle (chat_smooth header)
+            const headerSidebarToggle = document.getElementById('sidebarToggle');
+            if (headerSidebarToggle) {
+                headerSidebarToggle.addEventListener('click', toggleNewSidebar);
+            }
+
+            // Note: conversationSidebarToggle is already handled by the original conversation sidebar setup
+
+            // Sidebar close button
+            const newSidebarClose = document.getElementById('newSidebarClose');
+            if (newSidebarClose) {
+                newSidebarClose.addEventListener('click', toggleNewSidebar);
+            }
+
+            // Sidebar overlay - click to close
+            const newSidebarOverlay = document.getElementById('newSidebarOverlay');
+            if (newSidebarOverlay) {
+                newSidebarOverlay.addEventListener('click', toggleNewSidebar);
+            }
+
+            // New sidebar button functionality
+            const newChatBtn = document.getElementById('newChatBtn');
+            if (newChatBtn) {
+                newChatBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeNewSidebar();
+                    transitionToInitial();
+                    currentThreadId = null;
+                });
+            } else {
+                console.error('newChatBtn not found!');
+            }
+
+            const logoutBtn = document.getElementById('logoutBtn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    fetch('/api/auth/logout', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    })
+                        .then(() => {
+                            localStorage.removeItem('nasma_remember_me_token');
+                            sessionStorage.setItem('just_logged_out', 'true');
+                            window.location.href = '/login';
+                        })
+                        .catch(() => {
+                            localStorage.removeItem('nasma_remember_me_token');
+                            sessionStorage.setItem('just_logged_out', 'true');
+                            window.location.href = '/login';
+                        });
+                });
+            } else {
+                console.error('logoutBtn not found!');
+            }
+
+            // Event delegation as a fallback to guarantee button click handling
+            const sidebarWrap = document.getElementById('newSidebar');
+            if (sidebarWrap) {
+                sidebarWrap.addEventListener('click', function(e) {
+                    const target = e.target.closest('#newChatBtn, #logoutBtn');
+                    if (!target) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (target.id === 'newChatBtn') {
+                        closeNewSidebar();
+                        transitionToInitial();
+                        currentThreadId = null;
+                    } else if (target.id === 'logoutBtn') {
+                        fetch('/api/auth/logout', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        })
+                            .then(() => {
+                                localStorage.removeItem('nasma_remember_me_token');
+                                sessionStorage.setItem('just_logged_out', 'true');
+                                window.location.href = '/login';
+                            })
+                            .catch(() => {
+                                localStorage.removeItem('nasma_remember_me_token');
+                                sessionStorage.setItem('just_logged_out', 'true');
+                                window.location.href = '/login';
+                            });
+                    }
+                });
+            }
+        });
+
+        // Keep both input bars aligned to the same viewport-based width
+        function computeInputBarTargetWidth() {
+            try {
+                const viewportWidth = Math.max(
+                    Math.round(window.visualViewport ? window.visualViewport.width : 0),
+                    window.innerWidth || 0,
+                    document.documentElement ? document.documentElement.clientWidth : 0
+                );
+                if (!viewportWidth) return 0;
+                const isMobile = viewportWidth <= 768;
+                const ratio = isMobile ? 0.95 : 0.75;
+                const minWidth = Math.min(280, viewportWidth);
+                let widthPx = Math.round(viewportWidth * ratio);
+                widthPx = Math.min(widthPx, viewportWidth);
+                widthPx = Math.max(widthPx, minWidth);
+                return widthPx;
+            } catch (_) { return 0; }
+        }
+        function setBarWidth(bar, widthPx) {
+            if (!bar) return;
+            const targetWidth = widthPx && widthPx > 0 ? widthPx : computeInputBarTargetWidth();
+            if (targetWidth && targetWidth > 0) {
+                bar.style.width = targetWidth + 'px';
+            } else {
+                bar.style.width = '';
+            }
+        }
+        function syncBars() {
+            try {
+                const initialBar = document.getElementById('initialInputBar') || document.querySelector('#initialState .input-bar');
+                const convBar = document.getElementById('conversationInputBar') || document.querySelector('#conversationState .input-bar');
+                const widthPx = computeInputBarTargetWidth();
+                if (widthPx) {
+                    window.__initialInputBarWidth = widthPx;
+                }
+                setBarWidth(initialBar, widthPx);
+                setBarWidth(convBar, widthPx);
+            } catch (_) {}
+        }
+        // Initial sync + on standard resize
+        syncBars();
+        let __resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(__resizeTimer);
+            __resizeTimer = setTimeout(syncBars, 100);
+        });
+        // Also react to browser zoom/viewport changes
+        try { if (window.visualViewport) { window.visualViewport.addEventListener('resize', () => { syncBars(); }); } } catch (_) {}
+        // Observe both suggestion rows for dynamic size changes
+        try {
+            const initialRow = document.getElementById('initialSuggestionRow');
+            const convRow = document.querySelector('#conversationState .suggestion-row');
+            if (window.ResizeObserver) {
+                const ro = new ResizeObserver(() => syncBars());
+                if (initialRow) ro.observe(initialRow);
+                if (convRow) ro.observe(convRow);
+            }
+        } catch (_) {}
+        // Re-sync after load and minor delays for font/image layout shifts
+        const __postloadSync = () => {
+            syncBars();
+            setTimeout(syncBars, 150);
+            setTimeout(syncBars, 400);
+        };
+        window.addEventListener('load', __postloadSync);
+
+        // Aggressive width lock helpers
+        function __getInitialBarPx() {
+            try {
+                const computed = computeInputBarTargetWidth();
+                if (computed) return computed;
+                const el = document.getElementById('initialInputBar') || document.querySelector('#initialState .input-bar');
+                if (!el) return 0;
+                const r = el.getBoundingClientRect();
+                return Math.max(0, Math.round(r.width));
+            } catch (_) { return 0; }
+        }
+        function __lockConvWidth(px) {
+            try {
+                const conv = document.getElementById('conversationInputBar') || document.querySelector('#conversationState .input-bar');
+                lockBarWidthImportant(conv, px);
+            } catch (_) {}
+        }
+        function __aggressiveSyncConvWidth() {
+            const w = __getInitialBarPx() || Number(window.__initialInputBarWidth || 0);
+            if (w) __lockConvWidth(w);
+        }
+
+        // Enhance existing transition to conversation to force width equality
+        (function patchTransitionForWidth() {
+            try {
+                const orig = window.transitionToConversation;
+                window.transitionToConversation = function() {
+                    orig && orig.apply(this, arguments);
+                    // Re-apply locks several times during the transition
+                    let count = 0;
+                    const tick = () => { __aggressiveSyncConvWidth(); if (++count < 20) setTimeout(tick, 50); };
+                    setTimeout(tick, 10);
+                };
+            } catch (_) {}
+        })();
+
+        // Keep in sync on zoom/resize and when initial bar/suggestions change
+        try { if (window.visualViewport) { window.visualViewport.addEventListener('resize', __aggressiveSyncConvWidth); } } catch (_) {}
+        window.addEventListener('resize', () => { setTimeout(__aggressiveSyncConvWidth, 50); });
+        try {
+            const ib = document.getElementById('initialInputBar') || document.querySelector('#initialState .input-bar');
+            const row = document.getElementById('initialSuggestionRow');
+            if (window.ResizeObserver) {
+                if (ib) {
+                    const ro1 = new ResizeObserver(() => { syncBars(); __aggressiveSyncConvWidth(); });
+                    ro1.observe(ib);
+                }
+                if (row) {
+                    const ro2 = new ResizeObserver(() => { syncBars(); __aggressiveSyncConvWidth(); });
+                    ro2.observe(row);
+                }
+            }
+        } catch (_) {}
+        // Initial kick
+        setTimeout(() => { syncBars(); __aggressiveSyncConvWidth(); }, 10);
+    </script>
+
+    <!-- New Sidebar for All States (positioned at end to avoid layout issues) -->
+    <div id="newSidebar" class="new-sidebar" style="position: absolute; top: 0; left: 0; height: 0; width: 0; overflow: visible;">
+        <div style="position: fixed; top: 0; left: 0; width: 320px; height: 100vh; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); box-shadow: 0 0 50px rgba(0, 0, 0, 0.1); transform: translateX(-100%); transition: transform 0.3s ease; z-index: 10000; display: flex; flex-direction: column; pointer-events: none;">
+            <div class="new-sidebar-header">
+                <button id="newSidebarClose">
+                    <img src="/Nasma-Avatar.svg" onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEwIiBoZWlnaHQ9IjExNCIgdmlld0JveD0iMCAwIDExMCAxMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yNS4wNSA4Ni44NjQ0QzE4LjYyIDg2Ljg2NDQgMTMuMTcgODUuMTM0NCA4Ljc4OTk4IDgxLjY3NDRDMy45MTM0NCA3Ny43MDQ2IDAuNzk1MzY1IDcxLjk3NSAwLjEwOTk4NSA2NS43MjQ0VjY1LjM5NDRWNjUuMDY0NEMwLjEwOTk4NSA1OC4zMTQ0IDIuNCA1Mi41MDQ0IDYuNzUgNDguMjU0NEMxNC4xMSA0MS4wNjQ0IDI0LjY2IDQwLjg5NDQgMjYuMzYgNDAuOTE0NEgzOC40OVY1Ny40NjQ0SDI2LjFDMjQuNjggNTcuNDY0NCAyMC40NCA1Ny45NjQ0IDE4LjI5IDYwLjExNDRDMTcuNzQxNCA2MC43MDExIDE3LjMxNjMgNjEuMzkyIDE3LjAzOTcgNjIuMTQ2MUMxNi43NjMyIDYyLjkwMDIgMTYuNjQwOSA2My43MDIyIDE2LjY4IDY0LjUwNDRDMTYuOTk4NiA2Ni4xNTA1IDE3Ljg3ODcgNjcuNjM0OSAxOS4xNyA2OC43MDQ0QzIxLjY3IDcwLjU5NDQgMjUuODUgNzAuNDE0NCAyOC45MiA2OS45MjQ0QzMzLjk3IDY5LjEzNDQgMzguOTIgNjUuMDc0NCA0NC42NSA2MC4zODQ0QzU2Ljg5IDUwLjM4NDQgNzMuNjUgMzYuNjM0NCAxMDQuMzEgNDcuMTQ0NEw5OC45MyA2Mi44MzQ0Qzc3LjAyIDU1LjMxNDQgNjYuOTMgNjMuNjE0NCA1NS4xNiA3My4yMTQ0QzQ4LjE2IDc4LjkxNDQgNDEgODQuODE0NCAzMS41IDg2LjMwNDRDMjkuMzY4MiA4Ni42NjE2IDI3LjIxMTQgODYuODQ4OCAyNS4wNSA4Ni44NjQ0WiIgZmlsbD0iIzI5MUM0OCIvPgo8cGF0aCBkPSJNODMuODcgMTEzLjY1NEg3MS41M1Y5Ny4wNzQ0SDgzLjlDODUuMzIgOTcuMDc0NCA4OS41NiA5Ni41NjQ0IDkxLjcxIDk0LjQyNDRDOTIuMzYgOTMuNzc0NCA5My4yMiA5Mi42MjQ0IDkzLjMyIDkwLjAyNDRDOTIuOTk3NiA4OC4zODI1IDkyLjExODEgODYuOTAyNCA5MC44MyA4NS44MzQ0Qzg4LjMzIDgzLjk0NDQgODQuMTUgODQuMTI0NCA4MS4wOCA4NC42MTQ0Qzc2LjAzIDg1LjQwNDQgNzEuMDggODkuNDU0NCA2NS4zNSA5NC4xNTQ0QzU2LjIyIDEwMS42MjQgNDQuNTYgMTExLjE1NCAyNi41MSAxMTEuMTU0QzE5LjQwODkgMTExLjA2MiAxMi4zNzI4IDEwOS43ODggNS42OSAxMDcuMzg0TDExLjA3IDkxLjY5NDRDMzIuOTggOTkuMjE0NCA0My4wNyA5MC45MTQ0IDU0Ljg0IDgxLjMxNDRDNjEuODQgNzUuNjE0NCA2OSA2OS43MTQ0IDc4LjUgNjguMjI0NEM4Ny43OSA2Ni43NTQ0IDk1LjQzIDY4LjMyNDQgMTAxLjIgNzIuODg0NEMxMDYuMDgyIDc2Ljg1MSAxMDkuMjA0IDgyLjU4MTYgMTA5Ljg5IDg4LjgzNDRWODkuMTY0NFY4OS40NjQ0QzEwOS44OSA5Ni4yMTQ0IDEwNy42IDEwMi4wMjQgMTAzLjI1IDEwNi4yNzRDOTYuMTcgMTEzLjI1NCA4Ni4wOSAxMTMuNjU0IDgzLjg3IDExMy42NTRaIiBmaWxsPSIjMjkxQzQ4Ii8+CjxwYXRoIGQ9Ik01Mi4zOCAyLjQ2NDM5QzUxLjI2MjggMS42OTkwNCA0OS45OTk2IDEuMTcyNTUgNDguNjY5NSAwLjkxNzg4MkM0Ny4zMzkzIDAuNjYzMjE4IDQ1Ljk3MSAwLjY4NTg1OSA0NC42NSAwLjk4NDM4QzQ0LjQ0IDAuOTg0MzggNDQuMjQgMS4wOTQzOSA0NC4wMyAxLjE1NDM5QzQzLjAxODUgMS4xMDc4NSA0Mi4wMTI4IDEuMzMxNTkgNDEuMTE2NSAxLjgwMjYyQzQwLjIyMDEgMi4yNzM2NCAzOS40NjU0IDIuOTc0OTQgMzguOTMgMy44MzQzOUMzOC44MiA0LjAyNDM5IDM4LjcxIDQuMjI0MzkgMzguNjEgNC40MzQzOUMzOC4xODgyIDQuNDM0MDMgMzcuNzY4MSA0LjQ4NzgxIDM3LjM2IDQuNTk0NEMzNC4wNSA1LjQwNDQgMzEuNDIgOC43MDQzOSAzMi4yNiAxMi4yNDQ0QzMzLjU0IDE3LjU3NDQgMzguMzQgMjEuOTQ0NCA0NC4wMiAyMS43OTQ0QzQ2LjkwNTQgMjEuNzEzNiA0OS42NjM1IDIwLjU4ODUgNTEuNzgyMSAxOC42MjhDNTMuOTAwOCAxNi42Njc2IDU1LjIzNiAxNC4wMDQ5IDU1LjU0IDExLjEzNDRDNTUuOSA4LjA5NDQgNTUgNC4zMDQzOSA1Mi4zOCAyLjQ2NDM5WiIgZmlsbD0iI0ZGNjY2NiIvPgo8cGF0aCBkPSJNODIuNzUgNy41ODQzN0M4Mi43NSA3LjQ1NDM3IDgyLjc1IDcuMzI0MzggODIuNzUgNy4xOTQzOEM4Mi44NCA0LjYxNDM4IDgxLjE3IDEuMTk0MzYgNzguMzcgMC42NDQzNjRDNzYuMzMyNyAwLjA5NTQzNSA3NC4xODA1IDAuMTQ0MDQ4IDcyLjE3IDAuNzg0Mzc5QzcwLjE5NTggMS40OTEyNyA2OC40NjIyIDIuNzQyOSA2Ny4xNyA0LjM5NDM2QzY1Ljk2OTEgNS44OTM0OSA2NS4yMjExIDcuNzA0MjYgNjUuMDEzOSA5LjYxMzg1QzY0LjgwNjYgMTEuNTIzNCA2NS4xNDg3IDEzLjQ1MjUgNjYgMTUuMTc0NEM2OS41NiAyMS45MjQ0IDc5LjU1IDIyLjQ3NDQgODMuOSAxNi4yNTQ0Qzg0Ljc4OSAxNC45MTQ0IDg1LjE2MjMgMTMuMjk3OCA4NC45NTA4IDExLjcwMzdDODQuNzM5NCAxMC4xMDk3IDgzLjk1NzUgOC42NDYyNCA4Mi43NSA3LjU4NDM3WiIgZmlsbD0iI0ZGNjY2NiIvPgo8L3N2Zz4K';" alt="Nasma" class="sidebar-logo" />
+                </button>
+            </div>
+            <div class="new-sidebar-content">
+                <h2>Chat History</h2>
+                <div class="chat-history">
+                    <div id="globalHistoryList" class="history-list"></div>
+                    <div id="globalHistoryEmpty" class="history-empty no-chats">No conversations yet.</div>
+                </div>
+            </div>
+            <div class="new-sidebar-footer" style="padding: 1.5rem; border-top: 1px solid rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; gap: 0.75rem;">
+                <button id="logoutBtn" class="logout-btn" style="
+                    width: 100%;
+                    height: 50px;
+                    border: none;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    font-size: 16px;
+                    font-weight: 500;
+                    position: relative;
+                    z-index: 99999;
+                    pointer-events: auto;
+                    margin: 0 0 12px 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                    gap: 8px;
+                ">
+                    <span style="font-family: 'Material Symbols Outlined'; font-size: 20px;">logout</span>
+                    <span>Log Out</span>
+                </button>
+                <button id="newChatBtn" class="new-chat-btn" style="
+                    width: 100%;
+                    height: 50px;
+                    border: none;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    font-size: 16px;
+                    font-weight: 500;
+                    position: relative;
+                    z-index: 99999;
+                    pointer-events: auto;
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                    gap: 8px;
+                ">
+                    <span style="font-family: 'Material Symbols Outlined'; font-size: 20px;">add</span>
+                    <span>New Chat</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Sidebar Overlay -->
+    <div id="newSidebarOverlay" class="new-sidebar-overlay" style="position: absolute; top: 0; left: 0; height: 0; width: 0; overflow: visible;">
+        <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.3); opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0.3s ease; z-index: 99; pointer-events: none;"></div>
+    </div>
+
+
+</body>
+</html>
+

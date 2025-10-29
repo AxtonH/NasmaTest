@@ -1,0 +1,354 @@
+/* Modern Glassmorphism Design for Nasma AI Assistant */
+
+/* Base styles and reset */
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Glass effects */
+.glass-header {
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    background: rgba(255, 255, 255, 0.25);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+}
+
+.glass-message {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.2);
+    transition: all 0.3s ease;
+}
+
+.glass-message:hover {
+    background: rgba(255, 255, 255, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.3);
+}
+
+.glass-input-area {
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    background: transparent !important;
+    border-top: 1px solid rgba(209, 179, 230, 0.3) !important;
+}
+
+.glass-input-container {
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    background: rgba(232, 213, 242, 0.7) !important;
+    border: 1px solid rgba(209, 179, 230, 0.5) !important;
+    box-shadow: 0 8px 32px 0 rgba(139, 95, 191, 0.2) !important;
+    transition: all 0.3s ease;
+}
+
+.glass-input-container:focus-within {
+    background: rgba(232, 213, 242, 0.9) !important;
+    border: 1px solid rgba(139, 95, 191, 0.6) !important;
+    box-shadow: 0 8px 32px 0 rgba(139, 95, 191, 0.3) !important;
+}
+
+.glass-input {
+    background: transparent;
+    border: none;
+    font-size: 16px;
+    line-height: 1.5;
+    color: #4A1A5C;
+}
+
+.glass-input::placeholder {
+    color: #8B5FBF;
+}
+
+.glass-send-button {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    box-shadow: 0 8px 32px 0 rgba(102, 126, 234, 0.4);
+    transition: all 0.3s ease;
+}
+
+.glass-send-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px 0 rgba(102, 126, 234, 0.6);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.glass-send-button:active {
+    transform: translateY(0);
+}
+
+.glass-pill {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.glass-button {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    background: rgba(255, 255, 255, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    transition: all 0.3s ease;
+}
+
+.glass-button:hover {
+    background: rgba(255, 255, 255, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Simple Chat Bubble Styling */
+.chat-bubble-user {
+    background: rgba(139, 95, 191, 0.85) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    box-shadow: 0 4px 12px rgba(139, 95, 191, 0.3) !important;
+    max-width: 75% !important;
+    word-wrap: break-word !important;
+}
+
+.chat-bubble-user p {
+    color: #FFFFFF !important;
+    margin: 0 !important;
+}
+
+.chat-bubble-bot {
+    background: #E8D5F2 !important;
+    color: #4A1A5C !important;
+    border: 1px solid #D1B3E6 !important;
+    box-shadow: 0 4px 12px rgba(139, 95, 191, 0.15) !important;
+    max-width: 75% !important;
+    word-wrap: break-word !important;
+    overflow: visible !important;
+}
+
+.chat-bubble-bot p {
+    color: #4A1A5C !important;
+    margin: 0 !important;
+}
+
+.chat-bubble-error {
+    background: #FEE2E2 !important;
+    color: #DC2626 !important;
+    border: 1px solid #FECACA !important;
+    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2) !important;
+    max-width: 75% !important;
+    word-wrap: break-word !important;
+}
+
+.chat-bubble-error p {
+    color: #DC2626 !important;
+    margin: 0 !important;
+}
+
+.user-avatar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    box-shadow: 0 4px 16px 0 rgba(102, 126, 234, 0.4);
+}
+
+/* Error message styling */
+.error-message {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #DC2626;
+}
+
+/* Thinking bubble */
+.thinking-bubble .glass-message {
+    background: rgba(255, 255, 255, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Animations */
+@keyframes fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fade-in {
+    animation: fade-in 0.6s ease-out;
+}
+
+@keyframes bounce {
+    0%, 80%, 100% {
+        transform: translateY(0);
+    }
+    40% {
+        transform: translateY(-8px);
+    }
+}
+
+.animate-bounce {
+    animation: bounce 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Override Tailwind classes for input area */
+.glass-input-area.bg-white\/40 {
+    background: rgba(232, 213, 242, 0.4) !important;
+}
+
+.glass-input-container.bg-white\/60 {
+    background: rgba(232, 213, 242, 0.7) !important;
+}
+
+/* Force input area styling with maximum specificity */
+body .glass-input-area {
+    background: transparent !important;
+}
+
+body .glass-input-container {
+    background: rgba(232, 213, 242, 0.7) !important;
+    border: 1px solid rgba(209, 179, 230, 0.5) !important;
+}
+
+body .glass-input {
+    color: #4A1A5C !important;
+}
+
+/* Remove all custom scrollbar styling - use browser default */
+
+/* Smooth scrolling */
+.scroll-smooth {
+    scroll-behavior: smooth;
+}
+
+/* Focus states */
+.glass-input:focus {
+    outline: none;
+}
+
+/* Connection status colors */
+.status-connected {
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    color: #059669;
+}
+
+.status-error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #DC2626;
+}
+
+.status-loading {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    color: #D97706;
+}
+
+/* Message enter animation */
+.message-enter {
+    animation: fade-in 0.4s ease-out;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .glass-header {
+        padding: 1rem;
+    }
+    
+    #chatContainer {
+        padding: 1rem;
+        space-y: 1rem;
+    }
+    
+    .glass-input-area {
+        padding: 1rem;
+    }
+    
+    .glass-message {
+        padding: 1rem;
+    }
+    
+    .glass-input-container {
+        border-radius: 1.5rem;
+    }
+    
+    .glass-input {
+        padding: 0.75rem 1rem;
+        font-size: 16px; /* Prevent zoom on iOS */
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .glass-message {
+        background: rgba(255, 255, 255, 0.9);
+        border: 2px solid rgba(0, 0, 0, 0.2);
+    }
+    
+    .glass-input-container {
+        background: rgba(255, 255, 255, 0.9);
+        border: 2px solid rgba(0, 0, 0, 0.2);
+    }
+}
+
+/* Approval buttons styling for consistent sizing */
+.approval-button {
+    height: 2rem !important;
+    padding: 0 0.75rem !important;
+    border-radius: 9999px !important;
+    font-size: 0.75rem !important;
+    font-weight: 500 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 4rem !important;
+    border: 1px solid transparent !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+
+.approval-button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15) !important;
+}
+
+.approval-button:active {
+    transform: translateY(0) !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

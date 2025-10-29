@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Nasma - Login</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#135bec",
+                        "background-light": "#f0f2f5",
+                        "background-dark": "#1a1a2e",
+                        "card-light": "#ffffff",
+                        "card-dark": "#1a1a2e"
+                    },
+                    fontFamily: {
+                        display: ["Poppins", "sans-serif"],
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.5rem",
+                    },
+                },
+            },
+        };
+    </script>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
+    <link href="{{ url_for('static', filename='Nasma-Avatar.svg') }}" rel="icon" type="image/svg+xml"/>
+    <style>
+        /* Subtle translucent shell with tinted border */
+        .error-message {
+            background: rgba(255, 255, 255, 0.18);
+            border: 1px solid rgba(220, 38, 38, 0.35);
+            color: #DC2626;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+        }
+        .success-message {
+            background: rgba(41, 28, 72, 0.12);
+            border: 1px solid rgba(41, 28, 72, 0.35);
+            color: #291C48;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+        }
+
+        /* Frosted input styling to match message shell */
+        body .frosted-input,
+        body .frosted-input:focus {
+            background: rgba(255, 255, 255, 0.18) !important;
+            border: 1px solid rgba(41, 28, 72, 0.35) !important;
+            color: #291C48 !important;
+            backdrop-filter: blur(6px) !important;
+            -webkit-backdrop-filter: blur(6px) !important;
+            box-shadow: none !important;
+            outline: none !important;
+            background-clip: padding-box !important;
+            appearance: none !important;
+            -webkit-appearance: none !important;
+            caret-color: #291C48 !important;
+        }
+        body .frosted-input::placeholder { color: #291C48; opacity: 0.85; }
+        /* Remove Tailwind forms ring highlight */
+        body .frosted-input:focus { --tw-ring-offset-shadow: 0 0 #0000 !important; --tw-ring-shadow: 0 0 #0000 !important; --tw-ring-color: transparent !important; }
+
+        /* Force style through browser autofill */
+        body .frosted-input:-webkit-autofill,
+        body .frosted-input:-webkit-autofill:hover,
+        body .frosted-input:-webkit-autofill:focus {
+            -webkit-text-fill-color: #291C48 !important;
+            transition: background-color 99999s ease-in-out 0s !important;
+            -webkit-box-shadow: 0 0 0px 1000px rgba(255, 255, 255, 0.18) inset !important;
+            box-shadow: 0 0 0px 1000px rgba(255, 255, 255, 0.18) inset !important;
+            border: 1px solid rgba(41, 28, 72, 0.35) !important;
+        }
+    </style>
+</head>
+<body class="font-display">
+    <div class="relative min-h-screen w-full overflow-hidden">
+        <img src="/Nasma-1.png" alt="Nasma background" class="absolute inset-0 w-full h-full object-cover"/>
+
+        <div class="relative z-10 flex items-center justify-center min-h-screen px-4">
+            <div class="w-full max-w-[640px] flex flex-col items-center gap-[32px]">
+                <img src="/Nasma-logo.png" alt="Nasma logo" class="h-12 w-auto"/>
+                <p class="text-center text-[26px] font-medium" style="color:#291C48;">Enter your Odoo details to log in.</p>
+
+                <form id="loginForm" class="w-full flex flex-col items-center gap-[32px]">
+                    <div class="w-full">
+                            <input
+                            id="username"
+                            name="username"
+                            type="text"
+                            placeholder="Enter email"
+                            required
+                            class="w-full h-[65.08px] rounded-[8px] px-6 frosted-input !bg-[rgba(255,255,255,0.18)] !border !border-[rgba(41,28,72,0.35)] !text-[#291C48]"
+                        />
+                    </div>
+
+                    <div class="w-full">
+                        <div class="relative">
+                            <input
+                                id="password"
+                                name="password"
+                                type="password"
+                                placeholder="Enter your password"
+                                required
+                                class="w-full h-[65.08px] rounded-[8px] px-6 pr-12 frosted-input !bg-[rgba(255,255,255,0.18)] !border !border-[rgba(41,28,72,0.35)] !text-[#291C48]"
+                            />
+                            <button
+                                type="button"
+                                id="togglePassword"
+                                class="absolute inset-y-0 right-0 pr-4 flex items-center text-[#291C48]"
+                                aria-label="Toggle password visibility"
+                            >
+                                <span class="material-icons-outlined text-2xl" id="eyeIcon">visibility</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button
+                        type="submit"
+                        id="loginButton"
+                        class="w-full h-[65.08px] rounded-[8px] bg-[#291C48] text-white text-[22.63px] font-medium hover:opacity-90 transition"
+                    >
+                        <span id="loginButtonText">Log in</span>
+                        <span id="loginSpinner" class="hidden">
+                            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Connecting...
+                        </span>
+                    </button>
+
+                    <!-- Moved confirmation/message box here between button and checkbox -->
+                    <div id="messageContainer" class="hidden w-full">
+                        <div id="messageContent" class="mt-0 px-4 py-3 rounded-lg text-sm font-medium"></div>
+                    </div>
+
+                    <div class="flex items-center gap-[18px] mt-[32px]">
+                        <input id="rememberMe" type="checkbox" class="h-[25.83px] w-[25.83px] border border-[#291C48] bg-transparent" />
+                        <label for="rememberMe" class="text-[26px] font-medium" style="color:#291C48;">Keep me logged in.</label>
+                    </div>
+
+                    <div class="w-full mt-2">
+                        <p class="text-center" style="color:#291C48; opacity:0.7; font-size:9pt;">
+                            Please use your <span style="color:#FF6666;">Odoo credentials</span> to log in.<br/>
+                            If you are unsure of your login details, you can locate your Odoo credentials in your saved browser passwords or contact the Operations team for assistance
+                        </p>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class DeviceFingerprint {
+            /**
+             * Generate a unique device fingerprint based on browser/device characteristics
+             */
+            static async generate() {
+                const components = [];
+
+                // User Agent
+                components.push(navigator.userAgent);
+
+                // Screen resolution
+                components.push(`${screen.width}x${screen.height}x${screen.colorDepth}`);
+
+                // Timezone
+                components.push(Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+                // Language
+                components.push(navigator.language);
+
+                // Platform
+                components.push(navigator.platform);
+
+                // Hardware concurrency (CPU cores)
+                components.push(navigator.hardwareConcurrency || 'unknown');
+
+                // Device memory (if available)
+                components.push(navigator.deviceMemory || 'unknown');
+
+                // Canvas fingerprint (more unique)
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    ctx.textBaseline = 'top';
+                    ctx.font = '14px Arial';
+                    ctx.fillText('Device fingerprint', 2, 2);
+                    components.push(canvas.toDataURL());
+                } catch (e) {
+                    components.push('canvas-error');
+                }
+
+                // Create hash of all components
+                const fingerprint = components.join('|');
+                const hash = await this.hashString(fingerprint);
+                return hash;
+            }
+
+            static async hashString(str) {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(str);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                return hashHex;
+            }
+        }
+
+        class RememberMeManager {
+            constructor() {
+                this.storageKey = 'nasma_remember_me_token';
+            }
+
+            saveToken(token) {
+                localStorage.setItem(this.storageKey, token);
+            }
+
+            getToken() {
+                return localStorage.getItem(this.storageKey);
+            }
+
+            clearToken() {
+                localStorage.removeItem(this.storageKey);
+            }
+        }
+
+        class LoginManager {
+            constructor() {
+                this.loginForm = document.getElementById('loginForm');
+                this.loginButton = document.getElementById('loginButton');
+                this.loginButtonText = document.getElementById('loginButtonText');
+                this.loginSpinner = document.getElementById('loginSpinner');
+                this.messageContainer = document.getElementById('messageContainer');
+                this.messageContent = document.getElementById('messageContent');
+                this.passwordInput = document.getElementById('password');
+                this.togglePasswordButton = document.getElementById('togglePassword');
+                this.eyeIcon = document.getElementById('eyeIcon');
+                this.rememberMeCheckbox = document.getElementById('rememberMe');
+                this.rememberMeManager = new RememberMeManager();
+                this.deviceFingerprint = null;
+
+                this.init();
+            }
+
+            async init() {
+                // Generate device fingerprint
+                this.deviceFingerprint = await DeviceFingerprint.generate();
+
+                // Check for existing remember me token and try auto-login
+                await this.tryAutoLogin();
+
+                this.loginForm.addEventListener('submit', this.handleLogin.bind(this));
+                this.togglePasswordButton.addEventListener('click', this.togglePasswordVisibility.bind(this));
+            }
+
+            async tryAutoLogin() {
+                // Check if user just logged out (flag in sessionStorage)
+                if (sessionStorage.getItem('just_logged_out') === 'true') {
+                    sessionStorage.removeItem('just_logged_out');
+                    return;
+                }
+
+                const token = this.rememberMeManager.getToken();
+                if (!token || !this.deviceFingerprint) {
+                    return;
+                }
+
+                this.setLoading(true);
+                this.showMessage('Logging you in automatically...', 'success');
+
+                try {
+                    const response = await fetch('/api/auth/verify-remember-me', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            token: token,
+                            device_fingerprint: this.deviceFingerprint
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        this.showMessage('Auto-login successful! Redirecting...', 'success');
+                        setTimeout(() => {
+                            window.location.href = '/';
+                        }, 1000);
+                    } else {
+                        // Token invalid or expired, clear it
+                        this.rememberMeManager.clearToken();
+                        this.hideMessage();
+                        this.setLoading(false);
+                    }
+                } catch (error) {
+                    // Auto-login failed, clear token and show login form
+                    this.rememberMeManager.clearToken();
+                    this.hideMessage();
+                    this.setLoading(false);
+                }
+            }
+
+            togglePasswordVisibility() {
+                const isPassword = this.passwordInput.type === 'password';
+                this.passwordInput.type = isPassword ? 'text' : 'password';
+                this.eyeIcon.textContent = isPassword ? 'visibility_off' : 'visibility';
+            }
+
+            async handleLogin(event) {
+                event.preventDefault();
+
+                const username = document.getElementById('username').value;
+                const password = document.getElementById('password').value;
+                const rememberMe = this.rememberMeCheckbox.checked;
+
+                if (!username || !password) {
+                    this.showMessage('Please enter both username and password', 'error');
+                    return;
+                }
+
+                this.setLoading(true);
+                this.hideMessage();
+
+                try {
+                    const response = await fetch('/api/auth/login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            username: username,
+                            password: password,
+                            remember_me: rememberMe,
+                            device_fingerprint: this.deviceFingerprint
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Save remember me token if provided
+                        if (data.remember_me_token) {
+                            this.rememberMeManager.saveToken(data.remember_me_token);
+                        } else {
+                            // User unchecked remember me, clear any existing token
+                            this.rememberMeManager.clearToken();
+                        }
+
+                        this.showMessage('Login successful! Redirecting...', 'success');
+                        setTimeout(() => {
+                            window.location.href = '/';
+                        }, 1500);
+                    } else {
+                        this.showMessage(data.message || 'Login failed', 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Network error. Please try again.', 'error');
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            setLoading(loading) {
+                if (loading) {
+                    this.loginButton.disabled = true;
+                    this.loginButtonText.classList.add('hidden');
+                    this.loginSpinner.classList.remove('hidden');
+                } else {
+                    this.loginButton.disabled = false;
+                    this.loginButtonText.classList.remove('hidden');
+                    this.loginSpinner.classList.add('hidden');
+                }
+            }
+
+            showMessage(message, type) {
+                this.messageContent.textContent = message;
+                this.messageContent.className = `px-4 py-3 rounded-lg text-sm font-medium ${type === 'error' ? 'error-message' : 'success-message'}`;
+                this.messageContainer.classList.remove('hidden');
+            }
+
+            hideMessage() {
+                this.messageContainer.classList.add('hidden');
+            }
+        }
+
+        // Initialize login manager when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new LoginManager();
+        });
+    </script>
+</body>
+</html>

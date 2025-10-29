@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <style type="text/tailwindcss">
+        :root {
+            --primary-color: #135bec;
+            --background-color: #f0f2f5;
+            --glass-color: rgba(255, 255, 255, 0.6);
+            --border-color: rgba(255, 255, 255, 0.8);
+            --text-primary: #111318;
+            --text-secondary: #616f89;
+        }
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+        .glass-effect {
+            background-color: var(--glass-color);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+        }
+        .material-symbols-outlined {
+            font-variation-settings:
+            'FILL' 0,
+            'wght' 400,
+            'GRAD' 0,
+            'opsz' 24
+        }
+
+
+        .nasma-avatar-header {
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        .nasma-avatar-header.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+
+        /* Background image styling */
+        .nasma-background {
+            position: relative;
+            min-height: 100vh;
+        }
+
+        .nasma-background::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: url('/Nasma-1.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            z-index: -2;
+        }
+
+
+        .nasma-background > *:not(#sidebar):not(#sidebarOverlay) {
+            position: relative;
+            z-index: 2;
+        }
+
+        /* New Sidebar Styles */
+        .new-sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 320px;
+            height: 100vh;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.1);
+            transform: translateX(0); /* Always visible for debugging */
+            transition: transform 0.3s ease;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .new-sidebar.open {
+            transform: translateX(0);
+        }
+
+        .new-sidebar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            z-index: 9999;
+        }
+
+        .new-sidebar-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .new-sidebar-header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .new-sidebar-header button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: opacity 0.3s ease;
+        }
+
+
+        .sidebar-logo {
+            width: 80px;
+            height: 80px;
+            object-fit: contain;
+        }
+
+        .new-sidebar-content {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+
+        .new-sidebar-content h2 {
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: #374151;
+            margin-bottom: 1rem;
+        }
+
+        .no-chats {
+            color: #9CA3AF;
+            font-size: 0.875rem;
+        }
+
+        .new-sidebar-footer {
+            padding: 1.5rem;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .new-chat-btn, .logout-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-family: inherit;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            z-index: 10001;
+            position: relative;
+            pointer-events: auto !important;
+        }
+
+        .new-chat-btn {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .new-chat-btn:hover {
+            background: #1e40af;
+            transform: translateY(-1px);
+        }
+
+        .logout-btn {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .logout-btn:hover {
+            background: #e5e7eb;
+            transform: translateY(-1px);
+        }
+
+        /* Footer background fix */
+        .footer-background {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 200px;
+            background-image: url('/Nasma-1.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+    </style>
+    <title>{{ brand_name or 'Nasma - Chat' }}</title>
+    <link href="/Nasma-Avatar.svg" rel="icon" type="image/svg+xml"/>
+</head>
+<body class="bg-[var(--background-color)] nasma-background">
+    <!-- New Sidebar -->
+    <div id="newSidebar" class="new-sidebar">
+        <div class="new-sidebar-header">
+            <button id="newSidebarClose">
+                <img src="/Nasma-Avatar.svg" alt="Nasma" class="sidebar-logo" onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEwIiBoZWlnaHQ9IjExNCIgdmlld0JveD0iMCAwIDExMCAxMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yNS4wNSA4Ni44NjQ0QzE4LjYyIDg2Ljg2NDQgMTMuMTcgODUuMTM0NCA4Ljc4OTk4IDgxLjY3NDRDMy45MTM0NCA3Ny43MDQ2IDAuNzk1MzY1IDcxLjk3NSAwLjEwOTk4NSA2NS43MjQ0VjY1LjM5NDRWNjUuMDY0NEMwLjEwOTk4NSA1OC4zMTQ0IDIuNCA1Mi41MDQ0IDYuNzUgNDguMjU0NEMxNC4xMSA0MS4wNjQ0IDI0LjY2IDQwLjg5NDQgMjYuMzYgNDAuOTE0NEgzOC40OVY1Ny40NjQ0SDI2LjFDMjQuNjggNTcuNDY0NCAyMC40NCA1Ny45NjQ0IDE4LjI5IDYwLjExNDRDMTcuNzQxNCA2MC43MDExIDE3LjMxNjMgNjEuMzkyIDE3LjAzOTcgNjIuMTQ2MUMxNi43NjMyIDYyLjkwMDIgMTYuNjQwOSA2My43MDIyIDE2LjY4IDY0LjUwNDRDMTYuOTk4NiA2Ni4xNTA1IDE3Ljg3ODcgNjcuNjM0OSAxOS4xNyA2OC43MDQ0QzIxLjY3IDcwLjU5NDQgMjUuODUgNzAuNDE0NCAyOC45MiA2OS45MjQ0QzMzLjk3IDY5LjEzNDQgMzguOTIgNjUuMDc0NCA0NC42NSA2MC4zODQ0QzU2Ljg5IDUwLjM4NDQgNzMuNjUgMzYuNjM0NCAxMDQuMzEgNDcuMTQ0NEw5OC45MyA2Mi44MzQ0Qzc3LjAyIDU1LjMxNDQgNjYuOTMgNjMuNjE0NCA1NS4xNiA3My4yMTQ0QzQ4LjE2IDc4LjkxNDQgNDEgODQuODE0NCAzMS41IDg2LjMwNDRDMjkuMzY4MiA4Ni42NjE2IDI3LjIxMTQgODYuODQ4OCAyNS4wNSA4Ni44NjQ0WiIgZmlsbD0iIzI5MUM0OCIvPgo8cGF0aCBkPSJNODMuODcgMTEzLjY1NEg3MS41M1Y5Ny4wNzQ0SDgzLjlDODUuMzIgOTcuMDc0NCA4OS41NiA5Ni41NjQ0IDkxLjcxIDk0LjQyNDRDOTIuMzYgOTMuNzc0NCA5My4yMiA5Mi42MjQ0IDkzLjMyIDkwLjAyNDRDOTIuOTk3NiA4OC4zODI1IDkyLjExODEgODYuOTAyNCA5MC44MyA4NS44MzQ0Qzg4LjMzIDgzLjk0NDQgODQuMTUgODQuMTI0NCA4MS4wOCA4NC42MTQ0Qzc2LjAzIDg1LjQwNDQgNzEuMDggODkuNDU0NCA2NS4zNSA5NC4xNTQ0QzU2LjIyIDEwMS42MjQgNDQuNTYgMTExLjE1NCAyNi41MSAxMTEuMTU0QzE5LjQwODkgMTExLjA2MiAxMi4zNzI4IDEwOS43ODggNS42OSAxMDcuMzg0TDExLjA3IDkxLjY5NDRDMzIuOTggOTkuMjE0NCA0My4wNyA5MC45MTQ0IDU0Ljg0IDgxLjMxNDRDNjEuODQgNzUuNjE0NCA2OSA2OS43MTQ0IDc4LjUgNjguMjI0NEM4Ny43OSA2Ni43NTQ0IDk1LjQzIDY4LjMyNDQgMTAxLjIgNzIuODg0NEMxMDYuMDgyIDc2Ljg1MSAxMDkuMjA0IDgyLjU4MTYgMTA5Ljg5IDg4LjgzNDRWODkuMTY0NFY4OS40NjQ0QzEwOS44OSA5Ni4yMTQ0IDEwNy42IDEwMi4wMjQgMTAzLjI1IDEwNi4yNzRDOTYuMTcgMTEzLjI1NCA4Ni4wOSAxMTMuNjU0IDgzLjg3IDExMy42NTRaIiBmaWxsPSIjMjkxQzQ4Ii8+CjxwYXRoIGQ9Ik01Mi4zOCAyLjQ2NDM5QzUxLjI2MjggMS42OTkwNCA0OS45OTk2IDEuMTcyNTUgNDguNjY5NSAwLjkxNzg4MkM0Ny4zMzkzIDAuNjYzMjE4IDQ1Ljk3MSAwLjY4NTg1OSA0NC42NSAwLjk4NDM4QzQ0LjQ0IDAuOTg0MzggNDQuMjQgMS4wOTQzOSA0NC4wMyAxLjE1NDM5QzQzLjAxODUgMS4xMDc4NSA0Mi4wMTI4IDEuMzMxNTkgNDEuMTE2NSAxLjgwMjYyQzQwLjIyMDEgMi4yNzM2NCAzOS40NjU0IDIuOTc0OTQgMzguOTMgMy44MzQzOUMzOC44MiA0LjAyNDM5IDM4LjcxIDQuMjI0MzkgMzguNjEgNC40MzQzOUMzOC4xODgyIDQuNDM0MDMgMzcuNzY4MSA0LjQ4NzgxIDM3LjM2IDQuNTk0NEMzNC4wNSA1LjQwNDQgMzEuNDIgOC43MDQzOSAzMi4yNiAxMi4yNDQ0QzMzLjU0IDE3LjU3NDQgMzguMzQgMjEuOTQ0NCA0NC4wMiAyMS43OTQ0QzQ2LjkwNTQgMjEuNzEzNiA0OS42NjM1IDIwLjU4ODUgNTEuNzgyMSAxOC42MjhDNTMuOTAwOCAxNi42Njc2IDU1LjIzNiAxNC4wMDQ5IDU1LjU0IDExLjEzNDRDNTUuOSA4LjA5NDQgNTUgNC4zMDQzOSA1Mi4zOCAyLjQ2NDM5WiIgZmlsbD0iI0ZGNjY2NiIvPgo8cGF0aCBkPSJNODIuNzUgNy41ODQzN0M4Mi43NSA3LjQ1NDM3IDgyLjc1IDcuMzI0MzggODIuNzUgNy4xOTQzOEM4Mi44NCA0LjYxNDM4IDgxLjE3IDEuMTk0MzYgNzguMzcgMC42NDQzNjRDNzYuMzMyNyAwLjA5NTQzNSA3NC4xODA1IDAuMTQ0MDQ4IDcyLjE3IDAuNzg0Mzc5QzcwLjE5NTggMS40OTEyNyA2OC40NjIyIDIuNzQyOSA2Ny4xNyA0LjM5NDM2QzY1Ljk2OTEgNS44OTM0OSA2NS4yMjExIDcuNzA0MjYgNjUuMDEzOSA5LjYxMzg1QzY0LjgwNjYgMTEuNTIzNCA2NS4xNDg3IDEzLjQ1MjUgNjYgMTUuMTc0NEM2OS41NiAyMS45MjQ0IDc5LjU1IDIyLjQ3NDQgODMuOSAxNi4yNTQ0Qzg0Ljc4OSAxNC45MTQ0IDg1LjE2MjMgMTMuMjk3OCA4NC45NTA4IDExLjcwMzdDODQuNzM5NCAxMC4xMDk3IDgzLjk1NzUgOC42NDYyNCA4Mi43NSA3LjU4NDM3WiIgZmlsbD0iI0ZGNjY2NiIvPgo8L3N2Zz4K';" />
+            </button>
+        </div>
+        <div class="new-sidebar-content">
+            <h2>Chat History</h2>
+            <div class="chat-history">
+                <div class="no-chats">No previous chats</div>
+            </div>
+        </div>
+        <div class="new-sidebar-footer">
+            <button type="button" id="newChatBtn" class="new-chat-btn" onclick="handleNewChatClick()">
+                <span class="material-symbols-outlined">add</span>
+                <span>New Chat</span>
+            </button>
+            <button type="button" id="logoutBtn" class="logout-btn" onclick="handleLogoutClick()">
+                <span class="material-symbols-outlined">logout</span>
+                <span>Log Out</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Sidebar Overlay -->
+    <div id="newSidebarOverlay" class="new-sidebar-overlay"></div>
+
+    <div class="flex h-screen w-full flex-col">
+        <header class="flex items-center justify-between whitespace-nowrap px-6 py-4">
+                <div class="flex items-center gap-2 text-[var(--text-primary)]">
+                    <button id="sidebarToggle" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors">
+                        <span class="material-symbols-outlined text-[var(--text-primary)]">menu</span>
+                    </button>
+                <h1 class="text-xl font-bold">{{ brand_name or 'Nasma' }}</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <button id="historyButton" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors">
+                    <span class="material-symbols-outlined text-[var(--text-primary)]">history</span>
+                </button>
+                <button type="button" id="newChatButton" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors">
+                    <span class="material-symbols-outlined text-[var(--text-primary)]">add</span>
+                </button>
+                <button type="button" id="logoutButton" class="rounded-full object-cover" style='width:44px;height:44px;background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDhwW5-wPcfNiUcpFsTkT6y9M8_0qlwWaACSajKEttxrB_8x_HYum0NPwqQDg-OMN_PJ6m4yDP3wRShiqCC5VYloTvlVgh-t0feReJLOzXvTqUAyaPFr1mkRtYsASdB_O-BM14d7n5qzlKpo1ypb0_0EoIQprHzisHUIa90V6fVLCZGr8yrBo6Vj2myu8q4tT7IB4NnpnCtIBfnB8TmtvoLEKn6zXup_9oTIZWrCTLYuJbS51DSmKVEYrvargYZktcRikgYRIApRhX8"); background-size: cover; background-position: center;'></button>
+            </div>
+        </header>
+        <main class="flex-1 flex flex-col items-center overflow-y-auto px-4 pt-8 pb-24">
+            <div class="w-full max-w-4xl space-y-8" id="chatContainer">
+                <!-- Chat messages will be dynamically added here -->
+            </div>
+        </main>
+
+        <!-- Footer background fix -->
+        <div class="footer-background"></div>
+
+        <footer class="fixed bottom-0 left-0 right-0 flex justify-center p-4" style="z-index: 10; background: transparent; pointer-events: none;">
+            <div class="w-full max-w-4xl">
+                <!-- Additional Prompts Section (Hidden by default) - Only for managers -->
+                {% if is_manager %}
+                <div id="additionalPrompts" class="additional-prompts-section overflow-hidden" style="max-height: 0; transition: max-height 0.3s ease-out;">
+                    <div class="flex items-center justify-center gap-2 overflow-x-auto pb-3 -mx-2 px-2" style="pointer-events: auto;">
+                        <button class="suggestion-btn whitespace-nowrap text-sm text-[var(--text-secondary)] bg-white/70 hover:bg-white/90 transition-colors px-3 py-1.5 rounded-lg" data-suggestion="show me my team members">Show my team</button>
+                        <!-- Add more manager-specific prompts here in the future -->
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Standard Prompts Section with Toggle Button -->
+                <div id="standardPrompts" class="standard-prompts-section">
+                    <div class="flex items-center justify-center gap-2 overflow-x-auto pb-3 -mx-2 px-2" style="pointer-events: auto;">
+                        <button class="suggestion-btn whitespace-nowrap text-sm text-[var(--text-secondary)] bg-white/70 hover:bg-white/90 transition-colors px-3 py-1.5 rounded-lg" data-suggestion="Ask for time off">Ask for time off</button>
+                        <button class="suggestion-btn whitespace-nowrap text-sm text-[var(--text-secondary)] bg-white/70 hover:bg-white/90 transition-colors px-3 py-1.5 rounded-lg" data-suggestion="Generate letters">Generate letters</button>
+                        <button class="suggestion-btn whitespace-nowrap text-sm text-[var(--text-secondary)] bg-white/70 hover:bg-white/90 transition-colors px-3 py-1.5 rounded-lg" data-suggestion="Request Overtime">Request Overtime</button>
+                        <button class="suggestion-btn whitespace-nowrap text-sm text-[var(--text-secondary)] bg-white/70 hover:bg-white/90 transition-colors px-3 py-1.5 rounded-lg" data-suggestion="i want to request a reimbursement">Ask for reimbursement</button>
+                        <!-- Toggle Button for Additional Prompts - Only for managers -->
+                        {% if is_manager %}
+                        <button id="additionalPromptsToggle" class="flex items-center gap-1 text-sm text-white bg-red-500 hover:bg-red-600 transition-colors px-4 py-2 rounded-lg ml-2 border-2 border-red-600 shadow-lg" style="display: flex !important; min-width: 80px;">
+                            <span id="toggleArrow" class="material-symbols-outlined text-base">keyboard_arrow_up</span>
+                            <span id="toggleText" class="font-bold">MORE</span>
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="relative" style="pointer-events: auto;">
+                    <textarea
+                        id="messageInput"
+                        class="form-textarea w-full resize-none rounded-2xl glass-effect border-none focus:ring-2 focus:ring-[var(--primary-color)] pl-12 pr-12 py-3 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-lg"
+                        placeholder="Type your message..."
+                        rows="1"
+                        onkeydown="handleKeyPress(event)"
+                        oninput="autoResize(this)"
+                    ></textarea>
+                    <div class="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-2" style="pointer-events: auto;">
+                        <button class="text-[var(--text-secondary)] hover:text-[var(--primary-color)] transition-colors">
+                            <span class="material-symbols-outlined">add_circle</span>
+                        </button>
+                    </div>
+                    <div class="absolute right-4 top-1/2 -translate-y-1/2 flex items-center" style="pointer-events: auto;">
+                        <button class="text-[var(--text-secondary)] hover:text-[var(--primary-color)] transition-colors">
+                            <span class="material-symbols-outlined">mic</span>
+                        </button>
+                        <button
+                            id="sendButton"
+                            onclick="sendMessage()"
+                            class="ml-2 text-white bg-[var(--primary-color)] rounded-full p-1.5 hover:bg-blue-600 transition-colors"
+                        >
+                            <span class="material-symbols-outlined">arrow_upward</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        let conversationHistory = [];
+
+        // Inline click handlers for debugging
+        function handleNewChatClick() {
+            console.log('handleNewChatClick called!');
+            closeNewSidebar();
+            window.location.href = '/';
+        }
+
+        function handleLogoutClick() {
+            console.log('handleLogoutClick called!');
+            fetch('/api/auth/logout', { method: 'POST' })
+                .then(() => { window.location.href = '/login'; })
+                .catch(() => { window.location.href = '/login'; });
+        }
+
+        // Auto-resize textarea
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+        }
+
+        // Handle key press
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // Handle suggestion button clicks
+        document.querySelectorAll('.suggestion-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const suggestion = this.getAttribute('data-suggestion');
+                document.getElementById('messageInput').value = suggestion;
+                sendMessage();
+            });
+        });
+
+        // Render markdown formatting
+        function renderMarkdown(text) {
+            // First escape HTML to prevent XSS
+            let escaped = escapeHtml(text);
+
+            // Then convert **text** to bold
+            escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+            // Convert *text* to italic
+            escaped = escaped.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+            // Convert line breaks to <br> tags
+            escaped = escaped.replace(/\n/g, '<br>');
+
+            return escaped;
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Add message to chat
+        function addMessageToChat(message, isUser = true) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            
+            if (isUser) {
+                messageDiv.className = 'flex items-start gap-4 justify-end';
+                messageDiv.innerHTML = `
+                    <div class="bg-white rounded-2xl rounded-tr-none p-4 max-w-xl shadow-sm min-w-0 overflow-visible relative">
+                        <p class="text-gray-800">${renderMarkdown(message)}</p>
+                    </div>
+                    <img alt="User avatar" class="size-9 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBNBRa80Kej5RP4i7wVzLkewz_eJ0D31dEMA0uHJ8seS4Ec8bwPEXj4__SG3o9KYfomI1pknEnfcMHdnbXXONBEDPDV3Q3caWJRWVsk2A1NwCaUiD7ZxUiTK-d_4OI6e3mnEXnfvDb9-T_MuU6SLELv4lVnAQ2O2alIOkmjAvGisnSwuPEDiFRwnSQKwss3DfkvWdQs3d96lCFOVqdwH06OIQjMhgv_161eSLkCDDjQOWSRTttrfjS0MGxqLPkmHH4Z6DoLH9jzknuY"/>
+                `;
+            } else {
+                messageDiv.className = 'flex items-start gap-4';
+                messageDiv.innerHTML = `
+                    <div class="flex-shrink-0 size-12 overflow-hidden bg-[var(--background-color)] flex items-center justify-center">
+                        <img src="/Nasma-Avatar.svg" alt="Nasma" class="w-full h-full object-contain" onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEwIiBoZWlnaHQ9IjExNCIgdmlld0JveD0iMCAwIDExMCAxMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yNS4wNSA4Ni44NjQ0QzE4LjYyIDg2Ljg2NDQgMTMuMTcgODUuMTM0NCA4Ljc4OTk4IDgxLjY3NDRDMy45MTM0NCA3Ny43MDQ2IDAuNzk1MzY1IDcxLjk3NSAwLjEwOTk4NSA2NS43MjQ0VjY1LjM5NDRWNjUuMDY0NEMwLjEwOTk4NSA1OC4zMTQ0IDIuNCA1Mi41MDQ0IDYuNzUgNDguMjU0NEMxNC4xMSA0MS4wNjQ0IDI0LjY2IDQwLjg5NDQgMjYuMzYgNDAuOTE0NEgzOC40OVY1Ny40NjQ0SDI2LjFDMjQuNjggNTcuNDY0NCAyMC40NCA1Ny45NjQ0IDE4LjI5IDYwLjExNDRDMTcuNzQxNCA2MC43MDExIDE3LjMxNjMgNjEuMzkyIDE3LjAzOTcgNjIuMTQ2MUMxNi43NjMyIDYyLjkwMDIgMTYuNjQwOSA2My43MDIyIDE2LjY4IDY0LjUwNDRDMTYuOTk4NiA2Ni4xNTA1IDE3Ljg3ODcgNjcuNjM0OSAxOS4xNyA2OC43MDQ0QzIxLjY3IDcwLjU5NDQgMjUuODUgNzAuNDE0NCAyOC45MiA2OS45MjQ0QzMzLjk3IDY5LjEzNDQgMzguOTIgNjUuMDc0NCA0NC42NSA2MC4zODQ0QzU2Ljg5IDUwLjM4NDQgNzMuNjUgMzYuNjM0NCAxMDQuMzEgNDcuMTQ0NEw5OC45MyA2Mi44MzQ0Qzc3LjAyIDU1LjMxNDQgNjYuOTMgNjMuNjE0NCA1NS4xNiA3My4yMTQ0QzQ4LjE2IDc4LjkxNDQgNDEgODQuODE0NCAzMS41IDg2LjMwNDRDMjkuMzY4MiA4Ni42NjE2IDI3LjIxMTQgODYuODQ4OCAyNS4wNSA4Ni44NjQ0WiIgZmlsbD0iIzI5MUM0OCIvPgo8cGF0aCBkPSJNODMuODcgMTEzLjY1NEg3MS41M1Y5Ny4wNzQ0SDgzLjlDODUuMzIgOTcuMDc0NCA4OS41NiA5Ni41NjQ0IDkxLjcxIDk0LjQyNDRDOTIuMzYgOTMuNzc0NCA5My4yMiA5Mi42MjQ0IDkzLjMyIDkwLjAyNDRDOTIuOTk3NiA4OC4zODI1IDkyLjExODEgODYuOTAyNCA5MC44MyA4NS44MzQ0Qzg4LjMzIDgzLjk0NDQgODQuMTUgODQuMTI0NCA4MS4wOCA4NC42MTQ0Qzc2LjAzIDg1LjQwNDQgNzEuMDggODkuNDU0NCA2NS4zNSA5NC4xNTQ0QzU2LjIyIDEwMS42MjQgNDQuNTYgMTExLjE1NCAyNi41MSAxMTEuMTU0QzE5LjQwODkgMTExLjA2MiAxMi4zNzI4IDEwOS43ODggNS42OSAxMDcuMzg0TDExLjA3IDkxLjY5NDRDMzIuOTggOTkuMjE0NCA0My4wNyA5MC45MTQ0IDU0Ljg0IDgxLjMxNDRDNjEuODQgNzUuNjE0NCA2OSA2OS43MTQ0IDc4LjUgNjguMjI0NEM4Ny43OSA2Ni43NTQ0IDk1LjQzIDY4LjMyNDQgMTAxLjIgNzIuODg0NEMxMDYuMDgyIDc2Ljg1MSAxMDkuMjA0IDgyLjU4MTYgMTA5Ljg5IDg4LjgzNDRWODkuMTY0NFY4OS40NjQ0QzEwOS44OSA5Ni4yMTQ0IDEwNy42IDEwMi4wMjQgMTAzLjI1IDEwNi4yNzRDOTYuMTcgMTEzLjI1NCA4Ni4wOSAxMTMuNjU0IDgzLjQ3IDExMy42NTRaIiBmaWxsPSIjMjkxQzQ4Ii8+CjxwYXRoIGQ9Ik01Mi4zOCAyLjQ2NDM5QzUxLjI2MjggMS42OTkwNCA0OS45OTk2IDEuMTcyNTUgNDguNjY5NSAwLjkxNzg4MkM0Ny4zMzkzIDAuNjYzMjE4IDQ1Ljk3MSAwLjY4NTg1OSA0NC42NSAwLjk4NDM4QzQ0LjQ0IDAuOTg0MzggNDQuMjQgMS4wOTQzOSA0NC4wMyAxLjE1NDM5QzQzLjAxODUgMS4xMDc4NSA0Mi4wMTI4IDEuMzMxNTkgNDEuMTE2NSAxLjgwMjYyQzQwLjIyMDEgMi4yNzM2NCAzOS40NjU0IDIuOTc0OTQgMzguOTMgMy44MzQzOUMzOC44MiA0LjAyNDM5IDM4LjcxIDQuMjI0MzkgMzguNjEgNC40MzQzOUMzOC4xODgyIDQuNDM0MDMgMzcuNzY4MSA0LjQ4NzgxIDM3LjM2IDQuNTk0NEMzNC4wNSA1LjQwNDQgMzEuNDIgOC43MDQzOSAzMi4yNiAxMi4yNDQ0QzMzLjU0IDE3LjU3NDQgMzguMzQgMjEuOTQ0NCA0NC4wMiAyMS43OTQ0QzQ2LjkwNTQgMjEuNzEzNiA0OS42NjM1IDIwLjU4ODUgNTEuNzgyMSAxOC42MjhDNTMuOTAwOCAxNi42Njc2IDU1LjIzNiAxNC4wMDQ5IDU1LjU0IDExLjEzNDRDNTUuOSA4LjA5NDQgNTUgNC4zMDQzOSA1Mi4zOCAyLjQ2NDM5WiIgZmlsbD0iI0ZGNjY2NiIvPgo8cGF0aCBkPSJNODIuNzUgNy41ODQzN0M4Mi43NSA3LjQ1NDM3IDgyLjc1IDcuMzI0MzggODIuNzUgNy4xOTQzOEM4Mi44NCA0LjYxNDM4IDgxLjE3IDEuMTk0MzYgNzguMzcgMC42NDQzNjRDNzYuMzMyNyAwLjA5NTQzNSA3NC4xODA1IDAuMTQ0MDQ4IDcyLjE3IDAuNzg0Mzc5QzcwLjE5NTggMS40OTEyNyA2OC40NjIyIDIuNzQyOSA2Ny4xNyA0LjM5NDM2QzY1Ljk2OTEgNS44OTM0OSA2NS4yMjExIDcuNzA0MjYgNjUuMDEzOSA5LjYxMzg1QzY0LjgwNjYgMTEuNTIzNCA2NS4xNDg3IDEzLjQ1MjUgNjYgMTUuMTc0NEM2OS41NiAyMS45MjQ0IDc5LjU1IDIyLjQ3NDQgODMuOSAxNi4yNTQ0Qzg0Ljc4OSAxNC45MTQ0IDg1LjE2MjMgMTMuMjk3OCA4NC45NTA4IDExLjcwMzdDODQuNzM5NCAxMC4xMDk3IDgzLjk1NzUgOC42NDYyNCA4Mi43NSA3LjU4NDM3WiIgZmlsbD0iI0ZGNjY2NiIvPgo8L3N2Zz4K';" />
+                    </div>
+                    <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm min-w-0 overflow-visible relative">DD
+                        <div class="message-content text-gray-800 overflow-visible">${renderMarkdown(message)}</div>
+                    </div>
+                `;
+            }
+            
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Send message function
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+            
+            // Add user message to chat
+            addMessageToChat(message, true);
+            conversationHistory.push({role: 'user', content: message});
+            
+            // Clear input and reset height
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            
+            // Send message to backend
+            sendToBackend(message);
+        }
+
+        // Send message to backend
+        async function sendToBackend(message) {
+            try {
+                // Add typing indicator
+                const typingDiv = document.createElement('div');
+                typingDiv.className = 'flex items-start gap-4';
+                typingDiv.id = 'typing-indicator';
+                typingDiv.innerHTML = `
+                    <div class="flex-shrink-0 size-12 rounded-full bg-[var(--background-color)] flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                            <g clip-path="url(#clip0_6_319)">
+                                <path d="M8.57829 8.57829C5.52816 11.6284 3.451 15.5145 2.60947 19.7452C1.76794 23.9758 2.19984 28.361 3.85056 32.3462C5.50128 36.3314 8.29667 39.7376 11.8832 42.134C15.4698 44.5305 19.6865 45.8096 24 45.8096C28.3135 45.8096 32.5302 44.5305 36.1168 42.134C39.7033 39.7375 42.4987 36.3314 44.1494 32.3462C45.8002 28.361 46.2321 23.9758 45.3905 19.7452C44.549 15.5145 42.4718 11.6284 39.4217 8.57829L24 24L8.57829 8.57829Z" fill="currentColor"></path>
+                            </g>
+                            <defs>
+                                <clipPath id="clip0_6_319"><rect fill="white" height="48" width="48"></rect></clipPath>
+                            </defs>
+                        </svg>
+                    </div>
+                    <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm min-w-0 overflow-visible relative">
+                        <div class="text-gray-800">Typing...</div>
+                    </div>
+                `;
+                document.getElementById('chatContainer').appendChild(typingDiv);
+
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        conversation_history: conversationHistory
+                    })
+                });
+
+                // Remove typing indicator
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    addMessageToChat(data.response, false);
+                    conversationHistory.push({role: 'assistant', content: data.response});
+                } else {
+                    addMessageToChat('Sorry, I encountered an error. Please try again.', false);
+                }
+            } catch (error) {
+                // Remove typing indicator
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+                addMessageToChat('Sorry, I encountered an error. Please try again.', false);
+            }
+        }
+
+        // New chat button (header)
+        const headerNewChatBtn = document.getElementById('newChatButton');
+        if (headerNewChatBtn) {
+            headerNewChatBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeNewSidebar();
+                window.location.href = '/';
+            });
+        }
+
+        // Logout button (header)
+        const headerLogoutBtn = document.getElementById('logoutButton');
+        if (headerLogoutBtn) {
+            headerLogoutBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                fetch('/api/auth/logout', { method: 'POST' })
+                    .then(() => { window.location.href = '/login'; })
+                    .catch(() => { window.location.href = '/login'; });
+            });
+        }
+
+        // New Sidebar functionality with debugging
+        function toggleNewSidebar() {
+            console.log('toggleNewSidebar called!');
+            const sidebar = document.getElementById('newSidebar');
+            const overlay = document.getElementById('newSidebarOverlay');
+            const headerAvatar = document.querySelector('.nasma-avatar-header');
+
+            console.log('sidebar element:', sidebar);
+            console.log('overlay element:', overlay);
+            console.log('headerAvatar element:', headerAvatar);
+
+            if (!sidebar) {
+                console.error('Sidebar element not found!');
+                alert('Sidebar element not found!');
+                return;
+            }
+
+            const isOpen = sidebar.classList.contains('open');
+            console.log('sidebar isOpen:', isOpen);
+
+            if (isOpen) {
+                // Close sidebar
+                console.log('Closing sidebar');
+                sidebar.classList.remove('open');
+                overlay.classList.remove('active');
+                if (headerAvatar) headerAvatar.classList.remove('hidden');
+            } else {
+                // Open sidebar
+                console.log('Opening sidebar');
+                sidebar.classList.add('open');
+                overlay.classList.add('active');
+                if (headerAvatar) headerAvatar.classList.add('hidden');
+                alert('Sidebar should be open now!'); // Visual confirmation
+            }
+        }
+
+        // New Sidebar event listeners with debugging
+        console.log('Looking for sidebarToggle...');
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        console.log('sidebarToggle found:', sidebarToggle);
+
+        if (sidebarToggle) {
+            console.log('Adding click listener to hamburger menu');
+            sidebarToggle.addEventListener('click', function(e) {
+                console.log('Hamburger menu clicked!');
+                alert('Hamburger menu clicked!'); // Visual confirmation
+                e.preventDefault();
+                e.stopPropagation();
+                toggleNewSidebar();
+            });
+
+            // Add visual feedback for hover
+            sidebarToggle.addEventListener('mouseover', function() {
+                console.log('Hamburger menu hovered');
+                sidebarToggle.style.backgroundColor = 'rgba(255, 0, 0, 0.3)'; // Red background on hover
+            });
+
+            sidebarToggle.addEventListener('mouseout', function() {
+                sidebarToggle.style.backgroundColor = '';
+            });
+        } else {
+            console.error('sidebarToggle not found!');
+            alert('Hamburger menu button not found!');
+        }
+
+        const newSidebarClose = document.getElementById('newSidebarClose');
+        if (newSidebarClose) {
+            newSidebarClose.addEventListener('click', toggleNewSidebar);
+        }
+
+        const newSidebarOverlay = document.getElementById('newSidebarOverlay');
+        if (newSidebarOverlay) {
+            newSidebarOverlay.addEventListener('click', toggleNewSidebar);
+        }
+
+        // New Sidebar button functionality with extensive debugging
+        console.log('Looking for newChatBtn...');
+        const newChatBtn = document.getElementById('newChatBtn');
+        console.log('newChatBtn found:', newChatBtn);
+
+        if (newChatBtn) {
+            console.log('Adding click listener to newChatBtn');
+            newChatBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('New Chat button clicked!'); // Debug log
+                closeNewSidebar();
+                window.location.href = '/';
+            });
+
+            // Add mouseover debugging
+            newChatBtn.addEventListener('mouseover', function() {
+                console.log('Mouse over New Chat button');
+            });
+        } else {
+            console.error('newChatBtn not found!');
+        }
+
+        console.log('Looking for logoutBtn...');
+        const logoutBtn = document.getElementById('logoutBtn');
+        console.log('logoutBtn found:', logoutBtn);
+
+        if (logoutBtn) {
+            console.log('Adding click listener to logoutBtn');
+            logoutBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Logout button clicked!'); // Debug log
+                fetch('/api/auth/logout', { method: 'POST' })
+                    .then(() => { window.location.href = '/login'; })
+                    .catch(() => { window.location.href = '/login'; });
+            });
+
+            // Add mouseover debugging
+            logoutBtn.addEventListener('mouseover', function() {
+                console.log('Mouse over Logout button');
+            });
+        } else {
+            console.error('logoutBtn not found!');
+        }
+
+        // Function to close new sidebar
+        function closeNewSidebar() {
+            const sidebar = document.getElementById('newSidebar');
+            const overlay = document.getElementById('newSidebarOverlay');
+            const headerAvatar = document.querySelector('.nasma-avatar-header');
+
+            if (sidebar && overlay) {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('active');
+                if (headerAvatar) headerAvatar.classList.remove('hidden');
+            }
+        }
+
+        // Additional Prompts Toggle Functionality
+        let additionalPromptsVisible = false;
+        
+        function toggleAdditionalPrompts() {
+            const additionalPrompts = document.getElementById('additionalPrompts');
+            const toggleArrow = document.getElementById('toggleArrow');
+            const toggleText = document.getElementById('toggleText');
+            
+            if (!additionalPromptsVisible) {
+                // Show additional prompts
+                additionalPrompts.style.maxHeight = additionalPrompts.scrollHeight + 'px';
+                toggleArrow.textContent = 'keyboard_arrow_down';
+                toggleText.textContent = 'Less';
+                additionalPromptsVisible = true;
+            } else {
+                // Hide additional prompts
+                additionalPrompts.style.maxHeight = '0px';
+                toggleArrow.textContent = 'keyboard_arrow_up';
+                toggleText.textContent = 'More';
+                additionalPromptsVisible = false;
+            }
+        }
+
+        // Check for initial message from session storage
+        document.addEventListener('DOMContentLoaded', function() {
+            // Ensure new sidebar starts closed
+            closeNewSidebar();
+
+            // Initialize additional prompts toggle (only for managers)
+            const additionalPromptsToggle = document.getElementById('additionalPromptsToggle');
+            if (additionalPromptsToggle) {
+                additionalPromptsToggle.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleAdditionalPrompts();
+                });
+            }
+
+            const initialMessage = sessionStorage.getItem('initialMessage');
+            if (initialMessage) {
+                sessionStorage.removeItem('initialMessage');
+                document.getElementById('messageInput').value = initialMessage;
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

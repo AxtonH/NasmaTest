@@ -1,0 +1,15 @@
+{
+  "session_id": "overtime_1758704384",
+  "type": "overtime",
+  "state": "started",
+  "step": 2,
+  "created_at": "2025-09-24T11:59:47.514581",
+  "data": {
+    "category_id": 12,
+    "category_name": "Overtime - Prezlab FZ LLC - Regional Office",
+    "projects": [],
+    "date_start_dmy": "24/09/2025",
+    "date_end_dmy": "24/09/2025"
+  },
+  "completed_steps": []
+}
