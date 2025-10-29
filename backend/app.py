@@ -2124,10 +2124,12 @@ def create_app():
             if model not in {'hr.leave', 'approval.request'} or not isinstance(record_id, int) or action not in {'approve', 'refuse'}:
                 return jsonify({'success': False, 'message': 'Invalid model/id/action'}), 400
 
-            debug_log(
-                f"[ManagerAction] Button clicked: action={action} model={model} record_id={record_id}",
-                "bot_logic"
-            )
+            log_message = f"[ManagerAction] Button clicked: action={action} model={model} record_id={record_id}"
+            debug_log(log_message, "bot_logic")
+            try:
+                app.logger.info(log_message)
+            except Exception:
+                pass
 
             if not odoo_service.is_authenticated():
                 return jsonify({'success': False, 'message': 'Odoo session not authenticated'}), 401
@@ -2164,21 +2166,27 @@ def create_app():
             ok = (resp.status_code == 200)
             result = resp.json() if ok else { 'error': f'HTTP {resp.status_code}' }
             if ok and 'error' not in result:
-                debug_log(
-                    f"[ManagerAction] Success: action={action} model={model} record_id={record_id}",
-                    "bot_logic"
-                )
+                success_message = f"[ManagerAction] Success: action={action} model={model} record_id={record_id}"
+                debug_log(success_message, "bot_logic")
+                try:
+                    app.logger.info(success_message)
+                except Exception:
+                    pass
                 return jsonify({'success': True})
-            debug_log(
-                f"[ManagerAction] Failure: action={action} model={model} record_id={record_id} error={result.get('error')}",
-                "bot_logic"
-            )
+            failure_message = f"[ManagerAction] Failure: action={action} model={model} record_id={record_id} error={result.get('error')}"
+            debug_log(failure_message, "bot_logic")
+            try:
+                app.logger.warning(failure_message)
+            except Exception:
+                pass
             return jsonify({'success': False, 'message': str(result.get('error', 'Unknown error'))}), 500
         except Exception as e:
-            debug_log(
-                f"[ManagerAction] Exception during {action} on {model} id={record_id}: {e}",
-                "bot_logic"
-            )
+            exception_message = f"[ManagerAction] Exception during {action} on {model} id={record_id}: {e}"
+            debug_log(exception_message, "bot_logic")
+            try:
+                app.logger.exception(exception_message)
+            except Exception:
+                pass
             return jsonify({'success': False, 'message': f'Error performing approval action: {str(e)}'}), 500
     
     @app.route('/api/health', methods=['GET'])
