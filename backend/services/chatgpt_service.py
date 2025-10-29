@@ -7,6 +7,7 @@ except Exception:
     from config.settings import Config
 from datetime import datetime
 from typing import List, Dict, Any
+from flask import g
 
 def debug_log(message: str, category: str = "general"):
     """Conditional debug logging based on configuration"""
@@ -41,10 +42,6 @@ class ChatGPTService:
         self.reimbursement_service = None
         self.metrics_service = None
 
-        # Thread-local storage for per-request Odoo session data
-        # This prevents race conditions when multiple users submit simultaneously
-        self._local = threading.local()
-
         # Leave types that require the user to pick between full days vs custom hours
         self.leave_mode_config = {
             'Sick Leave': {
@@ -65,15 +62,9 @@ class ChatGPTService:
         # if not os.path.exists(self.storage_dir):
         #     os.makedirs(self.storage_dir)
 
-    @property
-    def current_odoo_session(self):
-        """Get thread-local Odoo session data (prevents race conditions)"""
-        return getattr(self._local, 'odoo_session', None)
-
-    @current_odoo_session.setter
-    def current_odoo_session(self, value):
-        """Set thread-local Odoo session data (isolated per request thread)"""
-        self._local.odoo_session = value
+    def get_current_odoo_session(self):
+        """Get Odoo session data from Flask's request context (g object)"""
+        return getattr(g, 'odoo_session_data', None)
 
     def set_services(
         self,
@@ -2054,7 +2045,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 except Exception:
                     pass
                 debug_log(f"User confirmed submission with full context present; submitting.", "bot_logic")
-                return self._submit_timeoff_request(thread_id, session, employee_data, self.current_odoo_session)
+                return self._submit_timeoff_request(thread_id, session, employee_data, self.get_current_odoo_session())
 
             # Missing leave type
             if not sel_type_now:
