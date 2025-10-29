@@ -2124,6 +2124,11 @@ def create_app():
             if model not in {'hr.leave', 'approval.request'} or not isinstance(record_id, int) or action not in {'approve', 'refuse'}:
                 return jsonify({'success': False, 'message': 'Invalid model/id/action'}), 400
 
+            debug_log(
+                f"[ManagerAction] Button clicked: action={action} model={model} record_id={record_id}",
+                "bot_logic"
+            )
+
             if not odoo_service.is_authenticated():
                 return jsonify({'success': False, 'message': 'Odoo session not authenticated'}), 401
 
@@ -2159,9 +2164,21 @@ def create_app():
             ok = (resp.status_code == 200)
             result = resp.json() if ok else { 'error': f'HTTP {resp.status_code}' }
             if ok and 'error' not in result:
+                debug_log(
+                    f"[ManagerAction] Success: action={action} model={model} record_id={record_id}",
+                    "bot_logic"
+                )
                 return jsonify({'success': True})
+            debug_log(
+                f"[ManagerAction] Failure: action={action} model={model} record_id={record_id} error={result.get('error')}",
+                "bot_logic"
+            )
             return jsonify({'success': False, 'message': str(result.get('error', 'Unknown error'))}), 500
         except Exception as e:
+            debug_log(
+                f"[ManagerAction] Exception during {action} on {model} id={record_id}: {e}",
+                "bot_logic"
+            )
             return jsonify({'success': False, 'message': f'Error performing approval action: {str(e)}'}), 500
     
     @app.route('/api/health', methods=['GET'])
