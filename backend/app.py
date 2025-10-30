@@ -25,6 +25,7 @@ try:
         build_overtime_table_widget,
         build_main_overview_table_widget,
     )
+    from .services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step
 except Exception:
     # Local import style when running as script from backend/ directory
     from services.chatgpt_service import ChatGPTService
@@ -47,6 +48,7 @@ except Exception:
         build_overtime_table_widget,
         build_main_overview_table_widget,
     )
+    from services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step
 import os
 from datetime import date
 import time
@@ -954,6 +956,282 @@ def create_app():
                     'has_employee_context': employee_data is not None,
                     'thread_id': thread_id
                 })
+
+            # Log hours flow: handle task viewing for normal users
+            try:
+                if is_log_hours_trigger(message):
+                    if not employee_data:
+                        assistant_text = 'Unable to retrieve your tasks. Please ensure you are logged in properly.'
+                        _log_chat_message_event(
+                            thread_id,
+                            'assistant',
+                            assistant_text,
+                            employee_data,
+                            {'source': 'log_hours', 'error': 'no_employee_data'}
+                        )
+                        return jsonify({
+                            'response': assistant_text,
+                            'status': 'error',
+                            'has_employee_context': False,
+                            'thread_id': thread_id
+                        })
+
+                    log_hours_resp = start_log_hours_flow(odoo_service, employee_data)
+                    assistant_text = log_hours_resp.get('message', '')
+
+                    if assistant_text:
+                        _log_chat_message_event(
+                            thread_id,
+                            'assistant',
+                            assistant_text,
+                            employee_data,
+                            {'source': 'log_hours'}
+                        )
+
+                    # Log usage metric
+                    _log_usage_metric(
+                        'log_hours',
+                        thread_id,
+                        {
+                            'user_message': message[:200] if message else '',
+                            'task_count': len(log_hours_resp.get('tasks', [])),
+                            'success': log_hours_resp.get('success', False)
+                        },
+                        employee_data
+                    )
+
+                    response_data = {
+                        'response': assistant_text,
+                        'status': 'success' if log_hours_resp.get('success') else 'error',
+                        'has_employee_context': employee_data is not None,
+                        'thread_id': thread_id
+                    }
+                    # Include widgets if present
+                    if 'widgets' in log_hours_resp:
+                        response_data['widgets'] = log_hours_resp['widgets']
+                    return jsonify(response_data)
+            except Exception as e:
+                debug_log(f"Error in log hours flow: {str(e)}", "bot_logic")
+                pass
+
+            # Log hours flow: handle button clicks and flow steps
+            try:
+                # Check for log hours button click format: log_hours:subtask_id:date:task_name
+                if message.startswith('log_hours:'):
+                    parts = message.split(':', 3)
+                    if len(parts) >= 4:
+                        subtask_id = int(parts[1])
+                        task_date = parts[2]
+                        task_name = parts[3] if len(parts) > 3 else 'Task'
+                        
+                        log_hours_resp = start_log_hours_for_task(odoo_service, employee_data, subtask_id, task_date, task_name)
+                        
+                        # Store flow context in session
+                        session['log_hours_flow'] = {
+                            'context': log_hours_resp.get('widgets', {}).get('log_hours_flow', {}),
+                            'started': True
+                        }
+                        
+                        assistant_text = log_hours_resp.get('message', '')
+                        if assistant_text:
+                            _log_chat_message_event(
+                                thread_id,
+                                'assistant',
+                                assistant_text,
+                                employee_data,
+                                {'source': 'log_hours'}
+                            )
+                        
+                        response_data = {
+                            'response': assistant_text,
+                            'status': 'success' if log_hours_resp.get('success') else 'error',
+                            'has_employee_context': employee_data is not None,
+                            'thread_id': thread_id
+                        }
+                        if 'widgets' in log_hours_resp:
+                            response_data['widgets'] = log_hours_resp['widgets']
+                        if 'buttons' in log_hours_resp:
+                            response_data['buttons'] = log_hours_resp['buttons']
+                        return jsonify(response_data)
+                
+                # Check for log hours flow step inputs
+                log_hours_session = session.get('log_hours_flow', {})
+                if log_hours_session.get('started'):
+                    context = log_hours_session.get('context', {})
+                    current_step = context.get('step', '')
+                    
+                    # Handle dropdown selection format: context_key=value
+                    if '=' in message:
+                        parts = message.split('=', 1)
+                        context_key = parts[0]
+                        value = parts[1] if len(parts) > 1 else ''
+                        
+                        if context_key == 'log_hours_task_activity':
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, value)
+                        elif context_key == 'log_hours_hours':
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, value)
+                        elif context_key == 'log_hours_description':
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, value)
+                        else:
+                            step_resp = None
+                    # Handle button actions
+                    elif message.startswith('log_hours_task_activity:'):
+                        activity_id = message.split(':', 1)[1] if ':' in message else message.replace('log_hours_task_activity:', '')
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, activity_id)
+                    elif message.startswith('log_hours_hours:'):
+                        hours = message.split(':', 1)[1] if ':' in message else message.replace('log_hours_hours:', '')
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, hours)
+                    elif message.startswith('log_hours_description:'):
+                        desc = message.split(':', 1)[1] if ':' in message else message.replace('log_hours_description:', '')
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, desc)
+                    elif message == 'log_hours_skip_description':
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, '')
+                    elif message == 'log_hours_confirm':
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'confirmation', context, 'log_hours_confirm')
+                        # Clear session after confirmation
+                        session.pop('log_hours_flow', None)
+                    elif message == 'log_hours_cancel':
+                        session.pop('log_hours_flow', None)
+                        step_resp = {
+                            'message': 'Log hours cancelled.',
+                            'success': True
+                        }
+                    else:
+                        # Check if this is a direct input for the current step (chat input)
+                        # Safeguard: if message looks like hours (contains hour-related words),
+                        # and we have task_activity_id in context, treat it as hours input
+                        looks_like_hours = False
+                        if message:
+                            import re
+                            msg_lower = message.lower().strip()
+                            # Check for hour-related keywords
+                            has_hour_keywords = bool(re.search(r'\b(hours?|hrs?|h|minutes?|mins?|m)\b', msg_lower))
+                            # Check for numbers (digits)
+                            has_number = bool(re.search(r'\d+', message))
+                            # Check for number words (zero, one, two, ..., ten, etc.)
+                            number_words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 
+                                         'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen',
+                                         'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+                                         'thirty', 'forty', 'fifty', 'sixty']
+                            has_word_number = any(word in msg_lower for word in number_words)
+                            # Check for "half" (as in "half an hour")
+                            has_half = 'half' in msg_lower
+                            
+                            # It looks like hours if it has hour keywords AND (numbers OR word numbers OR half)
+                            looks_like_hours = has_hour_keywords and (has_number or has_word_number or has_half)
+                        
+                        # Prevent going back to previous steps - check if we've already completed them
+                        has_activity_id = bool(context.get('task_activity_id'))
+                        has_hours = bool(context.get('hours'))
+                        has_description = 'description' in context  # Even if empty string, it's been set
+                        
+                        # If it looks like hours and we have activity_id, prioritize hours step
+                        # This handles cases where session step wasn't updated correctly after activity selection
+                        if looks_like_hours and has_activity_id:
+                            # If we have task_activity_id but step is still task_activity (or empty),
+                            # it means activity was selected but session wasn't updated - treat as hours
+                            if current_step in ['task_activity', ''] or not current_step:
+                                step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, message)
+                            else:
+                                # Step is already correct, use current step
+                                step_resp = handle_log_hours_step(odoo_service, employee_data, current_step, context, message)
+                        # Prevent going back: if we have activity_id, don't allow task_activity step
+                        elif current_step == 'task_activity' and has_activity_id:
+                            # Activity already selected, treat as hours if it looks like hours, otherwise show error
+                            if looks_like_hours:
+                                step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, message)
+                            else:
+                                step_resp = {
+                                    'message': 'Activity has already been selected. Please enter the hours spent (e.g., "five hours", "5.5").',
+                                    'success': False,
+                                    'widgets': {
+                                        'log_hours_flow': {
+                                            'step': 'hours',
+                                            **context
+                                        }
+                                    }
+                                }
+                        # Prevent going back: if we have hours, don't allow hours step again
+                        elif current_step == 'hours' and has_hours:
+                            # Hours already entered, move to description
+                            step_resp = {
+                                'message': 'Hours have already been entered. Please add a description or click Skip.',
+                                'success': False,
+                                'widgets': {
+                                    'log_hours_flow': {
+                                        'step': 'description',
+                                        **context
+                                    }
+                                },
+                                'buttons': [
+                                    {'text': 'Skip', 'value': 'log_hours_skip_description', 'type': 'action'}
+                                ]
+                            }
+                        elif current_step == 'task_activity':
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, message)
+                        elif current_step == 'hours':
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, message)
+                        elif current_step == 'description':
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, message)
+                        elif current_step == 'confirmation':
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'confirmation', context, message)
+                            # Clear session after confirmation or cancellation
+                            if step_resp and step_resp.get('success'):
+                                if message.lower() in ['yes', 'confirm', 'y']:
+                                    session.pop('log_hours_flow', None)
+                                elif message.lower() in ['no', 'cancel', 'n']:
+                                    session.pop('log_hours_flow', None)
+                        else:
+                            step_resp = None
+                    
+                    if step_resp:
+                        # Update session context - always update if we have widgets with log_hours_flow
+                        # OR if we have a successful response (to preserve context even if no widgets)
+                        if 'widgets' in step_resp and 'log_hours_flow' in step_resp['widgets']:
+                            session['log_hours_flow'] = {
+                                'context': step_resp['widgets']['log_hours_flow'],
+                                'started': True
+                            }
+                        elif step_resp.get('success'):
+                            # Even if no widgets, preserve context for next step
+                            # Only update if we're not clearing the session
+                            if 'timesheet_id' not in step_resp:
+                                # Update context with current step from existing context
+                                existing_context = session.get('log_hours_flow', {}).get('context', {})
+                                if existing_context:
+                                    session['log_hours_flow'] = {
+                                        'context': existing_context,
+                                        'started': True
+                                    }
+                        # Clear session if timesheet entry was successfully created
+                        if step_resp.get('success') and 'timesheet_id' in step_resp:
+                            session.pop('log_hours_flow', None)
+                        
+                        assistant_text = step_resp.get('message', '')
+                        if assistant_text:
+                            _log_chat_message_event(
+                                thread_id,
+                                'assistant',
+                                assistant_text,
+                                employee_data,
+                                {'source': 'log_hours'}
+                            )
+                        
+                        response_data = {
+                            'response': assistant_text,
+                            'status': 'success' if step_resp.get('success') else 'error',
+                            'has_employee_context': employee_data is not None,
+                            'thread_id': thread_id
+                        }
+                        if 'widgets' in step_resp:
+                            response_data['widgets'] = step_resp['widgets']
+                        if 'buttons' in step_resp:
+                            response_data['buttons'] = step_resp['buttons']
+                        return jsonify(response_data)
+                        
+            except Exception as e:
+                debug_log(f"Error in log hours flow step: {str(e)}", "bot_logic")
+                pass
 
             # Overtime flow: handle before document intents
             try:
