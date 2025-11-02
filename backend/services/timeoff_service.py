@@ -129,6 +129,10 @@ class TimeOffService:
         negative_patterns = [
             r'(?:not|don\'t|won\'t).{0,10}(?:need|want|take)',
             r'(?:already|have).{0,10}(?:requested|applied)',
+            # Leave balance queries (should not trigger time-off flow)
+            r'(?:what|show|check|tell|see|how much).{0,20}(?:remaining|balance|left|available).{0,20}(?:annual|sick|leave|vacation)',
+            r'(?:remaining|balance|left|available).{0,20}(?:annual|sick|leave|vacation)',
+            r'(?:how many).{0,20}(?:days|hours).{0,20}(?:remaining|left|available).{0,20}(?:annual|sick|leave)',
         ]
         for neg_pattern in negative_patterns:
             if re.search(neg_pattern, message_lower):

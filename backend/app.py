@@ -17,6 +17,7 @@ try:
     from .services.intent_service import IntentService
     from .services.overtime_service import OvertimeService
     from .services.remember_me_service import RememberMeService
+    from .services.leave_balance_service import LeaveBalanceService
     from .services.title_generator import generate_conversation_title, update_title_if_needed
     from .services.manager_helper import (
         get_team_overview,
@@ -40,6 +41,7 @@ except Exception:
     from services.intent_service import IntentService
     from services.overtime_service import OvertimeService
     from services.remember_me_service import RememberMeService
+    from services.leave_balance_service import LeaveBalanceService
     from services.title_generator import generate_conversation_title, update_title_if_needed
     from services.manager_helper import (
         get_team_overview,
@@ -164,8 +166,12 @@ def create_app():
     reimbursement_service = ReimbursementService(odoo_service, employee_service, metrics_service=metrics_service)
     reimbursement_service.session_manager = session_manager
     
+    # Initialize leave balance service
+    leave_balance_service = LeaveBalanceService(odoo_service)
+    
     # Wire services together
     chatgpt_service.set_services(timeoff_service, session_manager, halfday_service, reimbursement_service, metrics_service)
+    chatgpt_service.leave_balance_service = leave_balance_service
 
     PEOPLE_CULTURE_DENIED = "sorry this flow is restricted to members of the People & Culture Department"
 
@@ -1012,6 +1018,113 @@ def create_app():
                 return jsonify({
                     'response': assistant_text,
                     'status': 'success',
+                    'has_employee_context': employee_data is not None,
+                    'thread_id': thread_id
+                })
+
+            # Leave balance query: handle before time-off flow
+            def _is_leave_balance_query(text: str) -> bool:
+                """Detect if user is asking about remaining leave balance"""
+                import re
+                text_lower = text.lower()
+                balance_patterns = [
+                    # Patterns with "what" + balance/leave
+                    r'(?:what|what\'s|whats).{0,15}(?:is|my|me)?.{0,10}(?:remaining|balance|left|available).{0,20}(?:annual|sick|leave|vacation)',
+                    r'(?:what|what\'s|whats).{0,15}(?:is|my|me)?.{0,10}(?:leave|annual|sick).{0,10}(?:balance|remaining|left)',
+                    # Patterns with balance/remaining + leave types
+                    r'(?:remaining|balance|left|available).{0,20}(?:annual|sick|leave|vacation)',
+                    # Patterns with "my/me" + balance
+                    r'(?:my|me).{0,10}(?:remaining|balance|left|available).{0,20}(?:annual|sick|leave|vacation)',
+                    r'(?:my|me).{0,10}(?:leave|annual|sick).{0,10}(?:balance|remaining|left)',
+                    # Simple patterns
+                    r'leave.{0,10}balance',
+                    r'balance.{0,10}leave',
+                    # Patterns with "how many days"
+                    r'(?:how many).{0,20}(?:days|hours).{0,20}(?:remaining|left|available).{0,20}(?:annual|sick|leave)',
+                    # Patterns with action verbs
+                    r'(?:show|check|tell|see|how much).{0,20}(?:remaining|balance|left|available).{0,20}(?:annual|sick|leave|vacation)',
+                    r'(?:show|check|tell|see).{0,20}(?:my|me).{0,10}(?:leave|annual|sick).{0,10}(?:balance|remaining)',
+                ]
+                for pattern in balance_patterns:
+                    if re.search(pattern, text_lower):
+                        return True
+                return False
+            
+            if _is_leave_balance_query(normalized_msg):
+                if not employee_data or not employee_data.get('id'):
+                    assistant_text = 'Unable to retrieve your leave balance. Please ensure you are logged in properly.'
+                    _log_chat_message_event(
+                        thread_id,
+                        'assistant',
+                        assistant_text,
+                        employee_data,
+                        {'source': 'leave_balance', 'error': 'no_employee_data'}
+                    )
+                    return jsonify({
+                        'response': assistant_text,
+                        'status': 'error',
+                        'has_employee_context': False,
+                        'thread_id': thread_id
+                    })
+                
+                try:
+                    # Extract leave type from message if mentioned
+                    leave_type_name = None
+                    message_lower = normalized_msg.lower()
+                    if 'annual' in message_lower or 'vacation' in message_lower:
+                        leave_type_name = 'Annual Leave'
+                    elif 'sick' in message_lower:
+                        leave_type_name = 'Sick Leave'
+                    
+                    # Calculate remaining leave
+                    remaining = leave_balance_service.calculate_remaining_leave(
+                        employee_data.get('id'),
+                        leave_type_name
+                    )
+                    
+                    if remaining:
+                        # Format message with each leave type on a separate line
+                        lines = []
+                        for leave_type, days in sorted(remaining.items()):
+                            # Format days with 1 decimal place, but show as integer if whole number
+                            if days == int(days):
+                                days_str = str(int(days))
+                            else:
+                                days_str = f"{days:.1f}"
+                            lines.append(f"\tAvailable {leave_type}: {days_str} days")
+                        
+                        formatted_message = "\n".join(lines)
+                        assistant_text = f"Here's your leave balance:\n\n{formatted_message}"
+                    else:
+                        assistant_text = "I couldn't retrieve your leave balance at the moment. Please try again later."
+                    
+                    _log_chat_message_event(
+                        thread_id,
+                        'assistant',
+                        assistant_text,
+                        employee_data,
+                        {'source': 'leave_balance'}
+                    )
+                    
+                    return jsonify({
+                        'response': assistant_text,
+                        'status': 'success',
+                        'has_employee_context': True,
+                        'thread_id': thread_id
+                    })
+                except Exception as e:
+                    debug_log(f"Error handling leave balance query: {str(e)}", "bot_logic")
+                    assistant_text = "I encountered an error while retrieving your leave balance. Please try again later."
+                    _log_chat_message_event(
+                        thread_id,
+                        'assistant',
+                        assistant_text,
+                        employee_data,
+                        {'source': 'leave_balance', 'error': str(e)}
+                    )
+                    return jsonify({
+                        'response': assistant_text,
+                        'status': 'error',
                     'has_employee_context': employee_data is not None,
                     'thread_id': thread_id
                 })

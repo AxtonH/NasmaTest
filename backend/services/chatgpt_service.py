@@ -41,6 +41,7 @@ class ChatGPTService:
         self.halfday_service = None
         self.reimbursement_service = None
         self.metrics_service = None
+        self.leave_balance_service = None
 
         # Leave types that require the user to pick between full days vs custom hours
         self.leave_mode_config = {
@@ -1616,12 +1617,28 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             return datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m/%Y')
                         except Exception:
                             return d
+                    
+                    # Get remaining leave time
+                    remaining_leave_text = ""
+                    try:
+                        if self.leave_balance_service and employee_data and employee_data.get('id'):
+                            employee_id = employee_data.get('id')
+                            leave_type_name = selected_type.get('name', 'Unknown')
+                            remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                            if remaining:
+                                remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
+                                if remaining_leave_text:
+                                    remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+                    except Exception as e:
+                        debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+                        # Continue without remaining leave info if there's an error
+                    
                     response_text = (
                         "Perfect! Here's your time-off request summary:\n\n"
                         f"📋 **Leave Type:** {selected_type.get('name', 'Unknown')}\n"
                         f"📅 **Start Date:** {_fmt(existing_start)}\n"
                         f"📅 **End Date:** {_fmt(existing_end)}\n"
-                        f"👤 **Employee:** {(employee_data or {}).get('name', 'Unknown')}\n\n"
+                        f"👤 **Employee:** {(employee_data or {}).get('name', 'Unknown')}{remaining_leave_text}\n\n"
                         "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     )
                     buttons = [
@@ -1718,12 +1735,28 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         return datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m/%Y')
                     except Exception:
                         return d
+                
+                # Get remaining leave time
+                remaining_leave_text = ""
+                try:
+                    if self.leave_balance_service and employee_data and employee_data.get('id'):
+                        employee_id = employee_data.get('id')
+                        leave_type_name = best_match.get('name', 'Unknown')
+                        remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                        if remaining:
+                            remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
+                            if remaining_leave_text:
+                                remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+                except Exception as e:
+                    debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+                    # Continue without remaining leave info if there's an error
+                
                 response_text = (
                     "Perfect! Here's your time-off request summary:\n\n"
                     f"📋 **Leave Type:** {best_match.get('name', 'Unknown')}\n"
                     f"📅 **Start Date:** {_fmt(existing_start)}\n"
                     f"📅 **End Date:** {_fmt(existing_end)}\n"
-                    f"👤 **Employee:** {(employee_data or {}).get('name', 'Unknown')}\n\n"
+                    f"👤 **Employee:** {(employee_data or {}).get('name', 'Unknown')}{remaining_leave_text}\n\n"
                     "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                 )
                 buttons = [
@@ -1894,11 +1927,27 @@ Be thorough and informative while maintaining clarity and accuracy."""
                     return datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m/%Y')
                 except Exception:
                     return d
+            
+            # Get remaining leave time
+            remaining_leave_text = ""
+            try:
+                if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
+                    employee_id = resolved_employee.get('id')
+                    leave_type_name = selected_type.get('name', 'Unknown') if selected_type else 'Unknown'
+                    remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                    if remaining:
+                        remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
+                        if remaining_leave_text:
+                            remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+            except Exception as e:
+                debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+                # Continue without remaining leave info if there's an error
+            
             response_text = f"Perfect! Here's your time-off request summary:\n\n"
             response_text += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if selected_type else 'Unknown'}\n"
             response_text += f"📅 **Start Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
             response_text += f"📅 **End Date:** {dd_mm_yyyy(parsed_date)}\n"
-            response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n\n"
+            response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
             response_text += "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
             buttons = [
                 {'text': 'Yes', 'value': 'yes', 'type': 'confirmation_choice'},
@@ -2175,12 +2224,27 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         or {}
                     )
                     lt = sel_type_now.get('name', 'Unknown') if isinstance(sel_type_now, dict) else 'Unknown'
+                    
+                    # Get remaining leave time
+                    remaining_leave_text = ""
+                    try:
+                        if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
+                            employee_id = resolved_employee.get('id')
+                            remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, lt)
+                            if remaining:
+                                remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
+                                if remaining_leave_text:
+                                    remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+                    except Exception as e:
+                        debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+                        # Continue without remaining leave info if there's an error
+                    
                     response_text = (
                         "Great, noted your dates. Here's your time-off request summary:\n\n"
                         f"📋 **Leave Type:** {lt}\n"
                         f"📅 **Start Date:** {dd_mm_yyyy(start_update)}\n"
                         f"📅 **End Date:** {dd_mm_yyyy(end_update)}\n"
-                        f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n\n"
+                        f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
                         "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     )
                     buttons = [
@@ -2222,12 +2286,27 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         or {}
                     )
                     lt = sel_type_now.get('name', 'Unknown') if isinstance(sel_type_now, dict) else 'Unknown'
+                    
+                    # Get remaining leave time
+                    remaining_leave_text = ""
+                    try:
+                        if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
+                            employee_id = resolved_employee.get('id')
+                            remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, lt)
+                            if remaining:
+                                remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
+                                if remaining_leave_text:
+                                    remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+                    except Exception as e:
+                        debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+                        # Continue without remaining leave info if there's an error
+                    
                     response_text = (
                         "Great, noted your date. Here's your time-off request summary:\n\n"
                         f"📋 **Leave Type:** {lt}\n"
                         f"📅 **Start Date:** { _dd_mm_yyyy(single_conf)}\n"
                         f"📅 **End Date:** { _dd_mm_yyyy(single_conf)}\n"
-                        f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n\n"
+                        f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
                         "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     )
                     buttons = [
@@ -2339,12 +2418,57 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             pass
                         return self._prompt_supporting_document_upload(thread_id)
                     
-                    response_text = f"Great, noted your hours. Here's your time-off request summary:\n\n"
-                    response_text += f"📋 **Leave Type:** {leave_type_name}\n"
-                    response_text += f"📅 **Date:** {dd_mm_yyyy(start_date)}\n"
-                    response_text += f"⏰ **Hours:** from {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
-                    response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n\n"
-                    response_text += "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
+                    # Get remaining leave time
+                    remaining_leave_text = ""
+                    try:
+                        if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
+                            employee_id = resolved_employee.get('id')
+                            remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                            if remaining:
+                                formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
+                                if formatted:
+                                    # Format as "**Available Sick Leave:** X days" (only label bold, not days)
+                                    import re
+                                    formatted_bold_label = re.sub(r'(Available [^:]+):', r'**\1:**', formatted)
+                                    remaining_leave_text = f"\n⏰ {formatted_bold_label}"
+                    except Exception as e:
+                        debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+                        # Continue without remaining leave info if there's an error
+                    
+                    # Check if this is a sick leave custom hours flow
+                    is_sick_custom_hours = (
+                        isinstance(selected_type, dict) and 
+                        selected_type.get('name') == 'Sick Leave' and
+                        self._is_custom_hours_mode(updated_session, 'Sick Leave')
+                    )
+                    
+                    # Collect supporting documents if any
+                    docs = self._collect_supporting_documents(updated_session)
+                    doc_name = ''
+                    if docs:
+                        first_doc = docs[0]
+                        doc_name = first_doc.get('filename') or first_doc.get('name') or 'Supporting document'
+                    
+                    if is_sick_custom_hours:
+                        # Custom format for sick leave custom hours
+                        response_text = f"Great, noted your hours. Here's your time-off request summary:\n\n"
+                        response_text += f"📋 **Leave Type:** {leave_type_name}\n"
+                        response_text += f"📅 **Date:** {dd_mm_yyyy(start_date)}\n"
+                        response_text += f"⏰ **Hours:** {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
+                        response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
+                        if remaining_leave_text:
+                            response_text += remaining_leave_text + "\n"
+                        if doc_name:
+                            response_text += f"📎 **Supporting Document:** {doc_name}\n"
+                        response_text += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
+                    else:
+                        # Original format for other leave types
+                        response_text = f"Great, noted your hours. Here's your time-off request summary:\n\n"
+                        response_text += f"📋 **Leave Type:** {leave_type_name}\n"
+                        response_text += f"📅 **Date:** {dd_mm_yyyy(start_date)}\n"
+                        response_text += f"⏰ **Hours:** from {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
+                        response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
+                        response_text += "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     buttons = [
                         {'text': 'Yes', 'value': 'yes', 'type': 'confirmation_choice'},
                         {'text': 'No', 'value': 'no', 'type': 'confirmation_choice'}
@@ -2401,11 +2525,27 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             return datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m/%Y')
                         except Exception:
                             return d
+                    
+                    # Get remaining leave time
+                    remaining_leave_text = ""
+                    try:
+                        if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
+                            employee_id = resolved_employee.get('id')
+                            selected_leave_type_name = selected_type.get('name', 'Unknown')
+                            remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, selected_leave_type_name)
+                            if remaining:
+                                remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
+                                if remaining_leave_text:
+                                    remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+                    except Exception as e:
+                        debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+                        # Continue without remaining leave info if there's an error
+                    
                     response_text = f"Great, noted your dates. Here's your time-off request summary:\n\n"
                     response_text += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown')}\n"
                     response_text += f"📅 **Start Date:** {dd_mm_yyyy(start_date)}\n"
                     response_text += f"📅 **End Date:** {dd_mm_yyyy(end_date)}\n"
-                    response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n\n"
+                    response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
                     response_text += "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     buttons = [
                         {'text': 'Yes', 'value': 'yes', 'type': 'confirmation_choice'},
@@ -2931,11 +3071,30 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 first_doc = docs[0]
                 doc_name = first_doc.get('filename') or first_doc.get('name') or 'Supporting document'
 
+            # Get remaining leave time
+            remaining_leave_text = ""
+            try:
+                if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
+                    employee_id = resolved_employee.get('id')
+                    leave_type_name = selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'
+                    remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                    if remaining:
+                        formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
+                        if formatted:
+                            # Format as "**Available Sick Leave:** X days" (only label bold, not days)
+                            # Replace "Available X: Y days" with "**Available X:** Y days"
+                            import re
+                            formatted_bold_label = re.sub(r'(Available [^:]+):', r'**\1:**', formatted)
+                            remaining_leave_text = f"\n⏰ {formatted_bold_label}"
+            except Exception as e:
+                debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+                # Continue without remaining leave info if there's an error
+
             summary = "Great, I have everything I need. Here's your time-off request summary:\n\n"
             summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
             summary += f"📅 **Start Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
             summary += f"📅 **End Date:** {dd_mm_yyyy(end_date) if end_date else 'Unknown'}\n"
-            summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
+            summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n"
             if doc_name:
                 summary += f"📎 **Supporting Document:** {doc_name}\n"
             summary += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
@@ -3016,11 +3175,26 @@ Be thorough and informative while maintaining clarity and accuracy."""
             except Exception:
                 return d
 
+        # Get remaining leave time
+        remaining_leave_text = ""
+        try:
+            if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
+                employee_id = resolved_employee.get('id')
+                leave_type_name = selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'
+                remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                if remaining:
+                    remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
+                    if remaining_leave_text:
+                        remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+        except Exception as e:
+            debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+            # Continue without remaining leave info if there's an error
+
         summary = "Great, noted your dates. Here's your time-off request summary:\n\n"
         summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
         summary += f"📅 **Start Date:** {dd_mm_yyyy(start_date)}\n"
         summary += f"📅 **End Date:** {dd_mm_yyyy(end_date)}\n"
-        summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n\n"
+        summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
         summary += "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
         buttons = [
             {'text': 'Yes', 'value': 'yes', 'type': 'confirmation_choice'},
