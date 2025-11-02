@@ -52,17 +52,49 @@ except Exception:
     )
     from services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step
 import os
+import sys
+import logging
 from datetime import date
 import time
 
+# Configure Python logging to output to stdout/stderr (for Railway)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True  # Override any existing configuration
+)
+
+# Get Flask logger
+logger = logging.getLogger('flask')
+logger.setLevel(logging.INFO)
+
+# Ensure stdout/stderr are unbuffered for immediate log output
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(line_buffering=True)
+
 def debug_log(message: str, category: str = "general"):
     """Conditional debug logging based on configuration"""
-    if category == "odoo_data" and Config.DEBUG_ODOO_DATA:
-        print(f"DEBUG: {message}")
+    # Always log errors and warnings
+    if "ERROR" in message.upper() or "FAILED" in message.upper() or "FAIL" in message.upper():
+        print(f"ERROR: {message}", flush=True)
+        logger.error(message)
+    elif "WARNING" in message.upper() or "WARN" in message.upper():
+        print(f"WARNING: {message}", flush=True)
+        logger.warning(message)
+    elif category == "odoo_data" and Config.DEBUG_ODOO_DATA:
+        print(f"DEBUG: {message}", flush=True)
+        logger.debug(message)
     elif category == "bot_logic" and Config.DEBUG_BOT_LOGIC:
-        print(f"DEBUG: {message}")
+        print(f"DEBUG: {message}", flush=True)
+        logger.debug(message)
     elif category == "general" and Config.VERBOSE_LOGS:
-        print(f"DEBUG: {message}")
+        print(f"DEBUG: {message}", flush=True)
+        logger.debug(message)
 
 def _parse_two_dates_from_text(text: str) -> tuple:
     # Restored to a no-op to avoid aggressive parsing side-effects
@@ -134,11 +166,22 @@ def create_app():
                 template_folder='../frontend/templates',
                 static_folder='../frontend/static')
     
+    # Configure Flask logging to stdout/stderr (for Railway)
+    app.logger.setLevel(logging.INFO)
+    app.logger.handlers = [logging.StreamHandler(sys.stdout)]
+    
     # Enable CORS for all routes
     CORS(app)
     
     # Load configuration
     app.config.from_object(Config)
+    
+    # Log startup info
+    app.logger.info("=" * 50)
+    app.logger.info("Nasma Flask Application Starting")
+    app.logger.info(f"Environment: {'DEVELOPMENT' if Config.DEBUG else 'PRODUCTION'}")
+    app.logger.info(f"Debug flags - ODOO_DATA: {Config.DEBUG_ODOO_DATA}, BOT_LOGIC: {Config.DEBUG_BOT_LOGIC}, VERBOSE: {Config.VERBOSE_LOGS}")
+    app.logger.info("=" * 50)
     
     # Initialize services
     chatgpt_service = ChatGPTService()
