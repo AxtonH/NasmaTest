@@ -949,12 +949,6 @@
                     const components = [];
                     components.push(navigator.userAgent || '');
                     try {
-                        const dims = `${screen.width}x${screen.height}x${screen.colorDepth}`;
-                        components.push(dims);
-                    } catch (_) {
-                        components.push('screen-unknown');
-                    }
-                    try {
                         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
                         components.push(tz || 'tz-unknown');
                     } catch (_) {
