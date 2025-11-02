@@ -1013,6 +1013,7 @@
         async function attemptAutoLogin() {
             const token = localStorage.getItem(REMEMBER_ME_STORAGE_KEY);
             if (!token) {
+                console.log('[AUTO_LOGIN] Skipping: no token in localStorage');
                 return false;
             }
             if (rememberMeAutoLoginPromise) {
@@ -1020,8 +1021,10 @@
             }
             rememberMeAutoLoginPromise = (async () => {
                 try {
+                    console.log('[AUTO_LOGIN] Starting auto-login attempt');
                     const fingerprint = await getDeviceFingerprint();
                     if (!fingerprint) {
+                        console.error('[AUTO_LOGIN] FAILED: Could not get device fingerprint');
                         return false;
                     }
                     const resp = await fetch('/api/auth/verify-remember-me', {
@@ -1030,22 +1033,40 @@
                         credentials: 'include',
                         body: JSON.stringify({ token, device_fingerprint: fingerprint })
                     });
+                    console.log(`[AUTO_LOGIN] Response status: ${resp.status}, ok: ${resp.ok}`);
                     if (!resp.ok) {
+                        let errorData = null;
+                        try {
+                            errorData = await resp.json();
+                            console.error('[AUTO_LOGIN] FAILED:', errorData);
+                        } catch (e) {
+                            console.error('[AUTO_LOGIN] FAILED: Could not parse error response');
+                        }
                         if (resp.status === 401) {
                             localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
                         }
                         return false;
                     }
-                    const data = await resp.json().catch(() => ({}));
+                    let data;
+                    try {
+                        data = await resp.json();
+                        console.log('[AUTO_LOGIN] Response data:', { success: data.success, failure_reason: data.failure_reason });
+                    } catch (parseError) {
+                        console.error('[AUTO_LOGIN] FAILED: Failed to parse auto-login response:', parseError);
+                        localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
+                        return false;
+                    }
                     if (data && data.success) {
+                        console.log('[AUTO_LOGIN] SUCCESS: Auto-login successful');
                         return true;
                     }
-                    if (resp.status === 401) {
-                        localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
-                    }
+                    // If we got here, response was OK but success was false
+                    console.error('[AUTO_LOGIN] FAILED: Auto-login unsuccessful:', data.message, data.failure_reason);
+                    localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
                     return false;
                 } catch (err) {
-                    console.error('Auto-login attempt failed', err);
+                    console.error('[AUTO_LOGIN] FAILED: Exception during auto-login:', err);
+                    localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
                     return false;
                 } finally {
                     rememberMeAutoLoginPromise = null;

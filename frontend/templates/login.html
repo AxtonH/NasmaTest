@@ -271,9 +271,11 @@
 
                 const token = this.rememberMeManager.getToken();
                 if (!token || !this.deviceFingerprint) {
+                    console.log('[AUTO_LOGIN] Skipping auto-login: no token or fingerprint');
                     return;
                 }
 
+                console.log('[AUTO_LOGIN] Starting auto-login attempt');
                 this.setLoading(true);
                 this.showMessage('Logging you in automatically...', 'success');
 
@@ -289,21 +291,53 @@
                         })
                     });
 
-                    const data = await response.json();
+                    console.log(`[AUTO_LOGIN] Response status: ${response.status}, ok: ${response.ok}`);
+
+                    // Check if response is OK before parsing JSON
+                    if (!response.ok) {
+                        // Non-200 status code - token invalid or server error
+                        let errorData = null;
+                        try {
+                            errorData = await response.json();
+                            console.error('[AUTO_LOGIN] FAILED:', errorData);
+                        } catch (e) {
+                            console.error('[AUTO_LOGIN] FAILED: Could not parse error response');
+                        }
+                        this.rememberMeManager.clearToken();
+                        this.hideMessage();
+                        this.setLoading(false);
+                        return;
+                    }
+
+                    let data;
+                    try {
+                        data = await response.json();
+                        console.log('[AUTO_LOGIN] Response data:', { success: data.success, failure_reason: data.failure_reason });
+                    } catch (parseError) {
+                        // Failed to parse JSON response
+                        console.error('[AUTO_LOGIN] FAILED: Failed to parse auto-login response:', parseError);
+                        this.rememberMeManager.clearToken();
+                        this.hideMessage();
+                        this.setLoading(false);
+                        return;
+                    }
 
                     if (data.success) {
+                        console.log('[AUTO_LOGIN] SUCCESS: Auto-login successful, redirecting...');
                         this.showMessage('Auto-login successful! Redirecting...', 'success');
                         setTimeout(() => {
                             window.location.href = '/';
                         }, 1000);
                     } else {
                         // Token invalid or expired, clear it
+                        console.error('[AUTO_LOGIN] FAILED: Auto-login unsuccessful:', data.message, data.failure_reason);
                         this.rememberMeManager.clearToken();
                         this.hideMessage();
                         this.setLoading(false);
                     }
                 } catch (error) {
                     // Auto-login failed, clear token and show login form
+                    console.error('[AUTO_LOGIN] FAILED: Exception during auto-login:', error);
                     this.rememberMeManager.clearToken();
                     this.hideMessage();
                     this.setLoading(false);

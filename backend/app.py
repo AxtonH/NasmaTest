@@ -548,58 +548,117 @@ def create_app():
     @app.route('/api/auth/verify-remember-me', methods=['POST'])
     def verify_remember_me():
         """Verify remember me token and auto-login if valid"""
+        failure_reason = None
+        step = "initialization"
+        
         try:
+            step = "parsing_request"
             data = request.get_json()
             token = data.get('token', '')
             device_fingerprint = data.get('device_fingerprint', '')
+            
+            debug_log(f"[STEP: {step}] Received auto-login request (token length: {len(token)}, fingerprint length: {len(device_fingerprint)})", "bot_logic")
 
             if not token or not device_fingerprint:
+                failure_reason = "missing_token_or_fingerprint"
+                debug_log(f"FAILED [{failure_reason}]: Missing token or device_fingerprint", "bot_logic")
                 return jsonify({
                     'success': False,
-                    'message': 'Token and device fingerprint are required'
+                    'message': 'Token and device fingerprint are required',
+                    'failure_reason': failure_reason
                 }), 400
 
+            step = "token_verification"
             # Verify token and get credentials
             credentials = remember_me_service.verify_token(token, device_fingerprint)
 
-            if credentials:
-                username, password = credentials
+            if not credentials:
+                failure_reason = "token_verification_failed"
+                debug_log(f"FAILED [{failure_reason}]: Token verification returned None (invalid token or device mismatch)", "bot_logic")
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid or expired token',
+                    'failure_reason': failure_reason
+                }), 401
 
-                # Authenticate with Odoo (stateless - returns session data)
-                success, message, session_data = odoo_service.authenticate(username, password)
+            username, password, token_failure_reason = credentials
+            if token_failure_reason:
+                failure_reason = f"token_error_{token_failure_reason}"
+                debug_log(f"FAILED [{failure_reason}]: {token_failure_reason}", "bot_logic")
+                return jsonify({
+                    'success': False,
+                    'message': 'Token verification failed',
+                    'failure_reason': failure_reason
+                }), 401
 
-                if success and session_data:
-                    # Store authentication in Flask session (per-user, isolated)
-                    session.permanent = True
-                    session['authenticated'] = True
-                    session['username'] = username
-                    session['user_id'] = session_data['user_id']
-                    session['odoo_session_id'] = session_data['session_id']
-                    session['password'] = password  # For session renewal
+            step = "odoo_authentication"
+            debug_log(f"[STEP: {step}] Token verified for {username}, attempting Odoo authentication", "bot_logic")
 
-                    debug_log(f"Auto-login successful for {username} via remember me token", "bot_logic")
+            # Authenticate with Odoo (stateless - returns session data)
+            success, message, session_data = odoo_service.authenticate(username, password)
 
-                    return jsonify({
-                        'success': True,
-                        'message': 'Auto-login successful',
-                        'user_info': {
-                            'user_id': session_data['user_id'],
-                            'username': username,
-                            'database': Config.ODOO_DB,
-                            'server_url': Config.ODOO_URL
-                        }
-                    })
+            if not success or not session_data:
+                failure_reason = "odoo_authentication_failed"
+                debug_log(f"FAILED [{failure_reason}]: Odoo authentication failed for {username}. Message: {message}", "bot_logic")
+                # Token is valid but Odoo authentication failed - clear the token as it may be stale
+                try:
+                    remember_me_service.remove_token(username, device_fingerprint)
+                    debug_log(f"Removed stale remember me token for {username} after Odoo auth failure", "bot_logic")
+                except Exception as e:
+                    debug_log(f"Failed to remove stale token: {str(e)}", "bot_logic")
+                
+                return jsonify({
+                    'success': False,
+                    'message': 'Authentication failed. Please log in again.',
+                    'failure_reason': failure_reason,
+                    'odoo_error': message
+                }), 401
+
+            step = "session_setup"
+            debug_log(f"[STEP: {step}] Odoo authentication successful, setting up Flask session", "bot_logic")
+
+            # Store authentication in Flask session (per-user, isolated)
+            try:
+                session.permanent = True
+                session['authenticated'] = True
+                session['username'] = username
+                session['user_id'] = session_data['user_id']
+                session['odoo_session_id'] = session_data['session_id']
+                session['password'] = password  # For session renewal
+                debug_log(f"Flask session configured successfully. Session ID: {session.get('odoo_session_id', 'N/A')[:20]}...", "bot_logic")
+            except Exception as e:
+                failure_reason = "session_setup_failed"
+                debug_log(f"FAILED [{failure_reason}]: Error setting up Flask session: {str(e)}", "bot_logic")
+                return jsonify({
+                    'success': False,
+                    'message': 'Session setup failed',
+                    'failure_reason': failure_reason
+                }), 500
+
+            step = "success"
+            debug_log(f"SUCCESS [{step}]: Auto-login completed successfully for {username} via remember me token", "bot_logic")
 
             return jsonify({
-                'success': False,
-                'message': 'Invalid or expired token'
-            }), 401
+                'success': True,
+                'message': 'Auto-login successful',
+                'user_info': {
+                    'user_id': session_data['user_id'],
+                    'username': username,
+                    'database': Config.ODOO_DB,
+                    'server_url': Config.ODOO_URL
+                }
+            })
 
         except Exception as e:
-            debug_log(f"Remember me verification error: {str(e)}", "bot_logic")
+            failure_reason = f"exception_at_{step}"
+            debug_log(f"FAILED [{failure_reason}]: Exception occurred during auto-login at step '{step}': {str(e)}", "bot_logic")
+            import traceback
+            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
             return jsonify({
                 'success': False,
-                'message': 'Verification error'
+                'message': 'Verification error',
+                'failure_reason': failure_reason,
+                'error': str(e)
             }), 500
 
     @app.route('/api/auth/logout', methods=['POST'])
@@ -2867,6 +2926,80 @@ def create_app():
             debug_log(f"Error in debug endpoint: {e}", "general")
             import traceback
             traceback.print_exc()
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+
+    @app.route('/api/auth/auto-login-diagnostics', methods=['GET'])
+    def auto_login_diagnostics():
+        """Diagnostic endpoint to view auto-login token statistics"""
+        try:
+            if not session.get('authenticated'):
+                return jsonify({
+                    'success': False,
+                    'message': 'Authentication required'
+                }), 401
+
+            username = session.get('username')
+            if not username:
+                return jsonify({
+                    'success': False,
+                    'message': 'Username not found in session'
+                }), 400
+
+            # Get all tokens for this user
+            user_tokens = remember_me_service.get_user_tokens(username)
+            
+            # Calculate statistics
+            total_tokens = len(user_tokens)
+            tokens_with_last_used = len([t for t in user_tokens if t.get('last_used_at')])
+            tokens_without_last_used = total_tokens - tokens_with_last_used
+            
+            # Find tokens that are old but never used
+            from datetime import datetime, timedelta
+            cutoff_date = datetime.utcnow() - timedelta(days=30)
+            old_unused_tokens = []
+            for token in user_tokens:
+                if token.get('last_used_at') is None:
+                    created_at_str = token.get('created_at')
+                    if created_at_str:
+                        try:
+                            created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                            if created_at < cutoff_date:
+                                old_unused_tokens.append({
+                                    'id': token.get('id'),
+                                    'created_at': created_at_str,
+                                    'device_fingerprint': token.get('device_fingerprint', '')[:16] + '...'
+                                })
+                        except Exception:
+                            pass
+
+            return jsonify({
+                'success': True,
+                'username': username,
+                'statistics': {
+                    'total_tokens': total_tokens,
+                    'tokens_with_last_used': tokens_with_last_used,
+                    'tokens_without_last_used': tokens_without_last_used,
+                    'old_unused_tokens_count': len(old_unused_tokens)
+                },
+                'tokens': [
+                    {
+                        'id': t.get('id'),
+                        'device_fingerprint': t.get('device_fingerprint', '')[:16] + '...',
+                        'created_at': t.get('created_at'),
+                        'last_used_at': t.get('last_used_at'),
+                        'is_old_unused': t.get('id') in [ot['id'] for ot in old_unused_tokens]
+                    }
+                    for t in user_tokens
+                ],
+                'old_unused_tokens': old_unused_tokens
+            })
+        except Exception as e:
+            debug_log(f"Error in auto-login diagnostics: {str(e)}", "bot_logic")
+            import traceback
+            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
             return jsonify({
                 'success': False,
                 'error': str(e)
