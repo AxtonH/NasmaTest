@@ -3071,6 +3071,17 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 first_doc = docs[0]
                 doc_name = first_doc.get('filename') or first_doc.get('name') or 'Supporting document'
 
+            # Check if this is a sick leave custom hours flow
+            is_sick_custom_hours = (
+                isinstance(selected_type, dict) and 
+                selected_type.get('name') == 'Sick Leave' and
+                self._is_custom_hours_mode(session_refreshed, 'Sick Leave')
+            )
+            
+            # Get hours for custom hours flow
+            raw_from = ctx.get('hour_from') or session_refreshed.get('hour_from')
+            raw_to = ctx.get('hour_to') or session_refreshed.get('hour_to')
+            
             # Get remaining leave time
             remaining_leave_text = ""
             try:
@@ -3090,14 +3101,28 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                 # Continue without remaining leave info if there's an error
 
-            summary = "Great, I have everything I need. Here's your time-off request summary:\n\n"
-            summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
-            summary += f"📅 **Start Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
-            summary += f"📅 **End Date:** {dd_mm_yyyy(end_date) if end_date else 'Unknown'}\n"
-            summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n"
-            if doc_name:
-                summary += f"📎 **Supporting Document:** {doc_name}\n"
-            summary += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
+            if is_sick_custom_hours and raw_from and raw_to:
+                # Custom format for sick leave custom hours
+                summary = "Great, I have everything I need. Here's your time-off request summary:\n\n"
+                summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
+                summary += f"📅 **Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
+                summary += f"⏰ **Hours:** {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
+                summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
+                if remaining_leave_text:
+                    summary += remaining_leave_text + "\n"
+                if doc_name:
+                    summary += f"📎 **Supporting Document:** {doc_name}\n"
+                summary += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
+            else:
+                # Original format for other leave types
+                summary = "Great, I have everything I need. Here's your time-off request summary:\n\n"
+                summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
+                summary += f"📅 **Start Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
+                summary += f"📅 **End Date:** {dd_mm_yyyy(end_date) if end_date else 'Unknown'}\n"
+                summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n"
+                if doc_name:
+                    summary += f"📎 **Supporting Document:** {doc_name}\n"
+                summary += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
             buttons = [
                 {'text': 'Yes', 'value': 'yes', 'type': 'confirmation_choice'},
                 {'text': 'No', 'value': 'no', 'type': 'confirmation_choice'}
