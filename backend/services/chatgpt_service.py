@@ -2430,7 +2430,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                                     # Format as "**Available Sick Leave:** X days" (only label bold, not days)
                                     import re
                                     formatted_bold_label = re.sub(r'(Available [^:]+):', r'**\1:**', formatted)
-                                    remaining_leave_text = f"\n⏰ {formatted_bold_label}"
+                                    # Use 💊 emoji for sick leave custom hours flow (no leading newline to avoid extra space)
+                                    remaining_leave_text = f"\n💊 {formatted_bold_label}"
                     except Exception as e:
                         debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                         # Continue without remaining leave info if there's an error
@@ -2457,7 +2458,12 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         response_text += f"⏰ **Hours:** {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
                         response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
                         if remaining_leave_text:
-                            response_text += remaining_leave_text + "\n"
+                            # Remove leading newline if present to avoid extra space
+                            cleaned_remaining = remaining_leave_text.lstrip('\n')
+                            # Ensure it ends with newline for proper formatting
+                            if not cleaned_remaining.endswith('\n'):
+                                cleaned_remaining += '\n'
+                            response_text += cleaned_remaining
                         if doc_name:
                             response_text += f"📎 **Supporting Document:** {doc_name}\n"
                         response_text += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
@@ -3096,7 +3102,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             # Replace "Available X: Y days" with "**Available X:** Y days"
                             import re
                             formatted_bold_label = re.sub(r'(Available [^:]+):', r'**\1:**', formatted)
-                            remaining_leave_text = f"\n⏰ {formatted_bold_label}"
+                            # Use 💊 emoji for sick leave custom hours flow
+                            remaining_leave_text = f"\n💊 {formatted_bold_label}"
             except Exception as e:
                 debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                 # Continue without remaining leave info if there's an error
@@ -3109,7 +3116,12 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 summary += f"⏰ **Hours:** {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
                 summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
                 if remaining_leave_text:
-                    summary += remaining_leave_text + "\n"
+                    # Remove leading newline if present to avoid extra space
+                    cleaned_remaining = remaining_leave_text.lstrip('\n')
+                    # Ensure it ends with newline for proper formatting
+                    if not cleaned_remaining.endswith('\n'):
+                        cleaned_remaining += '\n'
+                    summary += cleaned_remaining
                 if doc_name:
                     summary += f"📎 **Supporting Document:** {doc_name}\n"
                 summary += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
