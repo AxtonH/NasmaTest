@@ -4,6 +4,18 @@ from typing import Dict, Optional, Any
 from datetime import datetime, timedelta
 import threading
 
+try:
+    from ..config.settings import Config
+except Exception:
+    from config.settings import Config
+
+# Try to import Supabase client
+try:
+    from supabase import create_client, Client
+    _supabase_available = True
+except ImportError:
+    _supabase_available = False
+
 class SessionManager:
     """Manages multi-step conversation flows and sessions"""
     
@@ -13,14 +25,100 @@ class SessionManager:
         self.session_duration = timedelta(minutes=15)  # Session timeout for time-off requests
         self.lock = threading.Lock()
         
-        # Storage directory for persistent sessions
-        self.storage_dir = "conversation_storage"
-        if not os.path.exists(self.storage_dir):
-            os.makedirs(self.storage_dir)
+        # Determine storage backend
+        self.use_supabase = (
+            _supabase_available and 
+            Config.SUPABASE_ENABLED and 
+            getattr(Config, 'USE_SUPABASE_SESSIONS', True)
+        )
+        
+        if self.use_supabase:
+            try:
+                self.supabase: Client = create_client(Config.SUPABASE_URL, Config.SUPABASE_SERVICE_ROLE)
+                self.table_name = getattr(Config, 'SUPABASE_SESSION_TABLE', 'chat_sessions')
+                print(f"[SessionManager] Using Supabase storage (table: {self.table_name})")
+            except Exception as e:
+                print(f"[SessionManager] Failed to initialize Supabase, falling back to filesystem: {e}")
+                self.use_supabase = False
+        
+        # Filesystem storage (fallback or if Supabase disabled)
+        if not self.use_supabase:
+            self.storage_dir = "conversation_storage"
+            if not os.path.exists(self.storage_dir):
+                os.makedirs(self.storage_dir)
+            print(f"[SessionManager] Using filesystem storage (directory: {self.storage_dir})")
+            # Clean up expired sessions on startup (filesystem only)
+            self.cleanup_expired_sessions_from_disk()
+        else:
+            # Clean up expired sessions from Supabase on startup
+            self.cleanup_expired_sessions_from_supabase()
     
     def _get_session_file(self, thread_id: str) -> str:
-        """Get the session storage file path"""
+        """Get the session storage file path (filesystem only)"""
         return os.path.join(self.storage_dir, f"session_{thread_id}.json")
+    
+    def _save_session_supabase(self, thread_id: str, session_data: Dict) -> bool:
+        """Save session to Supabase"""
+        try:
+            # Serialize session data
+            session_json = json.dumps(session_data, default=str, ensure_ascii=False)
+            
+            # Calculate expiry time
+            created_at = session_data.get('created_at', datetime.now().isoformat())
+            expires_at = (datetime.fromisoformat(created_at) + self.session_duration).isoformat()
+            
+            # Upsert session
+            payload = {
+                'thread_id': thread_id,
+                'session_data': session_json,
+                'session_type': session_data.get('type', 'unknown'),
+                'state': session_data.get('state', 'started'),
+                'created_at': created_at,
+                'expires_at': expires_at,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            self.supabase.table(self.table_name).upsert(
+                payload,
+                on_conflict='thread_id'
+            ).execute()
+            
+            return True
+        except Exception as e:
+            print(f"DEBUG: Error saving session to Supabase: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _load_session_supabase(self, thread_id: str) -> Optional[Dict]:
+        """Load session from Supabase"""
+        try:
+            response = self.supabase.table(self.table_name)\
+                .select('*')\
+                .eq('thread_id', thread_id)\
+                .execute()
+            
+            if response.data and len(response.data) > 0:
+                record = response.data[0]
+                session_json = record.get('session_data')
+                if session_json:
+                    return json.loads(session_json)
+            return None
+        except Exception as e:
+            print(f"DEBUG: Error loading session from Supabase: {e}")
+            return None
+    
+    def _delete_session_supabase(self, thread_id: str) -> bool:
+        """Delete session from Supabase"""
+        try:
+            self.supabase.table(self.table_name)\
+                .delete()\
+                .eq('thread_id', thread_id)\
+                .execute()
+            return True
+        except Exception as e:
+            print(f"DEBUG: Error deleting session from Supabase: {e}")
+            return False
     
     def _save_session(self, thread_id: str, session_data: Dict):
         """Save session to persistent storage (with lock)"""
@@ -38,6 +136,13 @@ class SessionManager:
     
     def _save_session_internal(self, thread_id: str, session_data: Dict):
         """Save session to persistent storage (without lock - assumes lock is already held)"""
+        if self.use_supabase:
+            self._save_session_supabase(thread_id, session_data)
+        else:
+            self._save_session_filesystem(thread_id, session_data)
+    
+    def _save_session_filesystem(self, thread_id: str, session_data: Dict):
+        """Save session to filesystem"""
         try:
             print(f"DEBUG: _save_session_internal called for thread: {thread_id}")
             
@@ -132,6 +237,13 @@ class SessionManager:
     
     def _load_session_internal(self, thread_id: str) -> Optional[Dict]:
         """Load session from persistent storage (internal method without lock)"""
+        if self.use_supabase:
+            return self._load_session_supabase(thread_id)
+        else:
+            return self._load_session_filesystem(thread_id)
+    
+    def _load_session_filesystem(self, thread_id: str) -> Optional[Dict]:
+        """Load session from filesystem"""
         try:
             session_file = self._get_session_file(thread_id)
             if os.path.exists(session_file):
@@ -187,7 +299,7 @@ class SessionManager:
                         self.session_expiry[thread_id] = datetime.now() + self.session_duration
                         return session_data
                     else:
-                        # Expired, remove file
+                        # Expired, remove
                         self._clear_session_internal(thread_id)
                 except Exception as e:
                     print(f"DEBUG: SessionManager error loading session: {e}")
@@ -292,13 +404,16 @@ class SessionManager:
         if thread_id in self.session_expiry:
             del self.session_expiry[thread_id]
         
-        # Remove persistent file
-        try:
-            session_file = self._get_session_file(thread_id)
-            if os.path.exists(session_file):
-                os.remove(session_file)
-        except Exception as e:
-            print(f"DEBUG: Error removing session file: {e}")
+        # Remove from persistent storage
+        if self.use_supabase:
+            self._delete_session_supabase(thread_id)
+        else:
+            try:
+                session_file = self._get_session_file(thread_id)
+                if os.path.exists(session_file):
+                    os.remove(session_file)
+            except Exception as e:
+                print(f"DEBUG: Error removing session file: {e}")
     
     def _is_session_valid(self, thread_id: str) -> bool:
         """Check if session is still valid (not expired)"""
@@ -307,7 +422,7 @@ class SessionManager:
         return datetime.now() < self.session_expiry[thread_id]
     
     def cleanup_expired_sessions(self):
-        """Clean up expired sessions"""
+        """Clean up expired sessions from memory"""
         expired_threads = []
         with self.lock:
             for thread_id in list(self.session_expiry.keys()):
@@ -316,6 +431,93 @@ class SessionManager:
 
         for thread_id in expired_threads:
             self.clear_session(thread_id)
+    
+    def cleanup_expired_sessions_from_supabase(self):
+        """Clean up expired sessions from Supabase (called on startup)"""
+        if not self.use_supabase:
+            return
+        
+        try:
+            current_time = datetime.now().isoformat()
+            
+            # Delete expired sessions
+            response = self.supabase.table(self.table_name)\
+                .delete()\
+                .lt('expires_at', current_time)\
+                .execute()
+            
+            # Also delete completed/cancelled sessions older than 1 hour
+            one_hour_ago = (datetime.now() - timedelta(hours=1)).isoformat()
+            response2 = self.supabase.table(self.table_name)\
+                .delete()\
+                .in_('state', ['completed', 'cancelled'])\
+                .lt('created_at', one_hour_ago)\
+                .execute()
+            
+            print(f"[SessionManager] Cleaned up expired sessions from Supabase")
+        except Exception as e:
+            print(f"DEBUG: Error cleaning up expired sessions from Supabase: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def cleanup_expired_sessions_from_disk(self):
+        """Clean up expired session files from disk (called on startup)"""
+        try:
+            if not os.path.exists(self.storage_dir):
+                return
+            
+            cleaned_count = 0
+            current_time = datetime.now()
+            
+            # Scan all session files
+            for filename in os.listdir(self.storage_dir):
+                if not filename.startswith('session_') or not filename.endswith('.json'):
+                    continue
+                
+                thread_id = filename[8:-5]  # Remove 'session_' prefix and '.json' suffix
+                session_file = self._get_session_file(thread_id)
+                
+                try:
+                    with open(session_file, 'r', encoding='utf-8') as f:
+                        session_data = json.load(f)
+                    
+                    # Check if session is expired based on created_at
+                    created_at_str = session_data.get('created_at')
+                    if created_at_str:
+                        try:
+                            created_at = datetime.fromisoformat(created_at_str)
+                            age = current_time - created_at
+                            
+                            # Remove if expired (> 15 minutes) or completed/cancelled (> 1 hour old)
+                            state = session_data.get('state', '')
+                            if age > self.session_duration:
+                                # Expired active session
+                                os.remove(session_file)
+                                cleaned_count += 1
+                            elif state in ['completed', 'cancelled'] and age > timedelta(hours=1):
+                                # Completed/cancelled sessions older than 1 hour
+                                os.remove(session_file)
+                                cleaned_count += 1
+                        except (ValueError, TypeError) as e:
+                            # Invalid date format, remove the file
+                            print(f"DEBUG: Invalid session file {filename}: {e}")
+                            os.remove(session_file)
+                            cleaned_count += 1
+                except (json.JSONDecodeError, IOError) as e:
+                    # Corrupted file, remove it
+                    print(f"DEBUG: Corrupted session file {filename}: {e}")
+                    try:
+                        os.remove(session_file)
+                        cleaned_count += 1
+                    except Exception:
+                        pass
+            
+            if cleaned_count > 0:
+                print(f"DEBUG: Cleaned up {cleaned_count} expired session file(s) on startup")
+        except Exception as e:
+            print(f"DEBUG: Error cleaning up expired sessions from disk: {e}")
+            import traceback
+            traceback.print_exc()
 
     def find_active_timeoff_sessions(self) -> list:
         """Find all active timeoff sessions"""
@@ -331,32 +533,59 @@ class SessionManager:
                         active_sessions.append((thread_id, session_data))
 
             # Also check persistent storage for sessions not in memory
-            if os.path.exists(self.storage_dir):
-                for filename in os.listdir(self.storage_dir):
-                    if filename.startswith('session_') and filename.endswith('.json'):
-                        thread_id = filename[8:-5]  # Remove 'session_' prefix and '.json' suffix
-
-                        # Skip if already checked in memory
+            if self.use_supabase:
+                try:
+                    response = self.supabase.table(self.table_name)\
+                        .select('*')\
+                        .eq('session_type', 'timeoff')\
+                        .in_('state', ['active', 'started'])\
+                        .gt('expires_at', datetime.now().isoformat())\
+                        .execute()
+                    
+                    for record in response.data:
+                        thread_id = record['thread_id']
                         if thread_id in self.sessions:
-                            continue
-
+                            continue  # Already checked
+                        
                         try:
-                            session_file = self._get_session_file(thread_id)
-                            with open(session_file, 'r', encoding='utf-8') as f:
-                                session_data = json.load(f)
-
-                            # Check if it's an active timeoff session (accept both 'started' and 'active')
-                            if (session_data.get('type') == 'timeoff' and
-                                session_data.get('state') in ['active', 'started']):
-
-                                # Check expiry
-                                created_at = session_data.get('created_at')
-                                if created_at:
-                                    created_time = datetime.fromisoformat(created_at)
-                                    if datetime.now() - created_time < self.session_duration:
-                                        active_sessions.append((thread_id, session_data))
+                            session_data = json.loads(record['session_data'])
+                            created_at = session_data.get('created_at')
+                            if created_at:
+                                created_time = datetime.fromisoformat(created_at)
+                                if datetime.now() - created_time < self.session_duration:
+                                    active_sessions.append((thread_id, session_data))
                         except Exception:
                             continue
+                except Exception as e:
+                    print(f"DEBUG: Error finding active sessions in Supabase: {e}")
+            else:
+                # Filesystem storage
+                if os.path.exists(self.storage_dir):
+                    for filename in os.listdir(self.storage_dir):
+                        if filename.startswith('session_') and filename.endswith('.json'):
+                            thread_id = filename[8:-5]  # Remove 'session_' prefix and '.json' suffix
+
+                            # Skip if already checked in memory
+                            if thread_id in self.sessions:
+                                continue
+
+                            try:
+                                session_file = self._get_session_file(thread_id)
+                                with open(session_file, 'r', encoding='utf-8') as f:
+                                    session_data = json.load(f)
+
+                                # Check if it's an active timeoff session (accept both 'started' and 'active')
+                                if (session_data.get('type') == 'timeoff' and
+                                    session_data.get('state') in ['active', 'started']):
+
+                                    # Check expiry
+                                    created_at = session_data.get('created_at')
+                                    if created_at:
+                                        created_time = datetime.fromisoformat(created_at)
+                                        if datetime.now() - created_time < self.session_duration:
+                                            active_sessions.append((thread_id, session_data))
+                            except Exception:
+                                continue
 
         except Exception as e:
             print(f"DEBUG: Error finding active sessions: {e}")
@@ -375,5 +604,6 @@ class SessionManager:
             return {
                 'active_sessions': active_sessions,
                 'session_types': session_types,
-                'memory_usage': len(self.sessions)
+                'memory_usage': len(self.sessions),
+                'storage_backend': 'supabase' if self.use_supabase else 'filesystem'
             }

@@ -61,4 +61,8 @@ class Config:
     SUPABASE_THREAD_TABLE = os.environ.get("SUPABASE_THREAD_TABLE", "chat_threads")
     SUPABASE_MESSAGE_TABLE = os.environ.get("SUPABASE_MESSAGE_TABLE", "chat_messages")
     SUPABASE_REMEMBER_ME_TABLE = os.environ.get("SUPABASE_REMEMBER_ME_TABLE", "remember_me_tokens")
+    SUPABASE_SESSION_TABLE = os.environ.get("SUPABASE_SESSION_TABLE", "chat_sessions")
     SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE)
+    # Use Supabase for sessions if available (required for cloud deployments)
+    # Falls back to filesystem storage if Supabase is disabled
+    USE_SUPABASE_SESSIONS = _to_bool(os.environ.get("USE_SUPABASE_SESSIONS"), default=True)
