@@ -746,7 +746,7 @@ def start_log_hours_for_task(odoo_service, employee_data: dict, subtask_id: int,
         }
 
 
-def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context: dict, user_input: str = None) -> Dict[str, Any]:
+def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context: dict, user_input: str = None, odoo_session_data: dict = None) -> Dict[str, Any]:
     """
     Handle a step in the log hours flow.
     
@@ -946,7 +946,7 @@ def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context:
             confirm_input = (user_input or '').lower().strip()
             if confirm_input in ['log_hours_confirm', 'yes', 'confirm', 'y']:
                 # Create the timesheet entry
-                return create_timesheet_entry(odoo_service, employee_data, context)
+                return create_timesheet_entry(odoo_service, employee_data, context, odoo_session_data)
             else:
                 return {
                     'message': 'Log hours cancelled.',
@@ -966,7 +966,7 @@ def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context:
         }
 
 
-def create_timesheet_entry(odoo_service, employee_data: dict, context: dict) -> Dict[str, Any]:
+def create_timesheet_entry(odoo_service, employee_data: dict, context: dict, odoo_session_data: dict = None) -> Dict[str, Any]:
     """
     Create a timesheet entry in account.analytic.line.
     
@@ -1017,15 +1017,54 @@ def create_timesheet_entry(odoo_service, employee_data: dict, context: dict) -> 
             'kwargs': {}
         }
         
-        ok, result = _make_odoo_request(odoo_service, 'account.analytic.line', 'create', params)
+        # Use stateless requests if session data provided
+        if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+            # Use stateless authenticated request with automatic retry
+            result_dict = odoo_service.make_authenticated_request(
+                model='account.analytic.line',
+                method='create',
+                args=params.get('args', []),
+                kwargs=params.get('kwargs', {}),
+                session_id=odoo_session_data['session_id'],
+                user_id=odoo_session_data['user_id'],
+                username=odoo_session_data.get('username'),
+                password=odoo_session_data.get('password')
+            )
+            
+            renewed_session = result_dict.pop('_renewed_session', None) if isinstance(result_dict, dict) else None
+            
+            # Update Flask session if session was renewed
+            if renewed_session:
+                try:
+                    from flask import session as flask_session
+                    flask_session['odoo_session_id'] = renewed_session['session_id']
+                    flask_session['user_id'] = renewed_session['user_id']
+                    flask_session.modified = True
+                except Exception:
+                    pass
+            
+            if 'error' in result_dict:
+                return {
+                    'message': f'Failed to create timesheet entry: {result_dict.get("error", "Unknown error")}',
+                    'success': False
+                }
+            
+            timesheet_id = result_dict.get('result') if isinstance(result_dict.get('result'), int) else None
+        else:
+            # Fallback to regular request
+            ok, result = _make_odoo_request(odoo_service, 'account.analytic.line', 'create', params)
+            if not ok:
+                return {
+                    'message': f'Failed to create timesheet entry: {result}',
+                    'success': False
+                }
+            timesheet_id = result if isinstance(result, int) else None
         
-        if not ok:
+        if not timesheet_id:
             return {
-                'message': f'Failed to create timesheet entry: {result}',
+                'message': 'Failed to create timesheet entry: Invalid response',
                 'success': False
             }
-        
-        timesheet_id = result if isinstance(result, int) else None
         
         return {
             'message': f'✅ Successfully logged {hours:.1f} hours for {context.get("task_name", "the task")}!',

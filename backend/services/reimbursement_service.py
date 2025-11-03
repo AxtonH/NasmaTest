@@ -297,10 +297,11 @@ class ReimbursementService:
                 })
         return categories
 
-    def create_expense_record(self, employee_data: Dict, expense_data: Dict) -> Tuple[bool, Any]:
+    def create_expense_record(self, employee_data: Dict, expense_data: Dict, 
+                              odoo_session_data: Dict = None) -> Tuple[bool, Any, Optional[Dict]]:
         """
         Create expense record in Odoo
-        Returns: (success, result_data)
+        Returns: (success, result_data, renewed_session_data)
         """
         try:
             # Validate employee data early to avoid NoneType errors when sessions expire
@@ -309,7 +310,26 @@ class ReimbursementService:
                 return False, (
                     "I couldn't verify your employee profile (session may have expired). "
                     "Please log in again and resubmit your reimbursement."
-                )
+                ), None
+            
+            # Use stateless requests if session data provided
+            use_stateless = odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id')
+            
+            # Helper method to make requests (stateless or regular)
+            def _make_request(model, method, params):
+                if use_stateless:
+                    ok, res, renewed = self._make_odoo_request_stateless(
+                        model, method, params,
+                        session_id=odoo_session_data['session_id'],
+                        user_id=odoo_session_data['user_id'],
+                        username=odoo_session_data.get('username'),
+                        password=odoo_session_data.get('password')
+                    )
+                    return ok, res, renewed
+                else:
+                    ok, res = self._make_odoo_request(model, method, params)
+                    return ok, res, None
+            
             self._log(f"Creating expense record with data: {expense_data}", "bot_logic")
 
             # Get product ID first
@@ -447,10 +467,12 @@ class ReimbursementService:
                 try:
                     self._log("Attempting single-create with PER_DIEM product", "bot_logic")
                     params_sc = {'args': [expense_values], 'kwargs': {}}
-                    ok_sc, res_sc = self._make_odoo_request('hr.expense', 'create', params_sc)
+                    ok_sc, res_sc, renewed_sc = _make_request('hr.expense', 'create', params_sc)
+                    if renewed_sc:
+                        odoo_session_data.update(renewed_sc)  # Update session for subsequent requests
                     if ok_sc:
                         expense_id = res_sc
-                        return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}
+                        return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, renewed_sc
                     else:
                         self._log(f"Single-create failed, falling back to two-phase: {res_sc}", "bot_logic")
                 except Exception as e:
@@ -465,10 +487,12 @@ class ReimbursementService:
                         safe_values['product_id'] = safe_product
                     self._log(f"Creating PER_DIEM in two phases (safe create)", "bot_logic")
                     params_create = {'args': [safe_values], 'kwargs': {}}
-                    ok_create, res_create = self._make_odoo_request('hr.expense', 'create', params_create)
+                    ok_create, res_create, renewed_create = _make_request('hr.expense', 'create', params_create)
+                    if renewed_create:
+                        odoo_session_data.update(renewed_create)
                     if not ok_create:
                         self._log(f"Safe create failed: {res_create}", "bot_logic")
-                        return False, res_create
+                        return False, res_create, renewed_create
                     expense_id = res_create
 
                     # 2a) First write: push dates, days_abroad, quantity, destination ONLY (no product change yet)
@@ -480,15 +504,19 @@ class ReimbursementService:
                     pre_vals['unit_amount'] = pre_vals.get('unit_amount', 1)
                     self._log(f"Applying pre-values to expense #{expense_id}: {pre_vals}", "bot_logic")
                     if pre_vals:
-                        ok_pre, res_pre = self._make_odoo_request('hr.expense', 'write', {'args': [[expense_id], pre_vals], 'kwargs': {}})
+                        ok_pre, res_pre, renewed_pre = _make_request('hr.expense', 'write', {'args': [[expense_id], pre_vals], 'kwargs': {}})
+                        if renewed_pre:
+                            odoo_session_data.update(renewed_pre)
                         if not ok_pre:
                             self._log(f"Pre write failed for expense #{expense_id}: {res_pre}", "bot_logic")
-                            return False, res_pre
+                            return False, res_pre, renewed_pre
 
                     # 2b) Second write: switch product to PER_DIEM only
                     final_vals = {'product_id': expense_values.get('product_id')}
                     self._log(f"Switching product to PER_DIEM for expense #{expense_id}", "bot_logic")
-                    ok_write, res_write = self._make_odoo_request('hr.expense', 'write', {'args': [[expense_id], final_vals], 'kwargs': {}})
+                    ok_write, res_write, renewed_write = _make_request('hr.expense', 'write', {'args': [[expense_id], final_vals], 'kwargs': {}})
+                    if renewed_write:
+                        odoo_session_data.update(renewed_write)
                     if not ok_write:
                         self._log(f"Final write failed for expense #{expense_id}: {res_write}", "bot_logic")
                         # Fallback: attempt product switch with days fields again in same write
@@ -502,22 +530,26 @@ class ReimbursementService:
                             'unit_amount': pre_vals.get('unit_amount', 1)
                         }
                         self._log(f"Retrying product switch with fallback values for expense #{expense_id}: {fallback_vals}", "bot_logic")
-                        ok_write2, res_write2 = self._make_odoo_request('hr.expense', 'write', {'args': [[expense_id], fallback_vals], 'kwargs': {}})
+                        ok_write2, res_write2, renewed_write2 = _make_request('hr.expense', 'write', {'args': [[expense_id], fallback_vals], 'kwargs': {}})
+                        if renewed_write2:
+                            odoo_session_data.update(renewed_write2)
                         if not ok_write2:
-                            return False, res_write
-
-                    return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}
+                            return False, res_write, renewed_write2 or renewed_write
+                    
+                    # Return the latest renewed session
+                    latest_renewed = renewed_write2 if ok_write2 else renewed_write
+                    return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, latest_renewed
                 except Exception as e:
                     self._log(f"Two-phase create error: {e}", "general")
                     # Fallback to single create
                     params = {'args': [expense_values], 'kwargs': {}}
                     self._log(f"Fallback single create for PER_DIEM", "bot_logic")
-                    success, result = self._make_odoo_request('hr.expense', 'create', params)
+                    success, result, renewed_fallback = _make_request('hr.expense', 'create', params)
                     if success:
                         expense_id = result
-                        return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}
+                        return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, renewed_fallback
                     else:
-                        return False, result
+                        return False, result, renewed_fallback
             else:
                 # Default single create for other categories
                 params = {
@@ -526,7 +558,7 @@ class ReimbursementService:
                 }
 
                 self._log(f"Making Odoo request to create expense", "bot_logic")
-                success, result = self._make_odoo_request('hr.expense', 'create', params)
+                success, result, renewed = _make_request('hr.expense', 'create', params)
 
                 if success:
                     expense_id = result
@@ -534,16 +566,16 @@ class ReimbursementService:
                     return True, {
                         'id': expense_id,
                         'message': f"Expense record #{expense_id} created successfully."
-                    }
+                    }, renewed
                 else:
                     self._log(f"Failed to create expense record: {result}", "bot_logic")
-                    return False, result
+                    return False, result, renewed
 
         except Exception as e:
             self._log(f"Error creating expense record: {e}", "general")
             import traceback
             traceback.print_exc()
-            return False, str(e)
+            return False, str(e), None
 
     def _get_product_id_for_category(self, category: str) -> Optional[int]:
         """Resolve the Odoo product ID for a given expense category.
@@ -713,7 +745,40 @@ class ReimbursementService:
             self._log(f"Error making Odoo request: {e}", "general")
             return False, f"Request error: {str(e)}"
 
-    def handle_flow(self, message: str, thread_id: str, employee_data: Dict) -> Optional[Dict]:
+    def _make_odoo_request_stateless(self, model: str, method: str, params: Dict,
+                                     session_id: str = None, user_id: int = None,
+                                     username: str = None, password: str = None) -> Tuple[bool, Any, Optional[Dict]]:
+        """Make authenticated request to Odoo using stateless session (with automatic retry)"""
+        try:
+            if not session_id or not user_id:
+                return False, "Session data missing", None
+
+            result = self.odoo_service.make_authenticated_request(
+                model=model,
+                method=method,
+                args=params.get('args', []),
+                kwargs=params.get('kwargs', {}),
+                session_id=session_id,
+                user_id=user_id,
+                username=username,
+                password=password
+            )
+
+            renewed_session = result.pop('_renewed_session', None) if isinstance(result, dict) else None
+
+            if 'error' in result:
+                error_data = result.get('error', {})
+                error_msg = error_data.get('message', 'Unknown error') if isinstance(error_data, dict) else str(error_data)
+                self._log(f"Odoo error: {error_msg}", "bot_logic")
+                return False, error_msg, renewed_session
+
+            return True, result.get('result'), renewed_session
+
+        except Exception as e:
+            self._log(f"Error making stateless Odoo request: {e}", "general")
+            return False, f"Request error: {str(e)}", None
+
+    def handle_flow(self, message: str, thread_id: str, employee_data: Dict, odoo_session_data: Dict = None) -> Optional[Dict]:
         """
         Handle reimbursement flow - detect intent and manage multi-step process
         Returns: response dict or None if not a reimbursement request
@@ -724,7 +789,7 @@ class ReimbursementService:
 
             if active_session and active_session.get('type') == 'reimbursement':
                 # Continue existing session
-                return self._continue_reimbursement_session(message, thread_id, active_session, employee_data)
+                return self._continue_reimbursement_session(message, thread_id, active_session, employee_data, odoo_session_data)
 
             # CRITICAL: Block if another flow is active (BEFORE intent detection)
             # This prevents reimbursement from interrupting active timeoff/overtime flows
@@ -805,7 +870,7 @@ class ReimbursementService:
                 'source': 'reimbursement_service'
             }
 
-    def _continue_reimbursement_session(self, message: str, thread_id: str, active_session: Dict, employee_data: Dict) -> Dict:
+    def _continue_reimbursement_session(self, message: str, thread_id: str, active_session: Dict, employee_data: Dict, odoo_session_data: Dict = None) -> Dict:
         """Continue an existing reimbursement session"""
         try:
             # Check for exit/cancel commands FIRST before any step logic (with typo tolerance)
@@ -1191,7 +1256,17 @@ class ReimbursementService:
                 # Handle confirmation
                 if message.lower() in ['yes', 'confirm', 'submit', 'y', 'confirm_submit']:
                     # Create expense record
-                    success, result = self.create_expense_record(effective_employee, expense_data)
+                    success, result, renewed_session = self.create_expense_record(effective_employee, expense_data, odoo_session_data)
+                    
+                    # Update Flask session if session was renewed
+                    if renewed_session:
+                        try:
+                            from flask import session as flask_session
+                            flask_session['odoo_session_id'] = renewed_session['session_id']
+                            flask_session['user_id'] = renewed_session['user_id']
+                            flask_session.modified = True
+                        except Exception:
+                            pass
 
                     # Clear session
                     if self.session_manager:
@@ -1355,7 +1430,18 @@ class ReimbursementService:
             elif current_step == 'ta_confirmation':
                 if message.lower() in ['yes', 'confirm', 'submit', 'y', 'confirm_submit']:
                     # Create expense record for TRANS & ACC
-                    success, result = self.create_expense_record(effective_employee, expense_data)
+                    success, result, renewed_session = self.create_expense_record(effective_employee, expense_data, odoo_session_data)
+                    
+                    # Update Flask session if session was renewed
+                    if renewed_session:
+                        try:
+                            from flask import session as flask_session
+                            flask_session['odoo_session_id'] = renewed_session['session_id']
+                            flask_session['user_id'] = renewed_session['user_id']
+                            flask_session.modified = True
+                        except Exception:
+                            pass
+                    
                     if self.session_manager:
                         self.session_manager.clear_session(thread_id)
                     if success:
@@ -1446,7 +1532,18 @@ class ReimbursementService:
             elif current_step == 'per_diem_confirmation':
                 # Submit PER_DIEM with collected fields
                 if message.lower() in ['yes', 'confirm', 'submit', 'y', 'confirm_submit']:
-                    success, result = self.create_expense_record(effective_employee, expense_data)
+                    success, result, renewed_session = self.create_expense_record(effective_employee, expense_data, odoo_session_data)
+                    
+                    # Update Flask session if session was renewed
+                    if renewed_session:
+                        try:
+                            from flask import session as flask_session
+                            flask_session['odoo_session_id'] = renewed_session['session_id']
+                            flask_session['user_id'] = renewed_session['user_id']
+                            flask_session.modified = True
+                        except Exception:
+                            pass
+                    
                     if self.session_manager:
                         self.session_manager.clear_session(thread_id)
                     if success:

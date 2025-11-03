@@ -64,8 +64,28 @@ class ChatGPTService:
         #     os.makedirs(self.storage_dir)
 
     def get_current_odoo_session(self):
-        """Get Odoo session data from Flask's request context (g object)"""
-        return getattr(g, 'odoo_session_data', None)
+        """Get Odoo session data from Flask's request context (g object) or Flask session"""
+        # First try to get from Flask's g object (set by chat endpoint)
+        session_data = getattr(g, 'odoo_session_data', None)
+        
+        # If not available, try to get from Flask session directly
+        if not session_data:
+            try:
+                from flask import session as flask_session
+                if flask_session.get('authenticated'):
+                    session_data = {
+                        'session_id': flask_session.get('odoo_session_id'),
+                        'user_id': flask_session.get('user_id'),
+                        'username': flask_session.get('username'),
+                        'password': flask_session.get('password')
+                    }
+                    # Only return if we have required fields
+                    if session_data.get('session_id') and session_data.get('user_id'):
+                        return session_data
+            except Exception:
+                pass
+        
+        return session_data
 
     def set_services(
         self,
@@ -503,7 +523,7 @@ class ChatGPTService:
             if self.reimbursement_service and self.session_manager:
                 try:
                     debug_log(f"Checking reimbursement flow for message: {message[:50]}...", "bot_logic")
-                    reimbursement_response = self.reimbursement_service.handle_flow(message, thread_id, employee_data)
+                    reimbursement_response = self.reimbursement_service.handle_flow(message, thread_id, employee_data, self.get_current_odoo_session())
                     if reimbursement_response:
                         debug_log(f"Reimbursement flow handled, returning response", "bot_logic")
                         return reimbursement_response
@@ -2765,8 +2785,12 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 })
 
             # Use stateless version if session data provided, otherwise fall back to old method
+            # Ensure we always try to get session data if not provided
+            if not odoo_session_data:
+                odoo_session_data = self.get_current_odoo_session()
+            
             if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
-                print(f"DEBUG: Using stateless submit with session_id: {odoo_session_data.get('session_id')[:20]}...")
+                debug_log(f"Using stateless submit with session_id: {odoo_session_data.get('session_id')[:20] if odoo_session_data.get('session_id') else 'None'}...", "bot_logic")
                 success, result, renewed_session = self.timeoff_service.submit_leave_request_stateless(
                     employee_id=employee_id,
                     leave_type_id=leave_type_id,
@@ -2783,17 +2807,17 @@ Be thorough and informative while maintaining clarity and accuracy."""
 
                 # CRITICAL: If session was renewed, update Flask session
                 if renewed_session:
-                    print(f"DEBUG: Updating Flask session with renewed Odoo session_id")
+                    debug_log(f"Updating Flask session with renewed Odoo session_id", "bot_logic")
                     try:
                         from flask import session as flask_session
                         flask_session['odoo_session_id'] = renewed_session['session_id']
                         flask_session['user_id'] = renewed_session['user_id']
                         flask_session.modified = True
-                        print(f"DEBUG: Flask session updated successfully with new session_id: {renewed_session['session_id'][:20]}...")
+                        debug_log(f"Flask session updated successfully with new session_id: {renewed_session['session_id'][:20]}...", "bot_logic")
                     except Exception as session_update_error:
-                        print(f"DEBUG: Failed to update Flask session: {session_update_error}")
+                        debug_log(f"Failed to update Flask session: {session_update_error}", "bot_logic")
             else:
-                print("DEBUG: Using legacy submit (no session data provided)")
+                debug_log("Using legacy submit (no session data available) - this may cause session expiry issues", "bot_logic")
                 success, result = self.timeoff_service.submit_leave_request(
                     employee_id=employee_id,
                     leave_type_id=leave_type_id,

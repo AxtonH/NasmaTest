@@ -137,7 +137,39 @@ class OvertimeService:
         return (score >= 0.5), min(1.0, score)
 
     # -------------------------- Odoo utilities ---------------------------
+    def _make_odoo_request_stateless(self, model: str, method: str, params: Dict,
+                                     session_id: str = None, user_id: int = None,
+                                     username: str = None, password: str = None) -> Tuple[bool, Any, Optional[Dict]]:
+        """Make authenticated request to Odoo using stateless session (with automatic retry)"""
+        try:
+            if not session_id or not user_id:
+                return False, "Session data missing", None
+
+            result = self.odoo_service.make_authenticated_request(
+                model=model,
+                method=method,
+                args=params.get('args', []),
+                kwargs=params.get('kwargs', {}),
+                session_id=session_id,
+                user_id=user_id,
+                username=username,
+                password=password
+            )
+
+            renewed_session = result.pop('_renewed_session', None) if isinstance(result, dict) else None
+
+            if 'error' in result:
+                error_data = result.get('error', {})
+                error_msg = error_data.get('message', 'Unknown error') if isinstance(error_data, dict) else str(error_data)
+                return False, error_msg, renewed_session
+
+            return True, result.get('result'), renewed_session
+
+        except Exception as e:
+            return False, str(e), None
+
     def _make_odoo_request(self, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
+        """Make authenticated request to Odoo using web session (legacy - use stateless version when possible)"""
         try:
             session_ok, session_msg = self.odoo_service.ensure_active_session()
             if not session_ok:
@@ -238,30 +270,60 @@ class OvertimeService:
         # Nothing found
         return False, "No projects found or access denied"
 
-    def _create_approval_request(self, category_id: int, date_start: str, date_end: str, project_id: int) -> Tuple[bool, Any]:
+    def _create_approval_request(self, category_id: int, date_start: str, date_end: str, project_id: int,
+                                 odoo_session_data: Dict = None) -> Tuple[bool, Any, Optional[Dict]]:
+        """Create approval request (returns success, result, renewed_session)"""
         payload = {
             'category_id': category_id,
-            'request_owner_id': self.odoo_service.user_id,
+            'request_owner_id': self.odoo_service.user_id if not odoo_session_data else odoo_session_data.get('user_id'),
             'name': 'Overtime request via Nasma chatbot',
             'date_start': date_start,
             'date_end': date_end,
             'x_studio_project': project_id,
         }
-        # Create the approval request
-        ok_create, rid = self._make_odoo_request('approval.request', 'create', {'args': [payload], 'kwargs': {}})
-        if not ok_create:
-            return False, rid
-
-        # Immediately submit the request for approval (move from "new" to "to_approve")
-        try:
-            _ = self._make_odoo_request('approval.request', 'action_confirm', {'args': [[rid]], 'kwargs': {}})
-        except Exception:
-            # If confirm fails, still return the created id with a soft warning
-            pass
-        return True, rid
+        
+        # Use stateless if session data provided, otherwise fallback to regular
+        use_stateless = odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id')
+        
+        if use_stateless:
+            ok_create, rid, renewed_create = self._make_odoo_request_stateless(
+                'approval.request', 'create', {'args': [payload], 'kwargs': {}},
+                session_id=odoo_session_data['session_id'],
+                user_id=odoo_session_data['user_id'],
+                username=odoo_session_data.get('username'),
+                password=odoo_session_data.get('password')
+            )
+            if not ok_create:
+                return False, rid, renewed_create
+            
+            # Immediately submit the request for approval
+            try:
+                ok_confirm, _, renewed_confirm = self._make_odoo_request_stateless(
+                    'approval.request', 'action_confirm', {'args': [[rid]], 'kwargs': {}},
+                    session_id=odoo_session_data['session_id'],
+                    user_id=odoo_session_data['user_id'],
+                    username=odoo_session_data.get('username'),
+                    password=odoo_session_data.get('password')
+                )
+                # Return latest renewed session
+                latest_renewed = renewed_confirm or renewed_create
+                return True, rid, latest_renewed
+            except Exception:
+                return True, rid, renewed_create
+        else:
+            # Legacy fallback
+            ok_create, rid = self._make_odoo_request('approval.request', 'create', {'args': [payload], 'kwargs': {}})
+            if not ok_create:
+                return False, rid, None
+            
+            try:
+                _ = self._make_odoo_request('approval.request', 'action_confirm', {'args': [[rid]], 'kwargs': {}})
+            except Exception:
+                pass
+            return True, rid, None
 
     # -------------------------- Flow handling -----------------------------
-    def handle_flow(self, message: str, thread_id: str, employee_data: Dict) -> Optional[Dict[str, Any]]:
+    def handle_flow(self, message: str, thread_id: str, employee_data: Dict, odoo_session_data: Dict = None) -> Optional[Dict[str, Any]]:
         """Main entry to manage overtime flow. Returns response dict or None."""
         try:
             # Normalize message early and catch cancellation regardless of step/widgets
@@ -305,7 +367,7 @@ class OvertimeService:
                         'thread_id': thread_id,
                         'session_handled': True
                     }
-                return self._continue_overtime(message, thread_id, active, employee_data)
+                return self._continue_overtime(message, thread_id, active, employee_data, odoo_session_data)
 
             # CRITICAL: Block if another flow is active (BEFORE intent detection)
             if active and active.get('type') not in (None, 'overtime') and active.get('state') in ['started', 'active']:
@@ -360,7 +422,7 @@ class OvertimeService:
         except Exception:
             return None
 
-    def _continue_overtime(self, message: str, thread_id: str, session: Dict, employee_data: Dict) -> Optional[Dict[str, Any]]:
+    def _continue_overtime(self, message: str, thread_id: str, session: Dict, employee_data: Dict, odoo_session_data: Dict = None) -> Optional[Dict[str, Any]]:
         try:
             step = session.get('step', 1)
             data = session.get('data', {})
@@ -540,12 +602,24 @@ class OvertimeService:
                     tzname = data.get('user_tz') or (employee_data or {}).get('tz') or 'Asia/Amman'
                     start_dt = self._local_to_utc_datetime_str(start_iso, data.get('hour_from', '9'), tzname)
                     end_dt = self._local_to_utc_datetime_str(end_iso, data.get('hour_to', '17'), tzname)
-                    ok, result = self._create_approval_request(
+                    ok, result, renewed_session = self._create_approval_request(
                         category_id=data.get('category_id'),
                         date_start=start_dt,
                         date_end=end_dt,
-                        project_id=int(data.get('project_id')) if data.get('project_id') else False
+                        project_id=int(data.get('project_id')) if data.get('project_id') else False,
+                        odoo_session_data=odoo_session_data
                     )
+                    
+                    # Update Flask session if session was renewed
+                    if renewed_session:
+                        try:
+                            from flask import session as flask_session
+                            flask_session['odoo_session_id'] = renewed_session['session_id']
+                            flask_session['user_id'] = renewed_session['user_id']
+                            flask_session.modified = True
+                        except Exception:
+                            pass
+                    
                     self.session_manager.complete_session(thread_id, {'submitted': ok, 'result': result})
                     if ok:
                         rid = result
