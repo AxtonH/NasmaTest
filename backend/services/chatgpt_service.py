@@ -1590,14 +1590,19 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         if self.leave_balance_service and employee_data and employee_data.get('id'):
                             employee_id = employee_data.get('id')
                             leave_type_name = selected_type.get('name', 'Unknown')
-                            remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
-                            if remaining:
-                                formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
-                                if formatted:
-                                    # Format as "**Available Annual Leave:** X days" (only label bold, not days)
-                                    import re
-                                    formatted_bold_label = re.sub(r'(Available [^:]+):', r'**\1:**', formatted)
-                                    remaining_leave_text = f"\n⏰ {formatted_bold_label}"
+                            remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                            if not error:
+                                # Always show balance, even if 0 (for specific leave type)
+                                if remaining:
+                                    formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
+                                    if formatted:
+                                        # Format as "**Available Annual Leave:** X days" (only label bold, not days)
+                                        import re
+                                        formatted_bold_label = re.sub(r'(Available [^:]+):', r'**\1:**', formatted)
+                                        remaining_leave_text = f"\n⏰ {formatted_bold_label}"
+                                elif leave_type_name:
+                                    # Show 0 days for specific leave type with no allocations
+                                    remaining_leave_text = f"\n⏰ **Available {leave_type_name}:** 0 days"
                     except Exception as e:
                         debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                         # Continue without remaining leave info if there's an error
@@ -1711,11 +1716,16 @@ Be thorough and informative while maintaining clarity and accuracy."""
                     if self.leave_balance_service and employee_data and employee_data.get('id'):
                         employee_id = employee_data.get('id')
                         leave_type_name = best_match.get('name', 'Unknown')
-                        remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
-                        if remaining:
-                            remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
-                            if remaining_leave_text:
-                                remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+                        remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                        if not error:
+                            # Always show balance, even if 0 (for specific leave type)
+                            if remaining:
+                                remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
+                                if remaining_leave_text:
+                                    remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
+                            elif leave_type_name:
+                                # Show 0 days for specific leave type with no allocations
+                                remaining_leave_text = f"\n⏰ **Available {leave_type_name}:** 0 days\n"
                 except Exception as e:
                     debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                     # Continue without remaining leave info if there's an error
@@ -1903,8 +1913,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                     employee_id = resolved_employee.get('id')
                     leave_type_name = selected_type.get('name', 'Unknown') if selected_type else 'Unknown'
-                    remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
-                    if remaining:
+                    remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                    if not error and remaining:
                         remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
                         if remaining_leave_text:
                             remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
@@ -2206,8 +2216,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         try:
                             if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                                 employee_id = resolved_employee.get('id')
-                                remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, lt)
-                                if remaining:
+                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, lt)
+                                if not error and remaining:
                                     remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
                                     if remaining_leave_text:
                                         remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
@@ -2275,8 +2285,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         try:
                             if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                                 employee_id = resolved_employee.get('id')
-                                remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, lt)
-                                if remaining:
+                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, lt)
+                                if not error and remaining:
                                     remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
                                     if remaining_leave_text:
                                         remaining_leave_text = f"\n⏰ **{remaining_leave_text}**\n"
@@ -2427,8 +2437,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                                 employee_id = resolved_employee.get('id')
                                 # Use base_leave_type_name for balance calculation (e.g., "Annual Leave" for Half Days)
-                                remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, base_leave_type_name)
-                                if remaining:
+                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, base_leave_type_name)
+                                if not error and remaining:
                                     formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
                                     if formatted:
                                         # Format as "**Available Annual Leave:** X days" or "**Available Sick Leave:** X days"
@@ -2564,8 +2574,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                                 employee_id = resolved_employee.get('id')
                                 selected_leave_type_name = selected_type.get('name', 'Unknown')
-                                remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, selected_leave_type_name)
-                                if remaining:
+                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, selected_leave_type_name)
+                                if not error and remaining:
                                     formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
                                     if formatted:
                                         # Format as "**Available Annual Leave:** X days" (only label bold, not days)
@@ -3141,8 +3151,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         except Exception:
                             pass
                         
-                        remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, base_leave_type_name)
-                        if remaining:
+                        remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, base_leave_type_name)
+                        if not error and remaining:
                             formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
                             if formatted:
                                 # Format as "**Available Annual Leave:** X days" or "**Available Sick Leave:** X days"
@@ -3282,8 +3292,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                     employee_id = resolved_employee.get('id')
                     leave_type_name = selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'
-                    remaining = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
-                    if remaining:
+                    remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                    if not error and remaining:
                         formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
                         if formatted:
                             # Format as "**Available Annual Leave:** X days" (only label bold, not days)

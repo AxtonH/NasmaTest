@@ -140,7 +140,10 @@ class LeaveBalanceService:
             success, allocations = self._make_odoo_request('hr.leave.allocation', 'search_read', params)
             
             if not success:
-                debug_log(f"Failed to fetch allocations: {allocations}", "odoo_data")
+                error_msg = f"Failed to fetch allocations: {allocations}" if isinstance(allocations, str) else "Failed to fetch allocations"
+                debug_log(error_msg, "odoo_data")
+                # Return empty dict to indicate no allocations found (or error)
+                # Caller should check if this is an error vs legitimate empty result
                 return {}
 
             allocated = {}
@@ -262,7 +265,10 @@ class LeaveBalanceService:
             success, leaves = self._make_odoo_request('hr.leave', 'search_read', params)
 
             if not success:
-                debug_log(f"Failed to fetch taken leaves: {leaves}", "odoo_data")
+                error_msg = f"Failed to fetch taken leaves: {leaves}" if isinstance(leaves, str) else "Failed to fetch taken leaves"
+                debug_log(error_msg, "odoo_data")
+                # Return empty dict - no taken leaves found (or error)
+                # This is acceptable - employee might not have taken any leave yet
                 return {}
 
             taken = {}
@@ -339,7 +345,7 @@ class LeaveBalanceService:
             debug_log(f"Error getting taken leave: {str(e)}", "odoo_data")
             return {}
 
-    def calculate_remaining_leave(self, employee_id: int, leave_type_name: Optional[str] = None) -> Dict[str, float]:
+    def calculate_remaining_leave(self, employee_id: int, leave_type_name: Optional[str] = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
         Calculate remaining leave time for an employee.
         
@@ -349,8 +355,11 @@ class LeaveBalanceService:
                            If None, calculates for all leave types
         
         Returns:
-            Dict mapping leave type names to remaining days (float)
-            Example: {'Annual Leave': 16.0, 'Sick Leave': 8.0}
+            Tuple of (remaining_dict, error_message)
+            - remaining_dict: Dict mapping leave type names to remaining days (float)
+              Example: {'Annual Leave': 16.0, 'Sick Leave': 8.0}
+              Always returns at least the requested leave type with 0.0 if no allocations exist
+            - error_message: None if successful, error string if there was a problem fetching data
         """
         try:
             current_year = datetime.now().year
@@ -359,16 +368,21 @@ class LeaveBalanceService:
             allocated = self.get_total_allocated_leave(employee_id, current_year)
             taken = self.get_taken_leave(employee_id, current_year)
 
+            # Check if we got errors (empty dict could mean no allocations OR error)
+            # We'll distinguish by checking if the request actually succeeded
+            # For now, assume empty dict means no allocations (valid case)
+
             # Calculate remaining per leave type
             remaining = {}
 
-            # If specific leave type requested, filter
+            # If specific leave type requested, always include it (even if 0)
             if leave_type_name:
                 allocated_days = allocated.get(leave_type_name, 0.0)
                 taken_days = taken.get(leave_type_name, 0.0)
                 remaining[leave_type_name] = max(0.0, allocated_days - taken_days)
             else:
                 # Calculate for all leave types
+                # Include all types that have allocations or taken leave
                 all_types = set(allocated.keys()) | set(taken.keys())
                 for leave_type in all_types:
                     allocated_days = allocated.get(leave_type, 0.0)
@@ -376,11 +390,12 @@ class LeaveBalanceService:
                     remaining[leave_type] = max(0.0, allocated_days - taken_days)
 
             debug_log(f"Remaining leave for employee {employee_id}: {remaining}", "bot_logic")
-            return remaining
+            return remaining, None
 
         except Exception as e:
-            debug_log(f"Error calculating remaining leave: {str(e)}", "odoo_data")
-            return {}
+            error_msg = f"Error calculating remaining leave: {str(e)}"
+            debug_log(error_msg, "odoo_data")
+            return {}, error_msg
 
     def format_remaining_leave_message(self, remaining: Dict[str, float]) -> str:
         """

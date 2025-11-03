@@ -192,8 +192,8 @@ class OdooService:
             return False
 
         time_since_activity = time.time() - self.last_activity
-        # Renew if session is 80% expired (about 1.6 hours for 2-hour session)
-        return time_since_activity > (self.session_timeout * 0.8)
+        # Renew if session is 50% expired (about 1 hour for 2-hour session) for more proactive renewal
+        return time_since_activity > (self.session_timeout * 0.5)
 
     def _renew_session(self) -> Tuple[bool, str]:
         """Renew the Odoo session"""

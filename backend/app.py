@@ -1123,12 +1123,15 @@ def create_app():
                         leave_type_name = 'Sick Leave'
                     
                     # Calculate remaining leave
-                    remaining = leave_balance_service.calculate_remaining_leave(
+                    remaining, error = leave_balance_service.calculate_remaining_leave(
                         employee_data.get('id'),
                         leave_type_name
                     )
                     
-                    if remaining:
+                    if error:
+                        # There was an error fetching data
+                        assistant_text = "I couldn't retrieve your leave balance at the moment. Please try again later."
+                    elif remaining:
                         # Format message with each leave type on a separate line
                         lines = []
                         for leave_type, days in sorted(remaining.items()):
@@ -1142,7 +1145,11 @@ def create_app():
                         formatted_message = "\n".join(lines)
                         assistant_text = f"Here's your leave balance:\n\n{formatted_message}"
                     else:
-                        assistant_text = "I couldn't retrieve your leave balance at the moment. Please try again later."
+                        # No allocations found (valid case - show 0 days)
+                        if leave_type_name:
+                            assistant_text = f"Here's your leave balance:\n\n\tAvailable {leave_type_name}: 0 days"
+                        else:
+                            assistant_text = "Here's your leave balance:\n\n\tNo leave allocations found."
                     
                     _log_chat_message_event(
                         thread_id,
@@ -2627,12 +2634,24 @@ def create_app():
             except Exception:
                 pass
 
-            if not odoo_service.is_authenticated():
+            # Get fresh session data from Flask session (per-user, thread-safe)
+            odoo_session_data = get_odoo_session_data()
+            if not odoo_session_data or not odoo_session_data.get('session_id') or not odoo_session_data.get('user_id'):
                 return jsonify({'success': False, 'message': 'Odoo session not authenticated'}), 401
 
-            ok_session, msg = odoo_service.ensure_active_session()
-            if not ok_session:
-                return jsonify({'success': False, 'message': f'Odoo session error: {msg}'}), 500
+            # Ensure we have credentials for session renewal if needed
+            if not odoo_session_data.get('password'):
+                # Try to get password from remember_me service if available
+                # This handles cases where password wasn't stored in Flask session
+                try:
+                    username = odoo_session_data.get('username') or session.get('username')
+                    if username:
+                        # Note: We can't get password from remember_me without token
+                        # So we'll proceed and let make_authenticated_request handle session expiry
+                        # If it fails, user will need to log in again
+                        pass
+                except Exception:
+                    pass
 
             method_map = {
                 ('hr.leave', 'approve'): 'action_approve',
@@ -2644,24 +2663,28 @@ def create_app():
             if not method:
                 return jsonify({'success': False, 'message': 'Unsupported action'}), 400
 
-            import requests
-            url = f"{odoo_service.odoo_url}/web/dataset/call_kw"
-            payload = {
-                "jsonrpc": "2.0",
-                "method": "call",
-                "params": {
-                    "model": model,
-                    "method": method,
-                    "args": [[record_id]],
-                    "kwargs": {}
-                },
-                "id": 1
-            }
-            cookies = {'session_id': odoo_service.session_id} if odoo_service.session_id else {}
-            resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, cookies=cookies, timeout=20)
-            ok = (resp.status_code == 200)
-            result = resp.json() if ok else { 'error': f'HTTP {resp.status_code}' }
-            if ok and 'error' not in result:
+            # Use stateless authenticated request with automatic session renewal retry
+            # This will automatically retry with session renewal if the session expires during the request
+            # If password is not available, session renewal will fail but we'll get a clear error
+            result = odoo_service.make_authenticated_request(
+                model=model,
+                method=method,
+                args=[[record_id]],
+                kwargs={},
+                session_id=odoo_session_data['session_id'],
+                user_id=odoo_session_data['user_id'],
+                username=odoo_session_data.get('username'),
+                password=odoo_session_data.get('password')
+            )
+
+            # Check if session was renewed and update Flask session
+            renewed_session = result.pop('_renewed_session', None) if isinstance(result, dict) else None
+            if renewed_session:
+                session['odoo_session_id'] = renewed_session['session_id']
+                session['user_id'] = renewed_session['user_id']
+                debug_log(f"[ManagerAction] Session renewed during {action} on {model} id={record_id}", "bot_logic")
+
+            if 'error' not in result:
                 success_message = f"[ManagerAction] Success: action={action} model={model} record_id={record_id}"
                 debug_log(success_message, "bot_logic")
                 try:
@@ -2669,6 +2692,7 @@ def create_app():
                 except Exception:
                     pass
                 return jsonify({'success': True})
+            
             failure_message = f"[ManagerAction] Failure: action={action} model={model} record_id={record_id} error={result.get('error')}"
             debug_log(failure_message, "bot_logic")
             try:
