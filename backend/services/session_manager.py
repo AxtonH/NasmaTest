@@ -85,7 +85,7 @@ class SessionManager:
             
             return True
         except Exception as e:
-            print(f"DEBUG: Error saving session to Supabase: {e}")
+            print(f"ERROR: Error saving session to Supabase: {e}", flush=True)
             import traceback
             traceback.print_exc()
             return False
@@ -105,7 +105,7 @@ class SessionManager:
                     return json.loads(session_json)
             return None
         except Exception as e:
-            print(f"DEBUG: Error loading session from Supabase: {e}")
+            print(f"ERROR: Error loading session from Supabase: {e}", flush=True)
             return None
     
     def _delete_session_supabase(self, thread_id: str) -> bool:
@@ -117,20 +117,16 @@ class SessionManager:
                 .execute()
             return True
         except Exception as e:
-            print(f"DEBUG: Error deleting session from Supabase: {e}")
+            print(f"ERROR: Error deleting session from Supabase: {e}", flush=True)
             return False
     
     def _save_session(self, thread_id: str, session_data: Dict):
         """Save session to persistent storage (with lock)"""
         try:
-            print(f"DEBUG: _save_session called for thread: {thread_id}")
-            print(f"DEBUG: Session data keys: {list(session_data.keys()) if session_data else 'None'}")
-            
             with self.lock:
-                print(f"DEBUG: _save_session acquired lock")
                 self._save_session_internal(thread_id, session_data)
         except Exception as e:
-            print(f"DEBUG: Error saving session: {e}")
+            print(f"ERROR: Error saving session: {e}", flush=True)
             import traceback
             traceback.print_exc()
     
@@ -144,70 +140,46 @@ class SessionManager:
     def _save_session_filesystem(self, thread_id: str, session_data: Dict):
         """Save session to filesystem"""
         try:
-            print(f"DEBUG: _save_session_internal called for thread: {thread_id}")
-            
             # Try simple JSON serialization first
             try:
-                print(f"DEBUG: Attempting direct JSON serialization...")
                 session_file = self._get_session_file(thread_id)
                 with open(session_file, 'w', encoding='utf-8') as f:
                     json.dump(session_data, f, indent=2, ensure_ascii=False, default=str)
-                print(f"DEBUG: Direct JSON serialization successful")
                 return
-            except Exception as direct_error:
-                print(f"DEBUG: Direct JSON serialization failed: {direct_error}")
-            
-            # Fallback to data cleaning
-            print(f"DEBUG: About to clean session data...")
-            cleaned_data = self._clean_session_data(session_data)
-            print(f"DEBUG: Session data cleaned successfully")
-            
-            session_file = self._get_session_file(thread_id)
-            print(f"DEBUG: About to write cleaned data to file: {session_file}")
-            with open(session_file, 'w', encoding='utf-8') as f:
-                json.dump(cleaned_data, f, indent=2, ensure_ascii=False, default=str)
-            print(f"DEBUG: File written successfully")
+            except Exception:
+                # Fallback to data cleaning
+                cleaned_data = self._clean_session_data(session_data)
+                session_file = self._get_session_file(thread_id)
+                with open(session_file, 'w', encoding='utf-8') as f:
+                    json.dump(cleaned_data, f, indent=2, ensure_ascii=False, default=str)
         except Exception as e:
-            print(f"DEBUG: Error in _save_session_internal: {e}")
+            print(f"ERROR: Error saving session file: {e}", flush=True)
             import traceback
             traceback.print_exc()
     
     def _clean_session_data(self, data, depth=0):
         """Clean session data to prevent serialization issues"""
-        print(f"DEBUG: _clean_session_data called at depth {depth}, type: {type(data)}")
-        
         # Prevent infinite recursion
         if depth > 10:
-            print(f"DEBUG: Maximum depth reached in _clean_session_data")
             return f"<max_depth_reached>"
             
         if isinstance(data, dict):
-            print(f"DEBUG: Processing dict with {len(data)} keys at depth {depth}")
             cleaned = {}
             for key, value in data.items():
-                print(f"DEBUG: Processing key '{key}' of type {type(value)}")
                 try:
                     # For simple types, just test serialization without recursion
                     if isinstance(value, (str, int, float, bool, type(None))):
                         json.dumps(value)
                         cleaned[key] = value
-                        print(f"DEBUG: Simple type key '{key}' processed successfully")
                     else:
                         # For complex types, recurse with depth tracking
-                        print(f"DEBUG: Recursing into complex type for key '{key}'")
                         cleaned[key] = self._clean_session_data(value, depth + 1)
-                        print(f"DEBUG: Complex type key '{key}' processed successfully")
-                except (TypeError, ValueError) as e:
-                    print(f"DEBUG: Skipping unserializable session data key '{key}': {e}")
+                except (TypeError, ValueError):
                     cleaned[key] = f"<unserializable: {type(value)}>"
-            print(f"DEBUG: Dict processing complete at depth {depth}")
             return cleaned
         elif isinstance(data, list):
-            print(f"DEBUG: Processing list with {len(data)} items at depth {depth}")
             cleaned = []
-            for i, item in enumerate(data):
-                if i % 5 == 0:  # Log every 5th item to avoid spam
-                    print(f"DEBUG: Processing list item {i}/{len(data)} of type {type(item)}")
+            for item in data:
                 try:
                     # For simple types, just test serialization without recursion
                     if isinstance(item, (str, int, float, bool, type(None))):
@@ -216,14 +188,11 @@ class SessionManager:
                     else:
                         # For complex types, recurse with depth tracking
                         cleaned.append(self._clean_session_data(item, depth + 1))
-                except (TypeError, ValueError) as e:
-                    print(f"DEBUG: Skipping unserializable session data item {i}: {e}")
+                except (TypeError, ValueError):
                     cleaned.append(f"<unserializable: {type(item)}>")
-            print(f"DEBUG: List processing complete at depth {depth}")
             return cleaned
         else:
             # Simple types - just test and return
-            print(f"DEBUG: Processing simple type {type(data)}")
             try:
                 json.dumps(data, default=str)
                 return data
@@ -251,7 +220,7 @@ class SessionManager:
                     return json.load(f)
             return None
         except Exception as e:
-            print(f"DEBUG: Error loading session: {e}")
+            print(f"ERROR: Error loading session: {e}", flush=True)
             return None
     
     def start_session(self, thread_id: str, session_type: str, data: Dict = None) -> Dict:
@@ -271,14 +240,11 @@ class SessionManager:
             self.session_expiry[thread_id] = datetime.now() + self.session_duration
         
         self._save_session(thread_id, session_data)
-        print(f"DEBUG: Started {session_type} session for thread {thread_id}")
         return session_data
     
     def get_session(self, thread_id: str) -> Optional[Dict]:
         """Get current session for thread"""
-        print(f"DEBUG: SessionManager.get_session called for thread: {thread_id}")
         with self.lock:
-            print(f"DEBUG: SessionManager acquired lock for thread: {thread_id}")
             # Check memory first
             if thread_id in self.sessions:
                 if self._is_session_valid(thread_id):
@@ -302,10 +268,8 @@ class SessionManager:
                         # Expired, remove
                         self._clear_session_internal(thread_id)
                 except Exception as e:
-                    print(f"DEBUG: SessionManager error loading session: {e}")
                     pass
             
-            print(f"DEBUG: SessionManager returning None for thread: {thread_id}")
             return None
 
     def get_active_session(self, thread_id: str) -> Optional[Dict]:
@@ -327,23 +291,13 @@ class SessionManager:
     
     def update_session(self, thread_id: str, updates: Dict) -> bool:
         """Update session data"""
-        print(f"DEBUG: SessionManager.update_session called for thread: {thread_id}")
-        print(f"DEBUG: Updates keys: {list(updates.keys()) if updates else 'None'}")
-        
         with self.lock:
-            print(f"DEBUG: SessionManager acquired lock for update")
             if thread_id in self.sessions and self._is_session_valid(thread_id):
-                print(f"DEBUG: Session exists and is valid, updating...")
                 self.sessions[thread_id].update(updates)
-                print(f"DEBUG: Session data updated in memory")
                 self.session_expiry[thread_id] = datetime.now() + self.session_duration
-                print(f"DEBUG: Session expiry updated")
-                print(f"DEBUG: About to save session (without lock)...")
                 self._save_session_internal(thread_id, self.sessions[thread_id])
-                print(f"DEBUG: Session saved successfully")
                 return True
             else:
-                print(f"DEBUG: Session not found or invalid for thread: {thread_id}")
                 return False
     
     def advance_session_step(self, thread_id: str, step_data: Dict = None) -> bool:
@@ -373,9 +327,6 @@ class SessionManager:
             updates['result'] = result
         
         success = self.update_session(thread_id, updates)
-        if success:
-            # Keep completed session for a short while, then clean up
-            print(f"DEBUG: Completed session for thread {thread_id}")
         return success
     
     def cancel_session(self, thread_id: str, reason: str = None) -> bool:
@@ -388,8 +339,6 @@ class SessionManager:
             updates['cancel_reason'] = reason
         
         success = self.update_session(thread_id, updates)
-        if success:
-            print(f"DEBUG: Cancelled session for thread {thread_id}: {reason}")
         return success
     
     def clear_session(self, thread_id: str):

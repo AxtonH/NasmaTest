@@ -200,7 +200,6 @@ class OdooService:
         if not self.username or not self.password:
             return False, "Cannot renew session: credentials not stored"
 
-        print(f"DEBUG: Renewing Odoo session for user {self.username}")
         return self.authenticate(self.username, self.password)
 
     def ensure_active_session(self) -> Tuple[bool, str]:
@@ -208,7 +207,6 @@ class OdooService:
         try:
             # First check if we have basic authentication data
             if not self.is_authenticated():
-                print("DEBUG: Not authenticated - cannot ensure session")
                 return False, "Not authenticated"
 
             # Update last activity time
@@ -216,45 +214,33 @@ class OdooService:
 
             # Check if session needs renewal based on time
             if self._should_renew_session():
-                print("DEBUG: Session approaching expiry, attempting proactive renewal...")
                 success, message = self._renew_session()
                 if not success:
-                    print(f"DEBUG: Proactive session renewal failed: {message}")
                     # Don't return error yet, try testing session validity
+                    pass
                 else:
-                    print("DEBUG: Proactive session renewal successful")
                     return True, "Session renewed proactively"
 
             # Test current session validity regardless of time-based renewal
-            print("DEBUG: Testing current session validity...")
             valid, message = self.test_session_validity()
             if not valid:
-                print(f"DEBUG: Session invalid ({message}), attempting reactive renewal...")
                 if not self.username or not self.password:
-                    print("DEBUG: Cannot renew - missing credentials")
                     return False, "Session invalid and cannot renew (missing credentials)"
 
                 success, renew_message = self._renew_session()
                 if not success:
-                    print(f"DEBUG: Reactive session renewal failed: {renew_message}")
                     return False, f"Session renewal failed: {renew_message}"
-                print("DEBUG: Reactive session renewal successful")
 
                 # Test again after renewal
                 valid_after_renewal, test_message = self.test_session_validity()
                 if not valid_after_renewal:
-                    print(f"DEBUG: Session still invalid after renewal: {test_message}")
                     return False, f"Session still invalid after renewal: {test_message}"
 
                 return True, "Session renewed after invalidity"
 
-            print("DEBUG: Session is valid and active")
             return True, "Session is active"
 
         except Exception as e:
-            print(f"DEBUG: Error in ensure_active_session: {e}")
-            import traceback
-            traceback.print_exc()
             return False, f"Session check error: {str(e)}"
 
     def post_with_retry(self, url: str, json: dict, cookies: dict, timeout: int = 20):
@@ -343,7 +329,6 @@ class OdooService:
 
     def renew_session_with_credentials(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
         """Renew session by re-authenticating (stateless version)"""
-        print(f"DEBUG: Renewing Odoo session for user {username}")
         return self.authenticate(username, password)
 
     def make_authenticated_request(self, model: str, method: str, args: list, kwargs: dict,
@@ -389,13 +374,11 @@ class OdooService:
 
             # Check for auth errors and retry with renewal if credentials provided
             if response.status_code in (401, 403) and username and password:
-                print(f"DEBUG: Session expired (HTTP {response.status_code}), attempting renewal...")
                 success, msg, new_session_data = self.renew_session_with_credentials(username, password)
                 if success and new_session_data:
                     renewed_session_data = new_session_data
                     cookies = {'session_id': new_session_data['session_id']}
                     response = requests.post(url, json=request_data, cookies=cookies, timeout=20)
-                    print(f"DEBUG: Session renewed successfully, new session_id: {new_session_data['session_id'][:20]}...")
 
             # Check for Odoo session expiry errors
             if response.status_code == 200:
@@ -407,23 +390,19 @@ class OdooService:
                     session_expired = 'session expired' in msg or 'sessionexpiredexception' in name
 
                     if session_expired:
-                        print("DEBUG: Odoo session expired error detected, attempting renewal...")
                         success, msg, new_session_data = self.renew_session_with_credentials(username, password)
                         if success and new_session_data:
                             renewed_session_data = new_session_data
                             cookies = {'session_id': new_session_data['session_id']}
                             response = requests.post(url, json=request_data, cookies=cookies, timeout=20)
-                            print(f"DEBUG: Session renewed successfully, new session_id: {new_session_data['session_id'][:20]}...")
 
             final_result = response.json() if response.status_code == 200 else {'error': f'HTTP {response.status_code}'}
 
             # CRITICAL: Include renewed session data so caller can update Flask session
             if renewed_session_data:
                 final_result['_renewed_session'] = renewed_session_data
-                print(f"DEBUG: Returning response with renewed session data")
 
             return final_result
 
         except Exception as e:
-            print(f"DEBUG: Exception in make_authenticated_request: {e}")
             return {'error': str(e)}

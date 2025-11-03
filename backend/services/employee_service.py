@@ -109,11 +109,6 @@ class EmployeeService:
             # Use session cookies for authentication
             cookies = {'session_id': self.odoo_service.session_id} if self.odoo_service.session_id else {}
             
-            self._log(f"Making web session request to {url}", "odoo_data")
-            self._log(f"Session ID: {self.odoo_service.session_id}", "odoo_data")
-            self._log(f"Cookies: {cookies}", "odoo_data")
-            self._log(f"Data: {data}", "odoo_data")
-            
             # Use OdooService retry-aware post
             post = getattr(self.odoo_service, 'post_with_retry', None)
             if callable(post):
@@ -127,23 +122,16 @@ class EmployeeService:
                     timeout=30
                 )
             
-            self._log(f"Response status: {response.status_code}", "odoo_data")
-            self._log(f"Response text: {response.text[:500]}...", "odoo_data")
-            
             if response.status_code == 200:
                 result = response.json()
-                self._log(f"Parsed JSON result: {result}", "odoo_data")
                 if 'result' in result:
-                    self._log(f"Result data: {result['result']}", "odoo_data")
                     return True, result['result']
                 else:
                     # Return raw error object so callers can inspect details
                     err_obj = result.get('error', {'message': 'Unknown error'})
-                    self._log(f"Odoo API error: {err_obj}", "odoo_data")
                     return False, err_obj
             else:
                 error_msg = f"HTTP error: {response.status_code}"
-                self._log(f"{error_msg}", "odoo_data")
                 return False, error_msg
                 
         except Exception as e:
@@ -427,11 +415,6 @@ class EmployeeService:
     def get_current_user_employee_data(self) -> Tuple[bool, Any]:
         """Get employee data for the currently logged-in user with fast caching"""
         try:
-            self._log(f"get_current_user_employee_data() called", "bot_logic")
-            self._log(f"Odoo service authenticated: {self.odoo_service.is_authenticated()}", "bot_logic")
-            self._log(f"User ID: {self.odoo_service.user_id}", "bot_logic")
-            self._log(f"Session ID: {self.odoo_service.session_id}", "bot_logic")
-
             if not self.odoo_service.is_authenticated():
                 debug_log("Not authenticated with Odoo, returning error", "bot_logic")
                 return False, "Not authenticated with Odoo"
@@ -441,51 +424,38 @@ class EmployeeService:
             # Check super-fast cache first
             if user_id in self.user_fast_cache_expiry:
                 if datetime.now() < self.user_fast_cache_expiry[user_id]:
-                    self._log(f"Using super-fast cached data for user {user_id}", "bot_logic")
                     return True, self.user_fast_cache[user_id]
                 else:
                     # Expired, remove from cache
                     del self.user_fast_cache[user_id]
                     del self.user_fast_cache_expiry[user_id]
             
-            user_id = self.odoo_service.user_id
-            self._log(f"Fetching employee data for user_id: {user_id}", "bot_logic")
-            self._log(f"Session ID: {self.odoo_service.session_id}", "bot_logic")
-            
             cache_key = f"employee_data_{user_id}"
             
             # Check cache first
             cached_data = self._get_cache(cache_key)
             if cached_data:
-                self._log(f"Using cached employee data for user {user_id}", "bot_logic")
                 return True, cached_data
             
             # Start with a conservative field set to avoid common AccessError fields
             available_fields = self._get_safe_public_employee_fields()
-            self._log(f"Available fields: {available_fields}", "odoo_data")
             
             # Fetch employee id first (lightweight), then read details by id to avoid heavy search_read payloads
             search_params = {
                 'args': [[('user_id', '=', user_id)]],
                 'kwargs': {'limit': 1}
             }
-            self._log(f"Making Odoo search with params: {search_params}", "odoo_data")
             ok_ids, id_list = self._make_odoo_request('hr.employee', 'search', search_params)
             if not ok_ids or not isinstance(id_list, list) or not id_list:
                 return False, "No employee record found for current user"
 
             # Chunked read (single id, but keep structure for future batch use)
             # Use safe read wrapper to avoid AccessError field violations
-            self._log(f"Making safe employee read for ids: {id_list} with fields: {available_fields}", "odoo_data")
             success, data = self._safe_employee_read(id_list, available_fields)
-            
-            self._log(f"Employee search result - Success: {success}", "odoo_data")
-            self._log(f"Employee search result - Data length: {len(data) if isinstance(data, list) else 'Not a list'}", "odoo_data")
             
             if success and data:
                 if isinstance(data, list) and len(data) > 0:
                     employee_data = data[0]  # read returns list of dicts
-                    self._log(f"Found employee record: {employee_data.get('name', 'Unknown')}", "bot_logic")
                     
                     # Expand related data
                     expanded_data = self._expand_related_data(employee_data)
@@ -496,14 +466,11 @@ class EmployeeService:
                     # Store in super-fast cache for current user
                     self.user_fast_cache[user_id] = expanded_data
                     self.user_fast_cache_expiry[user_id] = datetime.now() + self.fast_cache_duration
-                    self._log(f"Stored in super-fast cache for user {user_id}", "bot_logic")
 
                     return True, expanded_data
                 else:
-                    self._log(f"No employee records found for user_id {user_id}", "bot_logic")
                     return False, f"No employee record found for user ID {user_id}"
             else:
-                self._log(f"Employee search failed - Success: {success}, Data: {data}", "bot_logic")
                 return False, data or "Could not retrieve employee data from Odoo"
                 
         except Exception as e:

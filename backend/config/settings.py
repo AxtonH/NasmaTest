@@ -27,9 +27,9 @@ class Config:
     GPT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")  # Primary GPT model
     GPT_FALLBACK_MODEL = os.environ.get("OPENAI_FALLBACK_MODEL", "gpt-4o")  # Fallback model if GPT-5 unavailable
     VERBOSE_LOGS = _to_bool(os.environ.get("VERBOSE_LOGS"), default=False)  # Reduce noisy debug logs when False
-    DEBUG_ODOO_DATA = _to_bool(os.environ.get("DEBUG_ODOO_DATA"), default=True)  # Show Odoo data gathering details when True
-    DEBUG_BOT_LOGIC = _to_bool(os.environ.get("DEBUG_BOT_LOGIC"), default=True)  # Show bot logic and actions when True
-    DEBUG_KNOWLEDGE_BASE = _to_bool(os.environ.get("DEBUG_KNOWLEDGE_BASE"), default=True)  # Show knowledge base loading details when True
+    DEBUG_ODOO_DATA = _to_bool(os.environ.get("DEBUG_ODOO_DATA"), default=False)  # Show Odoo data gathering details when True
+    DEBUG_BOT_LOGIC = _to_bool(os.environ.get("DEBUG_BOT_LOGIC"), default=False)  # Show bot logic and actions when True
+    DEBUG_KNOWLEDGE_BASE = _to_bool(os.environ.get("DEBUG_KNOWLEDGE_BASE"), default=False)  # Show knowledge base loading details when True
     # Chat history controls
     MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "2"))  # include only the last N messages as discrete turns
     HISTORY_CONTEXT_LIMIT = int(os.environ.get("HISTORY_CONTEXT_LIMIT", "1200"))  # chars to keep when condensing older turns

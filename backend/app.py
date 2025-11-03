@@ -67,6 +67,9 @@ logging.basicConfig(
     force=True  # Override any existing configuration
 )
 
+# Suppress httpx INFO logs (Supabase client) - only show WARNING and above
+logging.getLogger('httpx').setLevel(logging.WARNING)
+
 # Get Flask logger
 logger = logging.getLogger('flask')
 logger.setLevel(logging.INFO)
@@ -79,7 +82,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 def debug_log(message: str, category: str = "general"):
     """Conditional debug logging based on configuration"""
-    # Always log errors and warnings
+    # Always log errors and warnings with flush (critical)
     if "ERROR" in message.upper() or "FAILED" in message.upper() or "FAIL" in message.upper():
         print(f"ERROR: {message}", flush=True)
         logger.error(message)
@@ -87,13 +90,13 @@ def debug_log(message: str, category: str = "general"):
         print(f"WARNING: {message}", flush=True)
         logger.warning(message)
     elif category == "odoo_data" and Config.DEBUG_ODOO_DATA:
-        print(f"DEBUG: {message}", flush=True)
+        print(f"DEBUG: {message}")  # No flush for debug logs (performance)
         logger.debug(message)
     elif category == "bot_logic" and Config.DEBUG_BOT_LOGIC:
-        print(f"DEBUG: {message}", flush=True)
+        print(f"DEBUG: {message}")  # No flush for debug logs (performance)
         logger.debug(message)
     elif category == "general" and Config.VERBOSE_LOGS:
-        print(f"DEBUG: {message}", flush=True)
+        print(f"DEBUG: {message}")  # No flush for debug logs (performance)
         logger.debug(message)
 
 def _parse_two_dates_from_text(text: str) -> tuple:
