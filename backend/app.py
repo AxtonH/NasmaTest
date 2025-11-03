@@ -2691,6 +2691,57 @@ def create_app():
                     app.logger.info(success_message)
                 except Exception:
                     pass
+                
+                # Log metrics for approval/refusal actions
+                try:
+                    # Get manager's employee data for metrics
+                    emp_ok, emp_data = employee_service.get_current_user_employee_data()
+                    if emp_ok and emp_data:
+                        # Determine metric type based on model and action
+                        if model == 'hr.leave':
+                            metric_type = 'timeoff_approval' if action == 'approve' else 'timeoff_refusal'
+                        elif model == 'approval.request':
+                            metric_type = 'overtime_approval' if action == 'approve' else 'overtime_refusal'
+                        else:
+                            metric_type = f"{model}_{action}"
+                        
+                        # Create payload with relevant information
+                        metric_payload = {
+                            'record_id': record_id,
+                            'model': model,
+                            'action': action,
+                            'timestamp': datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        # Generate a thread_id for this manager action (using timestamp)
+                        thread_id = f"manager_action_{int(time.time() * 1000)}"
+                        
+                        # Log the metric
+                        tenant_id, tenant_name, user_id, user_name = _extract_identity(emp_data)
+                        if tenant_name:
+                            metric_payload.setdefault('context', {})['tenant_name'] = tenant_name
+                        
+                        logged = metrics_service.log_metric(
+                            metric_type,
+                            thread_id,
+                            user_id=user_id,
+                            user_name=user_name,
+                            tenant_id=tenant_id,
+                            payload=metric_payload
+                        )
+                        if not logged:
+                            metrics_error = getattr(metrics_service, "last_error", None)
+                            debug_log(f"[ManagerAction] Metrics logging returned False: metric_type={metric_type}, last_error={metrics_error}", "bot_logic")
+                except Exception as e:
+                    # Don't let metrics failure affect the actual approval action
+                    error_msg = str(e)
+                    metrics_error = getattr(metrics_service, "last_error", None) if metrics_service else None
+                    debug_log(f"[ManagerAction] Metrics logging failed: {error_msg} (metrics_service.last_error: {metrics_error})", "bot_logic")
+                    try:
+                        app.logger.warning(f"[ManagerAction] Metrics logging failed: {error_msg} (metrics_service.last_error: {metrics_error})")
+                    except Exception:
+                        pass
+                
                 return jsonify({'success': True})
             
             failure_message = f"[ManagerAction] Failure: action={action} model={model} record_id={record_id} error={result.get('error')}"
