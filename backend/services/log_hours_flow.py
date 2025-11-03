@@ -903,7 +903,7 @@ def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context:
             context['hours'] = hours
             
             return {
-                'message': 'What did you work on? (optional)',
+                'message': 'Please add a description in chat or Skip',
                 'success': True,
                 'widgets': {
                     'log_hours_flow': {
