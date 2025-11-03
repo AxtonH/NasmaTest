@@ -369,18 +369,20 @@ def _normalize_resource_name(employee_name: str) -> str:
     return (employee_name or '').strip()
 
 
-def _fetch_current_month_tasks(odoo_service, employee_name: str) -> Tuple[bool, Any]:
+def _fetch_current_month_tasks(odoo_service, employee_name: str, employee_id: int = None) -> Tuple[bool, Any]:
     """
     Fetch tasks from planning.slot for the current user within the current month.
 
     This includes:
-    - Tasks where resource_id contains the employee name
+    - Tasks where employee_id matches (preferred) or resource_id contains the employee name (fallback)
     - Tasks within current month (start_datetime to end_datetime overlapping current month)
     - Tasks spanning multiple months are included if they overlap with current month
+    - Shift status must be 'Planned' (capital P matches Odoo selection key)
 
     Args:
         odoo_service: Active Odoo service instance
-        employee_name: Employee full name to match against resource_id
+        employee_name: Employee full name to match against resource_id (fallback)
+        employee_id: Employee ID to match against employee_id (preferred)
 
     Returns:
         Tuple of (success: bool, data: list or error message)
@@ -396,20 +398,22 @@ def _fetch_current_month_tasks(odoo_service, employee_name: str) -> Tuple[bool, 
         month_start_dt = f"{month_start} 00:00:00"
         month_end_dt = f"{month_end} 23:59:59"
 
-        # Normalize employee name for matching
-        normalized_name = _normalize_resource_name(employee_name)
-
-        # Domain to find tasks:
-        # 1. resource_id contains employee name (using 'ilike' for flexible matching)
-        # 2. Task overlaps with current month:
-        #    - Task starts before month ends AND
-        #    - Task ends after month starts
-        # This covers tasks fully within month AND tasks spanning multiple months
-        domain = [
-            ('resource_id', 'ilike', normalized_name),
+        # Build domain: prefer employee_id match, fallback to resource_id name match
+        domain_parts = [
             ('start_datetime', '<=', month_end_dt),
-            ('end_datetime', '>=', month_start_dt)
+            ('end_datetime', '>=', month_start_dt),
+            ('x_studio_shift_status', '=', 'Planned')  # Note: capital P (matches selection key)
         ]
+        
+        # Add employee matching (prefer employee_id, fallback to resource_id)
+        if employee_id:
+            domain_parts.insert(0, ('employee_id', '=', employee_id))
+        else:
+            # Fallback to resource_id name matching
+            normalized_name = _normalize_resource_name(employee_name)
+            domain_parts.insert(0, ('resource_id', 'ilike', normalized_name))
+
+        domain = domain_parts
 
         params = {
             'args': [domain],
@@ -419,13 +423,15 @@ def _fetch_current_month_tasks(odoo_service, employee_name: str) -> Tuple[bool, 
                     'name',  # Task name (kept for reference)
                     'x_studio_sub_task_1',  # Sub task field
                     'resource_id',  # Resource (employee with job title)
+                    'employee_id',  # Employee ID (Many2one to hr.employee)
                     'start_datetime',
                     'end_datetime',
                     'allocated_hours',
                     'allocated_percentage',
                     'project_id',  # Many2one to project.project
                     'role_id',  # Role/position
-                    'state'  # draft, published, etc.
+                    'state',  # draft, published, etc.
+                    'x_studio_shift_status'  # Shift status (planned/forecasted)
                 ],
                 'limit': 500,
                 'order': 'start_datetime desc'
@@ -463,7 +469,8 @@ def start_log_hours_flow(odoo_service, employee_data: dict) -> Dict[str, Any]:
             }
 
         # Fetch tasks for current month
-        ok, tasks_data = _fetch_current_month_tasks(odoo_service, employee_name)
+        employee_id = employee_data.get('id')
+        ok, tasks_data = _fetch_current_month_tasks(odoo_service, employee_name, employee_id=employee_id)
 
         if not ok:
             return {
