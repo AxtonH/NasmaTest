@@ -29,9 +29,46 @@ class LeaveBalanceService:
     def __init__(self, odoo_service):
         self.odoo_service = odoo_service
 
-    def _make_odoo_request(self, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
-        """Make authenticated request to Odoo using web session"""
+    def _make_odoo_request(self, model: str, method: str, params: Dict, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
+        """Make authenticated request to Odoo using web session or stateless request."""
         try:
+            # If session data provided, use stateless request (preferred)
+            if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+                try:
+                    result_dict = self.odoo_service.make_authenticated_request(
+                        model=model,
+                        method=method,
+                        args=params.get('args', []),
+                        kwargs=params.get('kwargs', {}),
+                        session_id=odoo_session_data['session_id'],
+                        user_id=odoo_session_data['user_id'],
+                        username=odoo_session_data.get('username'),
+                        password=odoo_session_data.get('password')
+                    )
+                    
+                    # Check if session was renewed
+                    renewed_session = result_dict.pop('_renewed_session', None) if isinstance(result_dict, dict) else None
+                    if renewed_session:
+                        # Update Flask session if renewed
+                        try:
+                            from flask import session as flask_session
+                            flask_session['odoo_session_id'] = renewed_session['session_id']
+                            flask_session['user_id'] = renewed_session['user_id']
+                            flask_session.modified = True
+                        except Exception:
+                            pass
+                    
+                    if 'error' in result_dict:
+                        error_msg = result_dict.get('error', 'Unknown error')
+                        debug_log(f"Odoo API error (stateless): {error_msg}", "odoo_data")
+                        return False, error_msg
+                    
+                    return True, result_dict.get('result', [])
+                except Exception as e:
+                    debug_log(f"Stateless request failed, falling back to regular request: {str(e)}", "odoo_data")
+                    # Fall through to regular request
+            
+            # Fallback to regular request using OdooService session
             # Ensure session is active before making request
             session_ok, session_msg = self.odoo_service.ensure_active_session()
             if not session_ok:
@@ -113,13 +150,15 @@ class LeaveBalanceService:
             return holiday_status_id.get('id')
         return None
 
-    def get_total_allocated_leave(self, employee_id: int, current_year: int) -> Dict[str, float]:
+    def get_total_allocated_leave(self, employee_id: int, current_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
         Get total allocated leave for the current year from hr.leave.allocation.
         
         Returns:
-            Dict mapping leave type names to allocated days (float)
-            Example: {'Annual Leave': 21.0, 'Sick Leave': 10.0}
+            Tuple of (allocated_dict, error_message)
+            - allocated_dict: Dict mapping leave type names to allocated days (float)
+              Example: {'Annual Leave': 21.0, 'Sick Leave': 10.0}
+            - error_message: None if successful, error string if there was a problem fetching data
         """
         try:
             # Domain: filter by employee and year
@@ -137,14 +176,13 @@ class LeaveBalanceService:
                 }
             }
 
-            success, allocations = self._make_odoo_request('hr.leave.allocation', 'search_read', params)
+            success, allocations = self._make_odoo_request('hr.leave.allocation', 'search_read', params, odoo_session_data)
             
             if not success:
                 error_msg = f"Failed to fetch allocations: {allocations}" if isinstance(allocations, str) else "Failed to fetch allocations"
                 debug_log(error_msg, "odoo_data")
-                # Return empty dict to indicate no allocations found (or error)
-                # Caller should check if this is an error vs legitimate empty result
-                return {}
+                # Return empty dict with error message to distinguish from "no allocations"
+                return {}, error_msg
 
             allocated = {}
             current_year_start = date(current_year, 1, 1)
@@ -201,11 +239,12 @@ class LeaveBalanceService:
                     continue
 
             debug_log(f"Total allocated leave for employee {employee_id}: {allocated}", "odoo_data")
-            return allocated
+            return allocated, None
 
         except Exception as e:
-            debug_log(f"Error getting total allocated leave: {str(e)}", "odoo_data")
-            return {}
+            error_msg = f"Error getting total allocated leave: {str(e)}"
+            debug_log(error_msg, "odoo_data")
+            return {}, error_msg
 
     def _count_days_in_year(self, start_date: date, end_date: date, target_year: int) -> float:
         """
@@ -232,15 +271,17 @@ class LeaveBalanceService:
         except Exception:
             return 0.0
 
-    def get_taken_leave(self, employee_id: int, current_year: int) -> Dict[str, float]:
+    def get_taken_leave(self, employee_id: int, current_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
         Get total taken leave for the current year from hr.leave.
         Only includes leaves with state 'validate' (Approved) or 'validate1' (Second Approval).
         Handles leaves spanning multiple years.
         
         Returns:
-            Dict mapping leave type names to taken days (float)
-            Example: {'Annual Leave': 5.0, 'Sick Leave': 2.0}
+            Tuple of (taken_dict, error_message)
+            - taken_dict: Dict mapping leave type names to taken days (float)
+              Example: {'Annual Leave': 5.0, 'Sick Leave': 2.0}
+            - error_message: None if successful, error string if there was a problem fetching data
         """
         try:
             # Domain: filter by employee, approved states, and dates within current year
@@ -262,14 +303,13 @@ class LeaveBalanceService:
                 }
             }
 
-            success, leaves = self._make_odoo_request('hr.leave', 'search_read', params)
+            success, leaves = self._make_odoo_request('hr.leave', 'search_read', params, odoo_session_data)
 
             if not success:
                 error_msg = f"Failed to fetch taken leaves: {leaves}" if isinstance(leaves, str) else "Failed to fetch taken leaves"
                 debug_log(error_msg, "odoo_data")
-                # Return empty dict - no taken leaves found (or error)
-                # This is acceptable - employee might not have taken any leave yet
-                return {}
+                # Return empty dict with error message
+                return {}, error_msg
 
             taken = {}
 
@@ -339,13 +379,14 @@ class LeaveBalanceService:
                     continue
 
             debug_log(f"Total taken leave for employee {employee_id}: {taken}", "odoo_data")
-            return taken
+            return taken, None
 
         except Exception as e:
-            debug_log(f"Error getting taken leave: {str(e)}", "odoo_data")
-            return {}
+            error_msg = f"Error getting taken leave: {str(e)}"
+            debug_log(error_msg, "odoo_data")
+            return {}, error_msg
 
-    def calculate_remaining_leave(self, employee_id: int, leave_type_name: Optional[str] = None) -> Tuple[Dict[str, float], Optional[str]]:
+    def calculate_remaining_leave(self, employee_id: int, leave_type_name: Optional[str] = None, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
         Calculate remaining leave time for an employee.
         
@@ -365,12 +406,14 @@ class LeaveBalanceService:
             current_year = datetime.now().year
 
             # Get allocations and taken leave
-            allocated = self.get_total_allocated_leave(employee_id, current_year)
-            taken = self.get_taken_leave(employee_id, current_year)
+            allocated, alloc_error = self.get_total_allocated_leave(employee_id, current_year, odoo_session_data)
+            taken, taken_error = self.get_taken_leave(employee_id, current_year, odoo_session_data)
 
-            # Check if we got errors (empty dict could mean no allocations OR error)
-            # We'll distinguish by checking if the request actually succeeded
-            # For now, assume empty dict means no allocations (valid case)
+            # Check if we got errors
+            if alloc_error:
+                return {}, alloc_error
+            if taken_error:
+                return {}, taken_error
 
             # Calculate remaining per leave type
             remaining = {}

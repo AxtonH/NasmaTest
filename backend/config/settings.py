@@ -34,6 +34,8 @@ class Config:
     MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "2"))  # include only the last N messages as discrete turns
     HISTORY_CONTEXT_LIMIT = int(os.environ.get("HISTORY_CONTEXT_LIMIT", "1200"))  # chars to keep when condensing older turns
     INCLUDE_CONDENSED_HISTORY = _to_bool(os.environ.get("INCLUDE_CONDENSED_HISTORY"), default=True)  # if True, send older history as one system block
+    # Message retention (in days, None = keep forever)
+    CHAT_MESSAGES_RETENTION_DAYS = int(os.environ.get("CHAT_MESSAGES_RETENTION_DAYS", "90")) if os.environ.get("CHAT_MESSAGES_RETENTION_DAYS") else None
     # Simple KB settings
     KB_ENABLED = True
     KB_DIR = os.path.join(os.path.dirname(__file__), '..', 'knowledge_base')

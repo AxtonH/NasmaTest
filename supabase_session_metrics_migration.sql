@@ -1,5 +1,6 @@
--- Migration: Add approval/refusal metric types to session_metrics
+-- Migration: Add approval/refusal metric types and log_hours to session_metrics
 -- This allows tracking manager approval actions for timeoff and overtime requests
+-- and tracking when users log their hours
 
 -- Drop the existing check constraint
 ALTER TABLE public.session_metrics DROP CONSTRAINT IF EXISTS session_metrics_metric_type_check;
@@ -17,7 +18,8 @@ CHECK (
     'timeoff_approval',
     'timeoff_refusal',
     'overtime_approval',
-    'overtime_refusal'
+    'overtime_refusal',
+    'log_hours'
   )
 );
 

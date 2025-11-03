@@ -1,7 +1,25 @@
 from typing import Dict, Any, List, Tuple, Set, Optional
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 import re
 from .manager_helper import _make_odoo_request, _current_month_range
+
+try:
+    from ..config.settings import Config
+except Exception:
+    from config.settings import Config
+
+def debug_log(message: str, category: str = "general"):
+    """Conditional debug logging based on configuration"""
+    if "ERROR" in message.upper() or "FAILED" in message.upper() or "FAIL" in message.upper():
+        print(f"ERROR: {message}", flush=True)
+    elif "WARNING" in message.upper() or "WARN" in message.upper():
+        print(f"WARNING: {message}", flush=True)
+    elif category == "odoo_data" and Config.DEBUG_ODOO_DATA:
+        print(f"DEBUG: {message}")
+    elif category == "bot_logic" and Config.DEBUG_BOT_LOGIC:
+        print(f"DEBUG: {message}")
+    elif category == "general" and Config.VERBOSE_LOGS:
+        print(f"DEBUG: {message}")
 
 
 def _parse_hours_from_text(text: str) -> Optional[float]:
@@ -753,7 +771,7 @@ def start_log_hours_for_task(odoo_service, employee_data: dict, subtask_id: int,
         }
 
 
-def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context: dict, user_input: str = None, odoo_session_data: dict = None) -> Dict[str, Any]:
+def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context: dict, user_input: str = None, odoo_session_data: dict = None, metrics_service=None) -> Dict[str, Any]:
     """
     Handle a step in the log hours flow.
     
@@ -953,7 +971,7 @@ def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context:
             confirm_input = (user_input or '').lower().strip()
             if confirm_input in ['log_hours_confirm', 'yes', 'confirm', 'y']:
                 # Create the timesheet entry
-                return create_timesheet_entry(odoo_service, employee_data, context, odoo_session_data)
+                return create_timesheet_entry(odoo_service, employee_data, context, odoo_session_data, metrics_service)
             else:
                 return {
                     'message': 'Log hours cancelled.',
@@ -973,7 +991,45 @@ def handle_log_hours_step(odoo_service, employee_data: dict, step: str, context:
         }
 
 
-def create_timesheet_entry(odoo_service, employee_data: dict, context: dict, odoo_session_data: dict = None) -> Dict[str, Any]:
+def _resolve_identity(employee_data: dict) -> Dict[str, Optional[str]]:
+    """Resolve tenant/company identifiers and user id/name from employee context."""
+    tenant_id = None
+    tenant_name = None
+    user_id = None
+    user_name = None
+    try:
+        if isinstance(employee_data, dict):
+            eid = employee_data.get('id')
+            if eid is not None:
+                user_id = str(eid)
+            name = employee_data.get('name')
+            if name:
+                user_name = str(name)
+            company_details = employee_data.get('company_id_details')
+            if isinstance(company_details, dict):
+                if company_details.get('id') is not None:
+                    tenant_id = str(company_details.get('id'))
+                if company_details.get('name'):
+                    tenant_name = company_details.get('name')
+            else:
+                raw_company = employee_data.get('company_id')
+                if isinstance(raw_company, (list, tuple)) and raw_company:
+                    tenant_id = str(raw_company[0])
+                    if len(raw_company) > 1 and raw_company[1]:
+                        tenant_name = raw_company[1]
+                elif raw_company:
+                    tenant_id = str(raw_company)
+    except Exception:
+        pass
+    return {
+        'tenant_id': tenant_id,
+        'tenant_name': tenant_name,
+        'user_id': user_id,
+        'user_name': user_name
+    }
+
+
+def create_timesheet_entry(odoo_service, employee_data: dict, context: dict, odoo_session_data: dict = None, metrics_service=None) -> Dict[str, Any]:
     """
     Create a timesheet entry in account.analytic.line.
     
@@ -981,6 +1037,8 @@ def create_timesheet_entry(odoo_service, employee_data: dict, context: dict, odo
         odoo_service: Active Odoo service instance
         employee_data: Employee data dict
         context: Flow context with all the collected data
+        odoo_session_data: Optional Odoo session data for stateless requests
+        metrics_service: Optional metrics service for logging
     
     Returns:
         Response dict with success message or error
@@ -1072,6 +1130,46 @@ def create_timesheet_entry(odoo_service, employee_data: dict, context: dict, odo
                 'message': 'Failed to create timesheet entry: Invalid response',
                 'success': False
             }
+        
+        # Log metrics for successful hours logging
+        if metrics_service:
+            try:
+                identity = _resolve_identity(employee_data)
+                task_name = context.get('task_name', '')
+                task_activity_id = context.get('task_activity_id')
+                
+                # Generate thread_id for this log hours action
+                import time
+                thread_id = f"log_hours_{int(time.time() * 1000)}"
+                
+                metric_payload = {
+                    'timesheet_id': timesheet_id,
+                    'subtask_id': subtask_id,
+                    'task_name': task_name,
+                    'task_date': task_date,
+                    'hours': hours,
+                    'description': description or '',
+                    'task_activity_id': task_activity_id,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+                
+                if identity.get('tenant_name'):
+                    metric_payload.setdefault('context', {})['tenant_name'] = identity['tenant_name']
+                
+                logged = metrics_service.log_metric(
+                    'log_hours',
+                    thread_id,
+                    user_id=identity.get('user_id'),
+                    user_name=identity.get('user_name'),
+                    tenant_id=identity.get('tenant_id'),
+                    payload=metric_payload
+                )
+                if not logged:
+                    metrics_error = getattr(metrics_service, "last_error", None)
+                    debug_log(f"[LogHours] Metrics logging failed: {metrics_error}", "bot_logic")
+            except Exception as e:
+                # Don't let metrics failure affect the actual timesheet creation
+                debug_log(f"[LogHours] Metrics logging error: {e}", "bot_logic")
         
         return {
             'message': f'✅ Successfully logged {hours:.1f} hours for {context.get("task_name", "the task")}!',

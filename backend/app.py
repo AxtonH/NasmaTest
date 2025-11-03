@@ -1125,7 +1125,8 @@ def create_app():
                     # Calculate remaining leave
                     remaining, error = leave_balance_service.calculate_remaining_leave(
                         employee_data.get('id'),
-                        leave_type_name
+                        leave_type_name,
+                        get_odoo_session_data()
                     )
                     
                     if error:
@@ -1213,18 +1214,6 @@ def create_app():
                             {'source': 'log_hours'}
                         )
 
-                    # Log usage metric
-                    _log_usage_metric(
-                        'log_hours',
-                        thread_id,
-                        {
-                            'user_message': message[:200] if message else '',
-                            'task_count': len(log_hours_resp.get('tasks', [])),
-                            'success': log_hours_resp.get('success', False)
-                        },
-                        employee_data
-                    )
-
                     response_data = {
                         'response': assistant_text,
                         'status': 'success' if log_hours_resp.get('success') else 'error',
@@ -1292,27 +1281,27 @@ def create_app():
                         value = parts[1] if len(parts) > 1 else ''
                         
                         if context_key == 'log_hours_task_activity':
-                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, value, get_odoo_session_data())
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, value, get_odoo_session_data(), metrics_service)
                         elif context_key == 'log_hours_hours':
-                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, value, get_odoo_session_data())
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, value, get_odoo_session_data(), metrics_service)
                         elif context_key == 'log_hours_description':
-                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, value, get_odoo_session_data())
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, value, get_odoo_session_data(), metrics_service)
                         else:
                             step_resp = None
                     # Handle button actions
                     elif message.startswith('log_hours_task_activity:'):
                         activity_id = message.split(':', 1)[1] if ':' in message else message.replace('log_hours_task_activity:', '')
-                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, activity_id, get_odoo_session_data())
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, activity_id, get_odoo_session_data(), metrics_service)
                     elif message.startswith('log_hours_hours:'):
                         hours = message.split(':', 1)[1] if ':' in message else message.replace('log_hours_hours:', '')
-                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, hours, get_odoo_session_data())
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, hours, get_odoo_session_data(), metrics_service)
                     elif message.startswith('log_hours_description:'):
                         desc = message.split(':', 1)[1] if ':' in message else message.replace('log_hours_description:', '')
-                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, desc, get_odoo_session_data())
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, desc, get_odoo_session_data(), metrics_service)
                     elif message == 'log_hours_skip_description':
-                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, '', get_odoo_session_data())
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, '', get_odoo_session_data(), metrics_service)
                     elif message == 'log_hours_confirm':
-                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'confirmation', context, 'log_hours_confirm', get_odoo_session_data())
+                        step_resp = handle_log_hours_step(odoo_service, employee_data, 'confirmation', context, 'log_hours_confirm', get_odoo_session_data(), metrics_service)
                         # Clear session after confirmation
                         session.pop('log_hours_flow', None)
                     elif message == 'log_hours_cancel':
@@ -1356,15 +1345,15 @@ def create_app():
                             # If we have task_activity_id but step is still task_activity (or empty),
                             # it means activity was selected but session wasn't updated - treat as hours
                             if current_step in ['task_activity', ''] or not current_step:
-                                step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, message, get_odoo_session_data())
+                                step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, message, get_odoo_session_data(), metrics_service)
                             else:
                                 # Step is already correct, use current step
-                                step_resp = handle_log_hours_step(odoo_service, employee_data, current_step, context, message, get_odoo_session_data())
+                                step_resp = handle_log_hours_step(odoo_service, employee_data, current_step, context, message, get_odoo_session_data(), metrics_service)
                         # Prevent going back: if we have activity_id, don't allow task_activity step
                         elif current_step == 'task_activity' and has_activity_id:
                             # Activity already selected, treat as hours if it looks like hours, otherwise show error
                             if looks_like_hours:
-                                step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, message, get_odoo_session_data())
+                                step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, message, get_odoo_session_data(), metrics_service)
                             else:
                                 step_resp = {
                                     'message': 'Activity has already been selected. Please enter the hours spent (e.g., "five hours", "5.5").',
@@ -1393,13 +1382,13 @@ def create_app():
                                 ]
                             }
                         elif current_step == 'task_activity':
-                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, message, get_odoo_session_data())
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'task_activity', context, message, get_odoo_session_data(), metrics_service)
                         elif current_step == 'hours':
                             step_resp = handle_log_hours_step(odoo_service, employee_data, 'hours', context, message, get_odoo_session_data())
                         elif current_step == 'description':
-                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, message, get_odoo_session_data())
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, message, get_odoo_session_data(), metrics_service)
                         elif current_step == 'confirmation':
-                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'confirmation', context, message, get_odoo_session_data())
+                            step_resp = handle_log_hours_step(odoo_service, employee_data, 'confirmation', context, message, get_odoo_session_data(), metrics_service)
                             # Clear session after confirmation or cancellation
                             if step_resp and step_resp.get('success'):
                                 if message.lower() in ['yes', 'confirm', 'y']:

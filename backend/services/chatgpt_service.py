@@ -1610,7 +1610,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         if self.leave_balance_service and employee_data and employee_data.get('id'):
                             employee_id = employee_data.get('id')
                             leave_type_name = selected_type.get('name', 'Unknown')
-                            remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                            remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name, self.get_current_odoo_session())
                             if not error:
                                 # Always show balance, even if 0 (for specific leave type)
                                 if remaining:
@@ -2236,7 +2236,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         try:
                             if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                                 employee_id = resolved_employee.get('id')
-                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, lt)
+                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, lt, self.get_current_odoo_session())
                                 if not error and remaining:
                                     remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
                                     if remaining_leave_text:
@@ -2305,7 +2305,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         try:
                             if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                                 employee_id = resolved_employee.get('id')
-                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, lt)
+                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, lt, self.get_current_odoo_session())
                                 if not error and remaining:
                                     remaining_leave_text = self.leave_balance_service.format_remaining_leave_message(remaining)
                                     if remaining_leave_text:
@@ -2457,7 +2457,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                                 employee_id = resolved_employee.get('id')
                                 # Use base_leave_type_name for balance calculation (e.g., "Annual Leave" for Half Days)
-                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, base_leave_type_name)
+                                remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, base_leave_type_name, self.get_current_odoo_session())
                                 if not error and remaining:
                                     formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
                                     if formatted:
@@ -3175,7 +3175,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         except Exception:
                             pass
                         
-                        remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, base_leave_type_name)
+                        remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, base_leave_type_name, self.get_current_odoo_session())
                         if not error and remaining:
                             formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
                             if formatted:
@@ -3316,7 +3316,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 if self.leave_balance_service and resolved_employee and resolved_employee.get('id'):
                     employee_id = resolved_employee.get('id')
                     leave_type_name = selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'
-                    remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name)
+                    remaining, error = self.leave_balance_service.calculate_remaining_leave(employee_id, leave_type_name, self.get_current_odoo_session())
                     if not error and remaining:
                         formatted = self.leave_balance_service.format_remaining_leave_message(remaining)
                         if formatted:
