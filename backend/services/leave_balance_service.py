@@ -455,6 +455,9 @@ class LeaveBalanceService:
 
         lines = []
         for leave_type, days in sorted(remaining.items()):
+            # Exclude Unpaid Leave from balance display (unlimited, no balance concept)
+            if leave_type == 'Unpaid Leave':
+                continue
             # Format days with 1 decimal place, but show as integer if whole number
             if days == int(days):
                 days_str = str(int(days))

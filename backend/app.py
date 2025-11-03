@@ -1121,6 +1121,22 @@ def create_app():
                         leave_type_name = 'Annual Leave'
                     elif 'sick' in message_lower:
                         leave_type_name = 'Sick Leave'
+                    elif 'unpaid' in message_lower:
+                        # Don't show balance for unpaid leave (unlimited, no balance concept)
+                        assistant_text = "Unpaid Leave doesn't have a balance - it's unlimited. You can request unpaid leave for any dates you need."
+                        _log_chat_message_event(
+                            thread_id,
+                            'assistant',
+                            assistant_text,
+                            employee_data,
+                            {'source': 'leave_balance'}
+                        )
+                        return jsonify({
+                            'response': assistant_text,
+                            'status': 'success',
+                            'has_employee_context': True,
+                            'thread_id': thread_id
+                        })
                     
                     # Calculate remaining leave
                     remaining, error = leave_balance_service.calculate_remaining_leave(
@@ -1134,8 +1150,12 @@ def create_app():
                         assistant_text = "I couldn't retrieve your leave balance at the moment. Please try again later."
                     elif remaining:
                         # Format message with each leave type on a separate line
+                        # Filter out Unpaid Leave (unlimited, no balance concept)
                         lines = []
                         for leave_type, days in sorted(remaining.items()):
+                            # Skip Unpaid Leave
+                            if leave_type == 'Unpaid Leave':
+                                continue
                             # Format days with 1 decimal place, but show as integer if whole number
                             if days == int(days):
                                 days_str = str(int(days))
@@ -1143,8 +1163,12 @@ def create_app():
                                 days_str = f"{days:.1f}"
                             lines.append(f"\tAvailable {leave_type}: {days_str} days")
                         
-                        formatted_message = "\n".join(lines)
-                        assistant_text = f"Here's your leave balance:\n\n{formatted_message}"
+                        if lines:
+                            formatted_message = "\n".join(lines)
+                            assistant_text = f"Here's your leave balance:\n\n{formatted_message}"
+                        else:
+                            # Only Unpaid Leave was found, show no balance message
+                            assistant_text = "Here's your leave balance:\n\n\tNo leave allocations found."
                     else:
                         # No allocations found (valid case - show 0 days)
                         if leave_type_name:
