@@ -389,12 +389,12 @@ def _normalize_resource_name(employee_name: str) -> str:
 
 def _fetch_current_month_tasks(odoo_service, employee_name: str, employee_id: int = None) -> Tuple[bool, Any]:
     """
-    Fetch tasks from planning.slot for the current user within the current month.
+    Fetch tasks from planning.slot for the current user within the current month and previous month.
 
     This includes:
     - Tasks where employee_id matches (preferred) or resource_id contains the employee name (fallback)
-    - Tasks within current month (start_datetime to end_datetime overlapping current month)
-    - Tasks spanning multiple months are included if they overlap with current month
+    - Tasks within current month and previous month (start_datetime to end_datetime overlapping either month)
+    - Tasks spanning multiple months are included if they overlap with current or previous month
     - Shift status must be 'Planned' (capital P matches Odoo selection key)
 
     Args:
@@ -413,7 +413,19 @@ def _fetch_current_month_tasks(odoo_service, employee_name: str, employee_id: in
 
         # Get current month range
         month_start, month_end = _current_month_range()
-        month_start_dt = f"{month_start} 00:00:00"
+        
+        # Calculate previous month start date
+        current_start = datetime.strptime(month_start, '%Y-%m-%d')
+        if current_start.month == 1:
+            # If current month is January, previous month is December of previous year
+            previous_month_start = datetime(current_start.year - 1, 12, 1)
+        else:
+            # Previous month is the same year, previous month number
+            previous_month_start = datetime(current_start.year, current_start.month - 1, 1)
+        
+        # Use previous month start as the beginning of our range
+        range_start = previous_month_start.strftime('%Y-%m-%d')
+        month_start_dt = f"{range_start} 00:00:00"
         month_end_dt = f"{month_end} 23:59:59"
 
         # Build domain: prefer employee_id match, fallback to resource_id name match
@@ -469,7 +481,7 @@ def _fetch_current_month_tasks(odoo_service, employee_name: str, employee_id: in
 
 def start_log_hours_flow(odoo_service, employee_data: dict) -> Dict[str, Any]:
     """
-    Start the log hours flow by fetching and displaying user's tasks for the current month.
+    Start the log hours flow by fetching and displaying user's tasks for the current month and previous month.
 
     Args:
         odoo_service: Active Odoo service instance
@@ -497,11 +509,18 @@ def start_log_hours_flow(odoo_service, employee_data: dict) -> Dict[str, Any]:
             }
 
         if not tasks_data or len(tasks_data) == 0:
-            # No tasks found for current month
+            # No tasks found for current month and previous month
             month_start, month_end = _current_month_range()
             current_month_name = datetime.strptime(month_start, '%Y-%m-%d').strftime('%B %Y')
+            # Calculate previous month name
+            current_start = datetime.strptime(month_start, '%Y-%m-%d')
+            if current_start.month == 1:
+                previous_month_start = datetime(current_start.year - 1, 12, 1)
+            else:
+                previous_month_start = datetime(current_start.year, current_start.month - 1, 1)
+            previous_month_name = previous_month_start.strftime('%B %Y')
             return {
-                'message': f'You have no tasks assigned for {current_month_name}.',
+                'message': f'You have no tasks assigned for {previous_month_name} or {current_month_name}.',
                 'success': True
             }
 

@@ -1683,9 +1683,32 @@ def create_app():
                         has_hours = bool(context.get('hours'))
                         has_description = 'description' in context  # Even if empty string, it's been set
                         
+                        # PRIORITY: If we have hours, we're in the description step (even if session step is wrong)
+                        # This fixes the bug where description input is incorrectly treated as task_activity step
+                        if has_hours and not has_description:
+                            # Hours are entered but description not yet set - we're in description step
+                            # Check if it looks like hours (user trying to re-enter hours) vs description
+                            if looks_like_hours:
+                                # User is trying to re-enter hours, but hours already set - show error
+                                step_resp = {
+                                    'message': 'Hours have already been entered. Please add a description or click Skip.',
+                                    'success': False,
+                                    'widgets': {
+                                        'log_hours_flow': {
+                                            'step': 'description',
+                                            **context
+                                        }
+                                    },
+                                    'buttons': [
+                                        {'text': 'Skip', 'value': 'log_hours_skip_description', 'type': 'action'}
+                                    ]
+                                }
+                            else:
+                                # User is entering description - process it
+                                step_resp = handle_log_hours_step(odoo_service, employee_data, 'description', context, message, get_odoo_session_data(), metrics_service)
                         # If it looks like hours and we have activity_id, prioritize hours step
                         # This handles cases where session step wasn't updated correctly after activity selection
-                        if looks_like_hours and has_activity_id:
+                        elif looks_like_hours and has_activity_id:
                             # If we have task_activity_id but step is still task_activity (or empty),
                             # it means activity was selected but session wasn't updated - treat as hours
                             if current_step in ['task_activity', ''] or not current_step:
