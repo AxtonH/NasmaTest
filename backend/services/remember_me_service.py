@@ -285,3 +285,20 @@ class RememberMeService:
         except Exception as e:
             print(f"Error fetching user tokens: {str(e)}")
             return []
+
+    def has_token_for_device(self, device_fingerprint: str) -> bool:
+        """
+        Check if a token exists for a given device fingerprint.
+
+        Args:
+            device_fingerprint: Device identifier to check
+
+        Returns:
+            True if a token exists for this device, False otherwise
+        """
+        try:
+            response = self.supabase.table(self.table_name).select('id').eq('device_fingerprint', device_fingerprint).limit(1).execute()
+            return len(response.data) > 0 if response.data else False
+        except Exception as e:
+            debug_log(f"Error checking token existence for device: {str(e)}", "bot_logic")
+            return False

@@ -713,6 +713,39 @@ def create_app():
                 'error': str(e)
             }), 500
 
+    @app.route('/api/auth/check-remember-me', methods=['POST'])
+    def check_remember_me():
+        """Check if a remember me token exists for the current device fingerprint"""
+        try:
+            data = request.get_json()
+            device_fingerprint = data.get('device_fingerprint', '')
+            
+            if not device_fingerprint:
+                return jsonify({
+                    'success': False,
+                    'has_token': False,
+                    'message': 'Device fingerprint is required'
+                }), 400
+            
+            # Check if token exists for this device
+            has_token = remember_me_service.has_token_for_device(device_fingerprint)
+            
+            debug_log(f"Token check for device {device_fingerprint[:16]}...: {'found' if has_token else 'not found'}", "bot_logic")
+            
+            return jsonify({
+                'success': True,
+                'has_token': has_token,
+                'message': 'Token found' if has_token else 'No token found'
+            })
+            
+        except Exception as e:
+            debug_log(f"Error checking token existence: {str(e)}", "bot_logic")
+            return jsonify({
+                'success': False,
+                'has_token': False,
+                'message': 'Error checking token'
+            }), 500
+
     @app.route('/api/auth/logout', methods=['POST'])
     def auth_logout():
         try:

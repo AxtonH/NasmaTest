@@ -137,6 +137,14 @@
                         </span>
                     </button>
 
+                    <button
+                        type="button"
+                        id="autoLoginButton"
+                        class="w-full h-[65.08px] rounded-[8px] bg-transparent border-2 border-[#291C48] text-[#291C48] text-[22.63px] font-medium hover:opacity-90 transition"
+                    >
+                        Auto-login
+                    </button>
+
                     <!-- Moved confirmation/message box here between button and checkbox -->
                     <div id="messageContainer" class="hidden w-full">
                         <div id="messageContent" class="mt-0 px-4 py-3 rounded-lg text-sm font-medium"></div>
@@ -158,6 +166,7 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/auto_login_button.js') }}"></script>
     <script>
         class DeviceFingerprint {
             /**
@@ -244,6 +253,7 @@
                 this.rememberMeCheckbox = document.getElementById('rememberMe');
                 this.rememberMeManager = new RememberMeManager();
                 this.deviceFingerprint = null;
+                this.autoLoginButton = null;
 
                 this.init();
             }
@@ -257,6 +267,13 @@
 
                 this.loginForm.addEventListener('submit', this.handleLogin.bind(this));
                 this.togglePasswordButton.addEventListener('click', this.togglePasswordVisibility.bind(this));
+
+                // Initialize auto-login button
+                const autoLoginButtonElement = document.getElementById('autoLoginButton');
+                if (autoLoginButtonElement) {
+                    this.autoLoginButton = new AutoLoginButton(this);
+                    this.autoLoginButton.init(autoLoginButtonElement);
+                }
             }
 
             async tryAutoLogin() {
