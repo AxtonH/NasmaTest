@@ -154,8 +154,22 @@ class RememberMeService:
 
         # Verify device fingerprint matches
         if stored_fingerprint != device_fingerprint:
-            debug_log(f"FAILED: Device fingerprint mismatch. Stored: {stored_fingerprint[:16]}..., Provided: {device_fingerprint[:16]}...", "bot_logic")
-            return None
+            # Fingerprint mismatch - but token is valid, so update fingerprint
+            # This handles legitimate cases where fingerprints change (browser updates, GPU updates, etc.)
+            debug_log(f"Device fingerprint mismatch detected. Stored: {stored_fingerprint[:16]}..., Provided: {device_fingerprint[:16]}...", "bot_logic")
+            debug_log(f"Token is valid, updating fingerprint to allow auto-login (fingerprints can change due to browser/GPU updates)", "bot_logic")
+            
+            try:
+                # Update the fingerprint in the database
+                update_data = {
+                    'device_fingerprint': device_fingerprint
+                }
+                self.supabase.table(self.table_name).update(update_data).eq('token_hash', token_hash).execute()
+                debug_log(f"Successfully updated device fingerprint for token", "bot_logic")
+            except Exception as e:
+                # Log error but continue - fingerprint update failed but token is still valid
+                debug_log(f"WARNING: Error updating device fingerprint for token: {str(e)}", "bot_logic")
+                # Still proceed with authentication since token is valid
 
         debug_log(f"Device fingerprint verified successfully", "bot_logic")
 

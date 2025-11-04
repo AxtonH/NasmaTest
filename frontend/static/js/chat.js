@@ -994,7 +994,8 @@ class ChatBot {
     async generateDeviceFingerprint() {
         const components = [];
         components.push(navigator.userAgent);
-        components.push(`${screen.width}x${screen.height}x${screen.colorDepth}`);
+        // Note: Screen dimensions excluded for consistency across login.html and chat_smooth.html
+        // Screen dimensions can change when using different monitors/displays
         components.push(Intl.DateTimeFormat().resolvedOptions().timeZone);
         components.push(navigator.language);
         components.push(navigator.platform);
