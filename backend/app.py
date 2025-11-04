@@ -2165,7 +2165,10 @@ def create_app():
                     response = { 'message': PEOPLE_CULTURE_DENIED }
                 else:
                     try:
-                        from services.new_user_flow import start_new_user_flow, handle_new_user_action
+                        try:
+                            from .services.new_user_flow import start_new_user_flow, handle_new_user_action
+                        except Exception:
+                            from services.new_user_flow import start_new_user_flow, handle_new_user_action
                         response = start_new_user_flow()
                     except Exception as e:
                         response = { 'message': f"Couldn't start the new user flow: {e}" }
@@ -2174,7 +2177,10 @@ def create_app():
                     response = { 'message': PEOPLE_CULTURE_DENIED }
                 else:
                     try:
-                        from services.new_user_flow import handle_new_user_action
+                        try:
+                            from .services.new_user_flow import handle_new_user_action
+                        except Exception:
+                            from services.new_user_flow import handle_new_user_action
                         resp = handle_new_user_action(normalized_msg)
                         # Early return for upload widget so frontend doesn't treat empty message as error
                         if normalized_msg == 'new_user_upload':
@@ -2227,7 +2233,10 @@ def create_app():
                     response = { 'message': PEOPLE_CULTURE_DENIED }
                 else:
                     try:
-                        from services.new_user_flow import create_employees_batch
+                        try:
+                            from .services.new_user_flow import create_employees_batch
+                        except Exception:
+                            from services.new_user_flow import create_employees_batch
                         response = create_employees_batch(odoo_service)
                     except Exception as e:
                         response = { 'message': f"Couldn't confirm: {e}" }
@@ -2243,7 +2252,10 @@ def create_app():
                         else:
                             idx = int(parts[1])
                             label = parts[2]
-                            from services.new_user_flow import assign_company_to_record, confirmation_message
+                            try:
+                                from .services.new_user_flow import assign_company_to_record, confirmation_message
+                            except Exception:
+                                from services.new_user_flow import assign_company_to_record, confirmation_message
                             result = assign_company_to_record(idx, label, odoo_service)
                             if result.get('success'):
                                 rows = result.get('rows') or []
@@ -2276,7 +2288,10 @@ def create_app():
                         if not match:
                             response = { 'message': 'I could not find that teammate in the recently created list.' }
                         else:
-                            from services.new_user_flow import list_available_hardware
+                            try:
+                                from .services.new_user_flow import list_available_hardware
+                            except Exception:
+                                from services.new_user_flow import list_available_hardware
                             hardware_items = list_available_hardware(odoo_service)
                             if not hardware_items:
                                 response = { 'message': 'I could not find any available hardware right now. Please check again later.' }
@@ -2325,7 +2340,10 @@ def create_app():
                                 break
                         if not hardware_name:
                             hardware_name = 'the selected hardware'
-                        from services.new_user_flow import assign_hardware_to_employee, list_available_hardware
+                        try:
+                            from .services.new_user_flow import assign_hardware_to_employee, list_available_hardware
+                        except Exception:
+                            from services.new_user_flow import assign_hardware_to_employee, list_available_hardware
                         ok_assign, error_msg = assign_hardware_to_employee(odoo_service, hardware_id, emp_id)
                         if ok_assign:
                             refreshed = list_available_hardware(odoo_service)
@@ -2417,8 +2435,12 @@ def create_app():
                     if company_name not in allowed:
                         return jsonify({'success': False, 'message': 'Preview only available for selected companies'}), 400
 
-                    from services.employee_service import EmployeeService
-                    from services.document_service import DocumentService
+                    try:
+                        from .services.employee_service import EmployeeService
+                        from .services.document_service import DocumentService
+                    except Exception:
+                        from services.employee_service import EmployeeService
+                        from services.document_service import DocumentService
                     emp_service = EmployeeService(odoo_service)
                     doc_service = DocumentService(odoo_service, emp_service)
                     doc_service.metrics_service = metrics_service
@@ -2926,8 +2948,12 @@ def create_app():
             if company_name not in allowed_companies:
                 return jsonify({'success': False, 'message': 'Preview available only for selected companies'}), 400
 
-            from services.employee_service import EmployeeService
-            from services.document_service import DocumentService
+            try:
+                from .services.employee_service import EmployeeService
+                from .services.document_service import DocumentService
+            except Exception:
+                from services.employee_service import EmployeeService
+                from services.document_service import DocumentService
             emp_service = EmployeeService(odoo_service)
             doc_service = DocumentService(odoo_service, emp_service)
             doc_service.metrics_service = metrics_service
@@ -3109,7 +3135,10 @@ def create_app():
                 return jsonify({'success': False, 'message': PEOPLE_CULTURE_DENIED}), 403
             file = request.files['file']
             content = file.read()
-            from services.new_user_flow import parse_new_user_excel, confirmation_message
+            try:
+                from .services.new_user_flow import parse_new_user_excel, confirmation_message
+            except Exception:
+                from services.new_user_flow import parse_new_user_excel, confirmation_message
             # Pass odoo_service to enable duplicate checking
             parsed = parse_new_user_excel(content, odoo_service=odoo_service)
             if not parsed.get('success'):
@@ -3272,7 +3301,10 @@ def create_app():
         try:
             thread_id = request.json.get('thread_id')
             if thread_id:
-                from services.chatgpt_service import ChatGPTService
+                try:
+                    from .services.chatgpt_service import ChatGPTService
+                except Exception:
+                    from services.chatgpt_service import ChatGPTService
                 chatgpt_service = ChatGPTService()
                 # Clear local conversation history
                 chatgpt_service.clear_conversation_history(thread_id)
