@@ -17,6 +17,7 @@ try:
     from .services.intent_service import IntentService
     from .services.overtime_service import OvertimeService
     from .services.remember_me_service import RememberMeService
+    from .services.auth_token_service import AuthTokenService
     from .services.leave_balance_service import LeaveBalanceService
     from .services.title_generator import generate_conversation_title, update_title_if_needed
     from .services.manager_helper import (
@@ -41,6 +42,7 @@ except Exception:
     from services.intent_service import IntentService
     from services.overtime_service import OvertimeService
     from services.remember_me_service import RememberMeService
+    from services.auth_token_service import AuthTokenService
     from services.leave_balance_service import LeaveBalanceService
     from services.title_generator import generate_conversation_title, update_title_if_needed
     from services.manager_helper import (
@@ -202,6 +204,11 @@ def create_app():
         supabase_url=Config.SUPABASE_URL,
         supabase_key=Config.SUPABASE_SERVICE_ROLE,
         table_name=Config.SUPABASE_REMEMBER_ME_TABLE
+    )
+    auth_token_service = AuthTokenService(
+        supabase_url=Config.SUPABASE_URL,
+        supabase_key=Config.SUPABASE_SERVICE_ROLE,
+        table_name='refresh_tokens'
     )
     
     # Import and initialize reimbursement service (support package/local)
@@ -533,7 +540,7 @@ def create_app():
             username = data.get('username', '')
             password = data.get('password', '')
             remember_me = data.get('remember_me', False)
-            device_fingerprint = data.get('device_fingerprint', '')
+            # device_fingerprint no longer required - using JWT tokens instead
 
             if not username or not password:
                 return jsonify({
@@ -571,22 +578,38 @@ def create_app():
                     }
                 }
 
-                # Handle remember me functionality
-                if remember_me and device_fingerprint:
+                # Handle remember me functionality with JWT tokens
+                if remember_me:
                     try:
-                        token = remember_me_service.create_token(
+                        # Generate JWT access token and refresh token
+                        access_token = auth_token_service.create_access_token(
+                            user_id=session_data['user_id'],
                             username=username,
-                            password=password,
-                            device_fingerprint=device_fingerprint
+                            email=username
                         )
-                        response_data['remember_me_token'] = token
-                        debug_log(f"Remember me token created for {username} on device {device_fingerprint[:8]}...", "bot_logic")
+                        refresh_token = auth_token_service.create_refresh_token(
+                            user_id=session_data['user_id'],
+                            username=username,
+                            password=password  # Password encrypted and stored with refresh token
+                        )
                         
-                        # Set cookie for Teams iframe compatibility (works better than localStorage)
+                        response_data['access_token'] = access_token
+                        response_data['refresh_token'] = refresh_token
+                        debug_log(f"JWT tokens created for {username} (user_id: {session_data['user_id']})", "bot_logic")
+                        
+                        # Set cookies for Teams iframe compatibility
                         response = jsonify(response_data)
                         response.set_cookie(
-                            'nasma_remember_me_token',
-                            token,
+                            'nasma_access_token',
+                            access_token,
+                            max_age=7*24*60*60,  # 7 days
+                            httponly=False,  # Allow JavaScript access
+                            samesite='None',  # Required for Teams iframes
+                            secure=True  # Required when SameSite=None
+                        )
+                        response.set_cookie(
+                            'nasma_refresh_token',
+                            refresh_token,
                             max_age=365*24*60*60,  # 1 year
                             httponly=False,  # Allow JavaScript access
                             samesite='None',  # Required for Teams iframes
@@ -594,7 +617,8 @@ def create_app():
                         )
                         return response
                     except Exception as e:
-                        debug_log(f"Failed to create remember me token: {str(e)}", "bot_logic")
+                        debug_log(f"Failed to create JWT tokens: {str(e)}", "bot_logic")
+                        # Continue without tokens - user can still use session-based auth
 
                 return jsonify(response_data)
             else:
@@ -725,82 +749,306 @@ def create_app():
                 'error': str(e)
             }), 500
 
-    @app.route('/api/auth/check-remember-me', methods=['POST'])
-    def check_remember_me():
-        """Check if a remember me token exists for the current device fingerprint"""
+    @app.route('/api/auth/me', methods=['GET'])
+    def auth_me():
+        """Validate access token and return user info"""
         try:
-            data = request.get_json()
-            device_fingerprint = data.get('device_fingerprint', '')
+            # Get access token from Authorization header or cookie
+            access_token = None
             
-            if not device_fingerprint:
+            # Try Authorization header first
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                access_token = auth_header[7:]
+            
+            # Fallback to cookie
+            if not access_token:
+                access_token = request.cookies.get('nasma_access_token')
+            
+            if not access_token:
                 return jsonify({
                     'success': False,
-                    'has_token': False,
-                    'message': 'Device fingerprint is required'
-                }), 400
+                    'authenticated': False,
+                    'message': 'Access token required'
+                }), 401
             
-            # Check if token exists for this device
-            has_token = remember_me_service.has_token_for_device(device_fingerprint)
-            username = None
+            # Verify access token
+            payload = auth_token_service.verify_access_token(access_token)
             
-            if has_token:
-                # Get username associated with this device fingerprint
-                username = remember_me_service.get_username_for_device(device_fingerprint)
+            if not payload:
+                return jsonify({
+                    'success': False,
+                    'authenticated': False,
+                    'message': 'Invalid or expired access token'
+                }), 401
             
-            debug_log(f"Token check for device {device_fingerprint[:16]}...: {'found' if has_token else 'not found'}", "bot_logic")
-            
+            # Token is valid - return user info
             return jsonify({
                 'success': True,
-                'has_token': has_token,
-                'username': username,
-                'message': 'Token found' if has_token else 'No token found'
+                'authenticated': True,
+                'user_info': {
+                    'user_id': payload['user_id'],
+                    'username': payload['username'],
+                    'email': payload.get('email', payload['username'])
+                }
             })
             
         except Exception as e:
-            debug_log(f"Error checking token existence: {str(e)}", "bot_logic")
+            debug_log(f"Error in /api/auth/me: {str(e)}", "bot_logic")
             return jsonify({
                 'success': False,
-                'has_token': False,
-                'username': None,
-                'message': 'Error checking token'
+                'authenticated': False,
+                'message': f'Error validating token: {str(e)}'
+            }), 500
+
+    @app.route('/api/auth/refresh', methods=['POST'])
+    def auth_refresh():
+        """Refresh access token using refresh token"""
+        try:
+            data = request.get_json()
+            refresh_token = data.get('refresh_token', '')
+            
+            # Fallback to cookie if not in body
+            if not refresh_token:
+                refresh_token = request.cookies.get('nasma_refresh_token')
+            
+            if not refresh_token:
+                return jsonify({
+                    'success': False,
+                    'message': 'Refresh token required'
+                }), 400
+            
+            # Verify refresh token
+            user_info = auth_token_service.verify_refresh_token(refresh_token)
+            
+            if not user_info:
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid or revoked refresh token'
+                }), 401
+            
+            user_id, username, _ = user_info  # Password not needed for refresh, just for user info
+            
+            # Generate new access token
+            access_token = auth_token_service.create_access_token(
+                user_id=user_id,
+                username=username,
+                email=username
+            )
+            
+            debug_log(f"Access token refreshed for user_id={user_id}, username={username}", "bot_logic")
+            
+            # Return new access token
+            response = jsonify({
+                'success': True,
+                'access_token': access_token,
+                'refresh_token': refresh_token,  # Same refresh token (doesn't change)
+                'message': 'Token refreshed successfully'
+            })
+            
+            # Update cookie
+            response.set_cookie(
+                'nasma_access_token',
+                access_token,
+                max_age=7*24*60*60,  # 7 days
+                httponly=False,
+                samesite='None',
+                secure=True
+            )
+            
+            return response
+            
+        except Exception as e:
+            debug_log(f"Error in /api/auth/refresh: {str(e)}", "bot_logic")
+            return jsonify({
+                'success': False,
+                'message': f'Error refreshing token: {str(e)}'
+            }), 500
+
+    @app.route('/api/auth/auto-login', methods=['POST'])
+    def auth_auto_login():
+        """Auto-login using JWT tokens (replaces old remember me flow)"""
+        try:
+            # Get tokens from request body or cookies
+            data = request.get_json(silent=True) or {}
+            access_token = data.get('access_token') or request.cookies.get('nasma_access_token')
+            refresh_token = data.get('refresh_token') or request.cookies.get('nasma_refresh_token')
+            
+            if not access_token and not refresh_token:
+                return jsonify({
+                    'success': False,
+                    'message': 'No tokens found'
+                }), 401
+            
+            # Try access token first
+            if access_token:
+                payload = auth_token_service.verify_access_token(access_token)
+                if payload:
+                    # Access token is valid - authenticate user
+                    user_id = payload['user_id']
+                    username = payload['username']
+                    
+                    # Check if we have password in Flask session (from remember_me)
+                    password = session.get('password')
+                    
+                    if password:
+                        # Authenticate with Odoo to get fresh session
+                        success, message, session_data = odoo_service.authenticate(username, password)
+                        
+                        if success and session_data:
+                            # Store authentication in Flask session
+                            session.permanent = True
+                            session['authenticated'] = True
+                            session['username'] = username
+                            session['user_id'] = user_id
+                            session['odoo_session_id'] = session_data['session_id']
+                            session['password'] = password  # Keep password for future auto-logins
+                            
+                            debug_log(f"Auto-login successful via access token for {username} (Odoo session established)", "bot_logic")
+                            
+                            return jsonify({
+                                'success': True,
+                                'message': 'Auto-login successful',
+                                'user_info': {
+                                    'user_id': user_id,
+                                    'username': username,
+                                    'database': Config.ODOO_DB,
+                                    'server_url': Config.ODOO_URL
+                                }
+                            })
+                        else:
+                            # Odoo authentication failed
+                            debug_log(f"Auto-login failed: Odoo authentication failed for {username}", "bot_logic")
+                            return jsonify({
+                                'success': False,
+                                'message': 'Authentication failed. Please log in again.'
+                            }), 401
+                    else:
+                        # No password in session - Flask session expired, try refresh token path
+                        # This will fall through to refresh token handling below
+                        debug_log(f"Access token valid but no password in Flask session, trying refresh token...", "bot_logic")
+            
+            # Access token expired or invalid - try refresh token
+            if refresh_token:
+                user_info = auth_token_service.verify_refresh_token(refresh_token)
+                if user_info:
+                    user_id, username, password = user_info
+                    
+                    # Authenticate with Odoo using decrypted password
+                    success, message, session_data = odoo_service.authenticate(username, password)
+                    
+                    if success and session_data:
+                        # Generate new access token
+                        new_access_token = auth_token_service.create_access_token(
+                            user_id=user_id,
+                            username=username,
+                            email=username
+                        )
+                        
+                        # Store authentication in Flask session
+                        session.permanent = True
+                        session['authenticated'] = True
+                        session['username'] = username
+                        session['user_id'] = user_id
+                        session['odoo_session_id'] = session_data['session_id']
+                        session['password'] = password  # Keep password for faster access token flow
+                        
+                        debug_log(f"Auto-login successful via refresh token for {username} (Odoo session established)", "bot_logic")
+                        
+                        response = jsonify({
+                            'success': True,
+                            'message': 'Auto-login successful',
+                            'access_token': new_access_token,
+                            'refresh_token': refresh_token,
+                            'user_info': {
+                                'user_id': user_id,
+                                'username': username,
+                                'database': Config.ODOO_DB,
+                                'server_url': Config.ODOO_URL
+                            }
+                        })
+                        
+                        # Update cookie
+                        response.set_cookie(
+                            'nasma_access_token',
+                            new_access_token,
+                            max_age=7*24*60*60,
+                            httponly=False,
+                            samesite='None',
+                            secure=True
+                        )
+                        
+                        return response
+                    else:
+                        # Odoo authentication failed
+                        debug_log(f"Auto-login failed: Odoo authentication failed for {username}", "bot_logic")
+                        return jsonify({
+                            'success': False,
+                            'message': 'Authentication failed. Please log in again.'
+                        }), 401
+            
+            # Both tokens invalid
+            return jsonify({
+                'success': False,
+                'message': 'Invalid or expired tokens'
+            }), 401
+            
+        except Exception as e:
+            debug_log(f"Error in auto-login: {str(e)}", "bot_logic")
+            import traceback
+            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+            return jsonify({
+                'success': False,
+                'message': f'Auto-login error: {str(e)}'
             }), 500
 
     @app.route('/api/auth/logout', methods=['POST'])
     def auth_logout():
         try:
-            # Get device fingerprint to clear remember me token
-            # Handle both JSON and non-JSON requests
-            device_fingerprint = ''
+            # Get refresh token to revoke it
+            refresh_token = None
             try:
                 data = request.get_json(silent=True) or {}
-                device_fingerprint = data.get('device_fingerprint', '')
+                refresh_token = data.get('refresh_token') or request.cookies.get('nasma_refresh_token')
             except Exception:
-                # If JSON parsing fails, that's okay - logout should still work
-                pass
+                # If JSON parsing fails, try cookie
+                refresh_token = request.cookies.get('nasma_refresh_token')
 
-            username = session.get('username', '')
-
-            # Clear remember me token if device fingerprint provided
-            if username and device_fingerprint:
+            # Revoke refresh token if provided
+            if refresh_token:
                 try:
-                    remember_me_service.remove_token(username, device_fingerprint)
-                    debug_log(f"Removed remember me token for {username} on device {device_fingerprint[:8]}...", "bot_logic")
+                    auth_token_service.revoke_refresh_token(refresh_token)
+                    debug_log(f"Revoked refresh token on logout", "bot_logic")
                 except Exception as e:
-                    debug_log(f"Failed to remove remember me token: {str(e)}", "bot_logic")
+                    debug_log(f"Failed to revoke refresh token: {str(e)}", "bot_logic")
+            
+            # Also revoke all tokens for the user (optional - for security)
+            username = session.get('username', '')
+            user_id = session.get('user_id')
+            if user_id:
+                try:
+                    auth_token_service.revoke_all_user_tokens(user_id)
+                    debug_log(f"Revoked all tokens for user_id={user_id}", "bot_logic")
+                except Exception as e:
+                    debug_log(f"Failed to revoke all user tokens: {str(e)}", "bot_logic")
 
             # Clear session
-            # Clear session data
             session.pop('authenticated', None)
             session.pop('username', None)
             session.pop('user_id', None)
             session.pop('odoo_session_id', None)
-            # Note: No password to clear since we don't store it anymore
+            session.pop('password', None)
             odoo_service.logout()
 
-            return jsonify({
+            # Clear cookies
+            response = jsonify({
                 'success': True,
                 'message': 'Logged out successfully'
             })
+            response.set_cookie('nasma_access_token', '', expires=0)
+            response.set_cookie('nasma_refresh_token', '', expires=0)
+            
+            return response
 
         except Exception as e:
             debug_log(f"Logout error: {str(e)}", "bot_logic")

@@ -137,14 +137,6 @@
                         </span>
                     </button>
 
-                    <button
-                        type="button"
-                        id="autoLoginButton"
-                        class="w-full h-[65.08px] rounded-[8px] bg-transparent border-2 border-[#291C48] text-[#291C48] text-[22.63px] font-medium hover:opacity-90 transition"
-                    >
-                        Auto-login
-                    </button>
-
                     <!-- Moved confirmation/message box here between button and checkbox -->
                     <div id="messageContainer" class="hidden w-full">
                         <div id="messageContent" class="mt-0 px-4 py-3 rounded-lg text-sm font-medium"></div>
@@ -166,7 +158,6 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/auto_login_button.js') }}"></script>
     <script>
         class DeviceFingerprint {
             /**
@@ -221,67 +212,91 @@
             }
         }
 
-        class RememberMeManager {
+        class TokenManager {
             constructor() {
-                this.storageKey = 'nasma_remember_me_token';
-                this.cookieName = 'nasma_remember_me_token';
-                this.cookieMaxAge = 365 * 24 * 60 * 60; // 1 year in seconds
+                this.accessTokenKey = 'nasma_access_token';
+                this.refreshTokenKey = 'nasma_refresh_token';
+                this.accessTokenCookie = 'nasma_access_token';
+                this.refreshTokenCookie = 'nasma_refresh_token';
+                this.accessTokenMaxAge = 7 * 24 * 60 * 60; // 7 days
+                this.refreshTokenMaxAge = 365 * 24 * 60 * 60; // 1 year
             }
 
             /**
-             * Save token using cookies (works in Teams iframes) with localStorage fallback
+             * Save JWT tokens (access token and refresh token)
              */
-            saveToken(token) {
+            saveTokens(accessToken, refreshToken) {
                 try {
-                    // Try localStorage first (faster, works in normal browsers)
-                    localStorage.setItem(this.storageKey, token);
+                    // Save to localStorage
+                    localStorage.setItem(this.accessTokenKey, accessToken);
+                    localStorage.setItem(this.refreshTokenKey, refreshToken);
                 } catch (e) {
-                    console.warn('[RememberMe] localStorage not available, using cookies only:', e);
+                    console.warn('[TokenManager] localStorage not available, using cookies only:', e);
                 }
                 
-                // Always set cookie (works in Teams iframes)
-                this.setCookie(this.cookieName, token, this.cookieMaxAge);
+                // Always set cookies (works in Teams iframes)
+                this.setCookie(this.accessTokenCookie, accessToken, this.accessTokenMaxAge);
+                this.setCookie(this.refreshTokenCookie, refreshToken, this.refreshTokenMaxAge);
             }
 
             /**
-             * Get token from cookies (preferred for Teams) or localStorage fallback
+             * Get access token from cookies or localStorage
              */
-            getToken() {
+            getAccessToken() {
                 // Try cookie first (works in Teams iframes)
-                const cookieToken = this.getCookie(this.cookieName);
+                const cookieToken = this.getCookie(this.accessTokenCookie);
                 if (cookieToken) {
                     return cookieToken;
                 }
                 
                 // Fallback to localStorage
                 try {
-                    return localStorage.getItem(this.storageKey);
+                    return localStorage.getItem(this.accessTokenKey);
                 } catch (e) {
-                    console.warn('[RememberMe] localStorage not available:', e);
+                    console.warn('[TokenManager] localStorage not available:', e);
                     return null;
                 }
             }
 
             /**
-             * Clear token from both cookies and localStorage
+             * Get refresh token from cookies or localStorage
              */
-            clearToken() {
-                try {
-                    localStorage.removeItem(this.storageKey);
-                } catch (e) {
-                    console.warn('[RememberMe] localStorage not available:', e);
+            getRefreshToken() {
+                // Try cookie first (works in Teams iframes)
+                const cookieToken = this.getCookie(this.refreshTokenCookie);
+                if (cookieToken) {
+                    return cookieToken;
                 }
                 
-                // Clear cookie
-                this.setCookie(this.cookieName, '', -1); // Expire immediately
+                // Fallback to localStorage
+                try {
+                    return localStorage.getItem(this.refreshTokenKey);
+                } catch (e) {
+                    console.warn('[TokenManager] localStorage not available:', e);
+                    return null;
+                }
+            }
+
+            /**
+             * Clear tokens from both cookies and localStorage
+             */
+            clearTokens() {
+                try {
+                    localStorage.removeItem(this.accessTokenKey);
+                    localStorage.removeItem(this.refreshTokenKey);
+                } catch (e) {
+                    console.warn('[TokenManager] localStorage not available:', e);
+                }
+                
+                // Clear cookies
+                this.setCookie(this.accessTokenCookie, '', -1);
+                this.setCookie(this.refreshTokenCookie, '', -1);
             }
 
             /**
              * Set a cookie with proper attributes for Teams iframe
              */
             setCookie(name, value, maxAge) {
-                // Cookies work better in Teams iframes when set by backend
-                // For frontend, we'll set it with SameSite=Lax (most permissive that works)
                 const expires = maxAge > 0 ? `; max-age=${maxAge}` : '; expires=Thu, 01 Jan 1970 00:00:00 UTC';
                 document.cookie = `${name}=${value}${expires}; path=/; SameSite=Lax`;
             }
@@ -313,29 +328,17 @@
                 this.togglePasswordButton = document.getElementById('togglePassword');
                 this.eyeIcon = document.getElementById('eyeIcon');
                 this.rememberMeCheckbox = document.getElementById('rememberMe');
-                this.rememberMeManager = new RememberMeManager();
-                this.deviceFingerprint = null;
-                this.autoLoginButton = null;
+                this.tokenManager = new TokenManager();
 
                 this.init();
             }
 
             async init() {
-                // Generate device fingerprint
-                this.deviceFingerprint = await DeviceFingerprint.generate();
-
-                // Check for existing remember me token and try auto-login
+                // Check for existing tokens and try auto-login
                 await this.tryAutoLogin();
 
                 this.loginForm.addEventListener('submit', this.handleLogin.bind(this));
                 this.togglePasswordButton.addEventListener('click', this.togglePasswordVisibility.bind(this));
-
-                // Initialize auto-login button
-                const autoLoginButtonElement = document.getElementById('autoLoginButton');
-                if (autoLoginButtonElement) {
-                    this.autoLoginButton = new AutoLoginButton(this);
-                    this.autoLoginButton.init(autoLoginButtonElement);
-                }
             }
 
             async tryAutoLogin() {
@@ -345,9 +348,11 @@
                     return;
                 }
 
-                const token = this.rememberMeManager.getToken();
-                if (!token || !this.deviceFingerprint) {
-                    console.log('[AUTO_LOGIN] Skipping auto-login: no token or fingerprint');
+                const accessToken = this.tokenManager.getAccessToken();
+                const refreshToken = this.tokenManager.getRefreshToken();
+                
+                if (!accessToken && !refreshToken) {
+                    console.log('[AUTO_LOGIN] Skipping auto-login: no tokens found');
                     return;
                 }
 
@@ -356,14 +361,14 @@
                 this.showMessage('Logging you in automatically...', 'success');
 
                 try {
-                    const response = await fetch('/api/auth/verify-remember-me', {
+                    const response = await fetch('/api/auth/auto-login', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
                         body: JSON.stringify({
-                            token: token,
-                            device_fingerprint: this.deviceFingerprint
+                            access_token: accessToken,
+                            refresh_token: refreshToken
                         })
                     });
 
@@ -371,7 +376,6 @@
 
                     // Check if response is OK before parsing JSON
                     if (!response.ok) {
-                        // Non-200 status code - token invalid or server error
                         let errorData = null;
                         try {
                             errorData = await response.json();
@@ -379,7 +383,7 @@
                         } catch (e) {
                             console.error('[AUTO_LOGIN] FAILED: Could not parse error response');
                         }
-                        this.rememberMeManager.clearToken();
+                        this.tokenManager.clearTokens();
                         this.hideMessage();
                         this.setLoading(false);
                         return;
@@ -388,33 +392,35 @@
                     let data;
                     try {
                         data = await response.json();
-                        console.log('[AUTO_LOGIN] Response data:', { success: data.success, failure_reason: data.failure_reason });
+                        console.log('[AUTO_LOGIN] Response data:', { success: data.success });
                     } catch (parseError) {
-                        // Failed to parse JSON response
                         console.error('[AUTO_LOGIN] FAILED: Failed to parse auto-login response:', parseError);
-                        this.rememberMeManager.clearToken();
+                        this.tokenManager.clearTokens();
                         this.hideMessage();
                         this.setLoading(false);
                         return;
                     }
 
                     if (data.success) {
+                        // Save new access token if provided (from refresh)
+                        if (data.access_token) {
+                            this.tokenManager.saveTokens(data.access_token, data.refresh_token || refreshToken);
+                        }
+                        
                         console.log('[AUTO_LOGIN] SUCCESS: Auto-login successful, redirecting...');
                         this.showMessage('Auto-login successful! Redirecting...', 'success');
                         setTimeout(() => {
                             window.location.href = '/';
                         }, 1000);
                     } else {
-                        // Token invalid or expired, clear it
-                        console.error('[AUTO_LOGIN] FAILED: Auto-login unsuccessful:', data.message, data.failure_reason);
-                        this.rememberMeManager.clearToken();
+                        console.error('[AUTO_LOGIN] FAILED: Auto-login unsuccessful:', data.message);
+                        this.tokenManager.clearTokens();
                         this.hideMessage();
                         this.setLoading(false);
                     }
                 } catch (error) {
-                    // Auto-login failed, clear token and show login form
                     console.error('[AUTO_LOGIN] FAILED: Exception during auto-login:', error);
-                    this.rememberMeManager.clearToken();
+                    this.tokenManager.clearTokens();
                     this.hideMessage();
                     this.setLoading(false);
                 }
@@ -450,20 +456,19 @@
                         body: JSON.stringify({
                             username: username,
                             password: password,
-                            remember_me: rememberMe,
-                            device_fingerprint: this.deviceFingerprint
+                            remember_me: rememberMe
                         })
                     });
 
                     const data = await response.json();
 
                     if (data.success) {
-                        // Save remember me token if provided
-                        if (data.remember_me_token) {
-                            this.rememberMeManager.saveToken(data.remember_me_token);
+                        // Save JWT tokens if remember me is checked
+                        if (rememberMe && data.access_token && data.refresh_token) {
+                            this.tokenManager.saveTokens(data.access_token, data.refresh_token);
                         } else {
-                            // User unchecked remember me, clear any existing token
-                            this.rememberMeManager.clearToken();
+                            // User unchecked remember me, clear any existing tokens
+                            this.tokenManager.clearTokens();
                         }
 
                         this.showMessage('Login successful! Redirecting...', 'success');
