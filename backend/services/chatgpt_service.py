@@ -141,7 +141,8 @@ class ChatGPTService:
         session_manager,
         halfday_service=None,
         reimbursement_service=None,
-        metrics_service=None
+        metrics_service=None,
+        auth_token_service=None
     ):
         """Wire external services for advanced functionality"""
         self.timeoff_service = timeoff_service
@@ -149,6 +150,7 @@ class ChatGPTService:
         self.halfday_service = halfday_service
         self.reimbursement_service = reimbursement_service
         self.metrics_service = metrics_service
+        self.auth_token_service = auth_token_service
 
     def _resolve_identity(self, employee_data: dict = None) -> Dict[str, str]:
         """Extract tenant/user identifiers for metric logging."""
