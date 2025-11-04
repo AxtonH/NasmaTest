@@ -64,14 +64,15 @@ class ChatGPTService:
         #     os.makedirs(self.storage_dir)
 
     def get_current_odoo_session(self):
-        """Get Odoo session data from Flask's request context (g object) or Flask session"""
+        """Get Odoo session data from Flask's request context (g object) or Flask session.
+        If password is missing from Flask session, attempts to retrieve it from refresh token."""
         # First try to get from Flask's g object (set by chat endpoint)
         session_data = getattr(g, 'odoo_session_data', None)
         
         # If not available, try to get from Flask session directly
         if not session_data:
             try:
-                from flask import session as flask_session
+                from flask import session as flask_session, request
                 if flask_session.get('authenticated'):
                     session_data = {
                         'session_id': flask_session.get('odoo_session_id'),
@@ -84,6 +85,53 @@ class ChatGPTService:
                         return session_data
             except Exception:
                 pass
+        
+        # If we have session_id and user_id but missing password, try to get from refresh token
+        if session_data and session_data.get('session_id') and session_data.get('user_id') and not session_data.get('password'):
+            try:
+                from flask import request, session as flask_session
+                # Try to get refresh token from cookies or request headers
+                refresh_token = None
+                
+                # Check cookies first
+                if hasattr(request, 'cookies'):
+                    refresh_token = request.cookies.get('nasma_refresh_token')
+                
+                # If not in cookies, try to get from Flask session
+                if not refresh_token:
+                    refresh_token = flask_session.get('refresh_token')
+                
+                if refresh_token:
+                    # Get auth_token_service from self (set via set_services) or create new instance
+                    try:
+                        auth_token_service = getattr(self, 'auth_token_service', None)
+                        if not auth_token_service:
+                            # Try importing directly if not available
+                            try:
+                                from .auth_token_service import AuthTokenService
+                                from ..config.settings import Config
+                                import os
+                                auth_token_service = AuthTokenService(
+                                    supabase_url=Config.SUPABASE_URL,
+                                    supabase_key=Config.SUPABASE_SERVICE_ROLE,
+                                    jwt_secret=os.getenv('JWT_SECRET_KEY') or Config.SUPABASE_JWT_SECRET
+                                )
+                            except Exception:
+                                pass
+                        
+                        if auth_token_service:
+                            # Verify refresh token and get decrypted password
+                            result = auth_token_service.verify_refresh_token(refresh_token)
+                            if result:
+                                user_id, username, password = result
+                                # Update session_data with password
+                                session_data['password'] = password
+                                session_data['username'] = username
+                                debug_log(f"Retrieved password from refresh token for user_id: {user_id}", "bot_logic")
+                    except Exception as e:
+                        debug_log(f"Failed to retrieve password from refresh token: {str(e)}", "bot_logic")
+            except Exception as e:
+                debug_log(f"Error attempting to get password from refresh token: {str(e)}", "bot_logic")
         
         return session_data
 

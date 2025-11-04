@@ -223,7 +223,7 @@ def create_app():
     leave_balance_service = LeaveBalanceService(odoo_service)
     
     # Wire services together
-    chatgpt_service.set_services(timeoff_service, session_manager, halfday_service, reimbursement_service, metrics_service)
+    chatgpt_service.set_services(timeoff_service, session_manager, halfday_service, reimbursement_service, metrics_service, auth_token_service)
     chatgpt_service.leave_balance_service = leave_balance_service
 
     PEOPLE_CULTURE_DENIED = "sorry this flow is restricted to members of the People & Culture Department"
@@ -231,6 +231,7 @@ def create_app():
     def get_odoo_session_data():
         """
         Get Odoo session data from Flask session (per-user, thread-safe)
+        If password is missing, attempts to retrieve it from refresh token.
 
         Returns:
             Dict with session_id, user_id, username, password or None if not authenticated
@@ -238,12 +239,33 @@ def create_app():
         if not session.get('authenticated'):
             return None
 
-        return {
+        session_data = {
             'session_id': session.get('odoo_session_id'),
             'user_id': session.get('user_id'),
             'username': session.get('username'),
             'password': session.get('password')  # May be None if not stored
         }
+        
+        # If password is missing but we have session_id and user_id, try to get from refresh token
+        if session_data.get('session_id') and session_data.get('user_id') and not session_data.get('password'):
+            try:
+                from flask import request
+                # Try to get refresh token from cookies
+                refresh_token = request.cookies.get('nasma_refresh_token') if hasattr(request, 'cookies') else None
+                
+                if refresh_token and auth_token_service:
+                    # Verify refresh token and get decrypted password
+                    result = auth_token_service.verify_refresh_token(refresh_token)
+                    if result:
+                        user_id, username, password = result
+                        # Update session_data with password
+                        session_data['password'] = password
+                        session_data['username'] = username
+                        debug_log(f"Retrieved password from refresh token for user_id: {user_id} in get_odoo_session_data", "bot_logic")
+            except Exception as e:
+                debug_log(f"Failed to retrieve password from refresh token in get_odoo_session_data: {str(e)}", "bot_logic")
+        
+        return session_data
 
     def _is_people_culture_member(data) -> bool:
         """Return True if the provided employee data belongs to People & Culture."""
