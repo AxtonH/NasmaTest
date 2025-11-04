@@ -425,6 +425,7 @@ def create_app():
             sid = session.get('odoo_session_id')
             uid = session.get('user_id')
             uname = session.get('username')
+            pwd = session.get('password')  # Get password from Flask session for session renewal
             if not sid or not uid:
                 return
 
@@ -436,8 +437,15 @@ def create_app():
                 odoo_service.session_id = sid
                 odoo_service.user_id = uid
                 odoo_service.username = uname
+                # Set password if available (needed for session renewal)
+                if pwd:
+                    odoo_service.password = pwd
 
-            # no password stored for security; best-effort activity timestamp scoped to this session
+            # Update password if it changed (e.g., after auto-login refresh)
+            if pwd and odoo_service.password != pwd:
+                odoo_service.password = pwd
+
+            # Update last activity time
             odoo_service.last_activity = time.time()
         except Exception:
             # Best-effort only; never block requests here
@@ -904,6 +912,12 @@ def create_app():
                             session['odoo_session_id'] = session_data['session_id']
                             session['password'] = password  # Keep password for future auto-logins
                             
+                            # Set password in OdooService for session renewal
+                            odoo_service.password = password
+                            odoo_service.username = username
+                            odoo_service.user_id = user_id
+                            odoo_service.session_id = session_data['session_id']
+                            
                             debug_log(f"Auto-login successful via access token for {username} (Odoo session established)", "bot_logic")
                             
                             return jsonify({
@@ -952,6 +966,12 @@ def create_app():
                         session['user_id'] = user_id
                         session['odoo_session_id'] = session_data['session_id']
                         session['password'] = password  # Keep password for faster access token flow
+                        
+                        # Set password in OdooService for session renewal
+                        odoo_service.password = password
+                        odoo_service.username = username
+                        odoo_service.user_id = user_id
+                        odoo_service.session_id = session_data['session_id']
                         
                         debug_log(f"Auto-login successful via refresh token for {username} (Odoo session established)", "bot_logic")
                         
