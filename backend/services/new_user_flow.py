@@ -375,9 +375,10 @@ def create_employees_batch(odoo_service) -> Dict[str, Any]:
         try:
             vals: Dict[str, Any] = {}
             # Direct text fields
+            # Note: x_studio_work_location_country is handled separately as a many2one field below
             for field in [
                 'name','work_email','birthday','private_phone','private_street',
-                'x_studio_work_location_country','x_studio_contact_1_relation','marital','x_studio_religion',
+                'x_studio_contact_1_relation','marital','x_studio_religion',
                 'emergency_contact','emergency_phone','x_studio_employee_arabic_name'
             ]:
                 if rec.get(field):
@@ -397,8 +398,16 @@ def create_employees_batch(odoo_service) -> Dict[str, Any]:
                 vals['company_id'] = int(rec['company_id'])
 
             # Many2one: x_studio_work_location_country -> res.country
+            # Handle cases where value might be "City, Country" format
             if rec.get('x_studio_work_location_country'):
-                country_name = rec.get('x_studio_work_location_country')
+                country_value = str(rec.get('x_studio_work_location_country')).strip()
+                # If value contains comma, try to extract country name (last part after comma)
+                if ',' in country_value:
+                    parts = [p.strip() for p in country_value.split(',')]
+                    country_name = parts[-1] if parts else country_value
+                else:
+                    country_name = country_value
+                
                 ok_c, res_c = _make_odoo_request(
                     odoo_service,
                     'res.country',
@@ -412,7 +421,7 @@ def create_employees_batch(odoo_service) -> Dict[str, Any]:
                     cid = res_c[0].get('id')
                     if isinstance(cid, int):
                         vals['x_studio_work_location_country'] = cid
-                # If not found, drop the string to avoid type error
+                # If not found, drop the string to avoid type error (field won't be set)
 
             # TODO: bank_account_id and attachments require additional flows; skip for now
 
