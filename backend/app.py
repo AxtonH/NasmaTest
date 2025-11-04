@@ -581,6 +581,18 @@ def create_app():
                         )
                         response_data['remember_me_token'] = token
                         debug_log(f"Remember me token created for {username} on device {device_fingerprint[:8]}...", "bot_logic")
+                        
+                        # Set cookie for Teams iframe compatibility (works better than localStorage)
+                        response = jsonify(response_data)
+                        response.set_cookie(
+                            'nasma_remember_me_token',
+                            token,
+                            max_age=365*24*60*60,  # 1 year
+                            httponly=False,  # Allow JavaScript access
+                            samesite='None',  # Required for Teams iframes
+                            secure=True  # Required when SameSite=None
+                        )
+                        return response
                     except Exception as e:
                         debug_log(f"Failed to create remember me token: {str(e)}", "bot_logic")
 
@@ -729,12 +741,18 @@ def create_app():
             
             # Check if token exists for this device
             has_token = remember_me_service.has_token_for_device(device_fingerprint)
+            username = None
+            
+            if has_token:
+                # Get username associated with this device fingerprint
+                username = remember_me_service.get_username_for_device(device_fingerprint)
             
             debug_log(f"Token check for device {device_fingerprint[:16]}...: {'found' if has_token else 'not found'}", "bot_logic")
             
             return jsonify({
                 'success': True,
                 'has_token': has_token,
+                'username': username,
                 'message': 'Token found' if has_token else 'No token found'
             })
             
@@ -743,6 +761,7 @@ def create_app():
             return jsonify({
                 'success': False,
                 'has_token': False,
+                'username': None,
                 'message': 'Error checking token'
             }), 500
 

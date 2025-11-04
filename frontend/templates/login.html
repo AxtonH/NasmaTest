@@ -224,18 +224,80 @@
         class RememberMeManager {
             constructor() {
                 this.storageKey = 'nasma_remember_me_token';
+                this.cookieName = 'nasma_remember_me_token';
+                this.cookieMaxAge = 365 * 24 * 60 * 60; // 1 year in seconds
             }
 
+            /**
+             * Save token using cookies (works in Teams iframes) with localStorage fallback
+             */
             saveToken(token) {
-                localStorage.setItem(this.storageKey, token);
+                try {
+                    // Try localStorage first (faster, works in normal browsers)
+                    localStorage.setItem(this.storageKey, token);
+                } catch (e) {
+                    console.warn('[RememberMe] localStorage not available, using cookies only:', e);
+                }
+                
+                // Always set cookie (works in Teams iframes)
+                this.setCookie(this.cookieName, token, this.cookieMaxAge);
             }
 
+            /**
+             * Get token from cookies (preferred for Teams) or localStorage fallback
+             */
             getToken() {
-                return localStorage.getItem(this.storageKey);
+                // Try cookie first (works in Teams iframes)
+                const cookieToken = this.getCookie(this.cookieName);
+                if (cookieToken) {
+                    return cookieToken;
+                }
+                
+                // Fallback to localStorage
+                try {
+                    return localStorage.getItem(this.storageKey);
+                } catch (e) {
+                    console.warn('[RememberMe] localStorage not available:', e);
+                    return null;
+                }
             }
 
+            /**
+             * Clear token from both cookies and localStorage
+             */
             clearToken() {
-                localStorage.removeItem(this.storageKey);
+                try {
+                    localStorage.removeItem(this.storageKey);
+                } catch (e) {
+                    console.warn('[RememberMe] localStorage not available:', e);
+                }
+                
+                // Clear cookie
+                this.setCookie(this.cookieName, '', -1); // Expire immediately
+            }
+
+            /**
+             * Set a cookie with proper attributes for Teams iframe
+             */
+            setCookie(name, value, maxAge) {
+                // Cookies work better in Teams iframes when set by backend
+                // For frontend, we'll set it with SameSite=Lax (most permissive that works)
+                const expires = maxAge > 0 ? `; max-age=${maxAge}` : '; expires=Thu, 01 Jan 1970 00:00:00 UTC';
+                document.cookie = `${name}=${value}${expires}; path=/; SameSite=Lax`;
+            }
+
+            /**
+             * Get a cookie value
+             */
+            getCookie(name) {
+                const nameEQ = name + '=';
+                const ca = document.cookie.split(';');
+                for (let i = 0; i < ca.length; i++) {
+                    let c = ca[i];
+                    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+                    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+                }
+                return null;
             }
         }
 

@@ -34,15 +34,15 @@ class AutoLoginButton {
             const token = this.loginManager.rememberMeManager.getToken();
             
             if (token && this.loginManager.deviceFingerprint) {
-                // Token exists in localStorage, use existing auto-login
-                console.log('[AUTO_LOGIN_BUTTON] Token found in localStorage, attempting auto-login...');
+                // Token exists in localStorage or cookies, use existing auto-login
+                console.log('[AUTO_LOGIN_BUTTON] Token found, attempting auto-login...');
                 await this.loginManager.tryAutoLogin();
                 this.setLoading(false);
                 this.isProcessing = false;
                 return;
             }
 
-            // No token in localStorage, check Supabase for device fingerprint
+            // No token in localStorage or cookies, check Supabase for device fingerprint
             if (!this.loginManager.deviceFingerprint) {
                 console.error('[AUTO_LOGIN_BUTTON] Device fingerprint not available');
                 this.loginManager.showMessage('Device fingerprint not available. Please log in manually.', 'error');
@@ -51,7 +51,7 @@ class AutoLoginButton {
                 return;
             }
 
-            console.log('[AUTO_LOGIN_BUTTON] No token in localStorage, checking Supabase...');
+            console.log('[AUTO_LOGIN_BUTTON] No token found, checking Supabase...');
             
             // Check if token exists in Supabase
             const response = await fetch('/api/auth/check-remember-me', {
@@ -71,10 +71,24 @@ class AutoLoginButton {
             }
 
             if (data.has_token) {
-                // Token exists in Supabase but not in localStorage
-                // This shouldn't happen normally, but handle it gracefully
-                this.loginManager.showMessage('Saved credentials found, but token is missing from browser storage. Please log in manually.', 'error');
-                console.warn('[AUTO_LOGIN_BUTTON] Token exists in Supabase but not in localStorage');
+                // Token exists in Supabase but not in localStorage/cookies
+                // Pre-fill username and prompt for password
+                if (data.username) {
+                    const usernameInput = document.getElementById('username');
+                    if (usernameInput) {
+                        usernameInput.value = data.username;
+                        // Focus on password field
+                        const passwordInput = document.getElementById('password');
+                        if (passwordInput) {
+                            setTimeout(() => passwordInput.focus(), 100);
+                        }
+                    }
+                    this.loginManager.showMessage(`Saved credentials found for ${data.username}. Please enter your password to complete login.`, 'success');
+                    console.log('[AUTO_LOGIN_BUTTON] Token exists in Supabase but not in browser storage - username pre-filled');
+                } else {
+                    this.loginManager.showMessage('Saved credentials found, but token is missing from browser storage. Please log in manually.', 'error');
+                    console.warn('[AUTO_LOGIN_BUTTON] Token exists in Supabase but username not available');
+                }
             } else {
                 // No token found
                 this.loginManager.showMessage('No saved credentials found. Please log in manually.', 'error');
