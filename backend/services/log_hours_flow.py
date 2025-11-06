@@ -766,26 +766,159 @@ def start_log_hours_for_task(odoo_service, employee_data: dict, subtask_id: int,
             date_display = task_date
         
         return {
-            'message': f'**Logging hours for {task_name} on {date_display}**\n\nPlease select the task activity from the dropdown below, or type the activity name in chat:',
+            'message': f'**Logging hours for {task_name} on {date_display}**\n\nPlease fill in the details below:',
             'success': True,
             'widgets': {
                 'log_hours_flow': {
-                    'step': 'task_activity',
+                    'step': 'log_hours_form',
                     'subtask_id': subtask_id,
                     'task_date': task_date,
                     'task_name': task_name,
                     'employee_id': employee_data.get('id'),
                 },
-                'select_dropdown': True,
-                'options': activity_options,
-                'context_key': 'log_hours_task_activity',
-                'placeholder': 'Select task activity'
+                'log_hours_form': True,
+                'activity_options': activity_options,
+                'hours_options': _generate_hours_options(),
+                'context_key': 'log_hours_form'
             }
         }
         
     except Exception as e:
         return {
             'message': f'An error occurred while starting the log hours flow: {str(e)}',
+            'success': False
+        }
+
+
+def handle_log_hours_form_step(odoo_service, employee_data: dict, context: dict, form_data: dict, odoo_session_data: dict = None, metrics_service=None) -> Dict[str, Any]:
+    """
+    Handle the combined log hours form submission (activity, hours, description all at once).
+    
+    Args:
+        odoo_service: Active Odoo service instance
+        employee_data: Employee data dict
+        context: Flow context containing subtask_id, task_date, task_name, etc.
+        form_data: Dict with 'activity_id', 'hours', and optionally 'description' keys
+        odoo_session_data: Optional Odoo session data for stateless requests
+        metrics_service: Optional metrics service for logging
+    
+    Returns:
+        Response dict with confirmation message or error
+    """
+    try:
+        subtask_id = context.get('subtask_id')
+        task_date = context.get('task_date')
+        task_name = context.get('task_name')
+        employee_id = context.get('employee_id') or employee_data.get('id')
+        
+        # Extract form data
+        task_activity_id = form_data.get('activity_id')
+        hours_str = form_data.get('hours', '')
+        description = form_data.get('description', '').strip()
+        
+        # Validate activity
+        if not task_activity_id:
+            # Fetch activity options for error message
+            ok, activity_options = _fetch_task_activity_options(odoo_service)
+            if not ok:
+                activity_options = []
+            return {
+                'message': 'Please select a task activity.',
+                'success': False,
+                'widgets': {
+                    'log_hours_flow': {
+                        'step': 'log_hours_form',
+                        **context
+                    },
+                    'log_hours_form': True,
+                    'activity_options': activity_options,
+                    'hours_options': _generate_hours_options(),
+                    'context_key': 'log_hours_form'
+                }
+            }
+        
+        # Validate hours - parse from natural language text
+        hours = None
+        if hours_str:
+            # First try parsing as natural language (e.g., "5 hours and 5 minutes")
+            hours = _parse_hours_from_text(hours_str)
+            
+            # If natural language parsing failed, try direct float parsing
+            if hours is None:
+                try:
+                    hours = float(hours_str)
+                except (ValueError, TypeError):
+                    pass
+        
+        if hours is None or hours <= 0:
+            ok, activity_options = _fetch_task_activity_options(odoo_service)
+            if not ok:
+                activity_options = []
+            return {
+                'message': 'Please enter valid hours (e.g., "5 hours and 5 minutes", "5.5", or "5 hours 30 minutes").',
+                'success': False,
+                'widgets': {
+                    'log_hours_flow': {
+                        'step': 'log_hours_form',
+                        **context
+                    },
+                    'log_hours_form': True,
+                    'activity_options': activity_options,
+                    'hours_options': _generate_hours_options(),
+                    'context_key': 'log_hours_form'
+                }
+            }
+        
+        # Store all data in context
+        context['task_activity_id'] = task_activity_id
+        context['hours'] = hours
+        context['description'] = description
+        
+        # Fetch task activity name for display
+        activity_name = f"Activity {task_activity_id}"
+        ok, activity_options = _fetch_task_activity_options(odoo_service)
+        if ok and isinstance(activity_options, list):
+            for opt in activity_options:
+                if str(opt.get('value')) == str(task_activity_id):
+                    activity_name = opt.get('label', activity_name)
+                    break
+        
+        # Format date for display (DD/MM/YYYY format like time off flow)
+        try:
+            date_obj = datetime.strptime(task_date, '%Y-%m-%d')
+            date_display = date_obj.strftime('%d/%m/%Y')
+        except Exception:
+            date_display = task_date
+        
+        hours_display = f"{hours:.1f}" if hours else "0"
+        
+        # Format confirmation message
+        confirmation_text = f"Great! Here's a summary of your timesheet entry:\n\n"
+        confirmation_text += f"📋 **Task:** {task_name}\n"
+        confirmation_text += f"📅 **Date:** {date_display}\n"
+        confirmation_text += f"📝 **Activity:** {activity_name}\n"
+        confirmation_text += f"⏰ **Hours:** {hours_display}\n"
+        confirmation_text += f"💬 **Description:** {description if description else 'None'}\n\n"
+        confirmation_text += "Do you want to submit this entry? Reply or click 'yes' to confirm or 'no' to cancel"
+        
+        return {
+            'message': confirmation_text,
+            'success': True,
+            'widgets': {
+                'log_hours_flow': {
+                    'step': 'confirmation',
+                    **context
+                }
+            },
+            'buttons': [
+                {'text': 'Yes', 'value': 'log_hours_confirm', 'type': 'action'},
+                {'text': 'No', 'value': 'log_hours_cancel', 'type': 'action'}
+            ]
+        }
+        
+    except Exception as e:
+        return {
+            'message': f'An error occurred while processing the form: {str(e)}',
             'success': False
         }
 

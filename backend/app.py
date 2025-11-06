@@ -27,7 +27,7 @@ try:
         build_overtime_table_widget,
         build_main_overview_table_widget,
     )
-    from .services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step
+    from .services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step, handle_log_hours_form_step
 except Exception:
     # Local import style when running as script from backend/ directory
     from services.chatgpt_service import ChatGPTService
@@ -52,7 +52,7 @@ except Exception:
         build_overtime_table_widget,
         build_main_overview_table_widget,
     )
-    from services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step
+    from services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step, handle_log_hours_form_step
 import os
 import sys
 import logging
@@ -1640,8 +1640,19 @@ def create_app():
                     context = log_hours_session.get('context', {})
                     current_step = context.get('step', '')
                     
+                    # Handle combined form submission format: log_hours_form=activity_id|hours|description
+                    if message.startswith('log_hours_form='):
+                        form_data_str = message.replace('log_hours_form=', '')
+                        # Parse format: activity_id|hours|description
+                        form_parts = form_data_str.split('|', 2)
+                        form_data = {
+                            'activity_id': form_parts[0] if len(form_parts) > 0 else '',
+                            'hours': form_parts[1] if len(form_parts) > 1 else '',
+                            'description': form_parts[2] if len(form_parts) > 2 else ''
+                        }
+                        step_resp = handle_log_hours_form_step(odoo_service, employee_data, context, form_data, get_odoo_session_data(), metrics_service)
                     # Handle dropdown selection format: context_key=value
-                    if '=' in message:
+                    elif '=' in message:
                         parts = message.split('=', 1)
                         context_key = parts[0]
                         value = parts[1] if len(parts) > 1 else ''

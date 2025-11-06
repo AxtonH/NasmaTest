@@ -424,6 +424,74 @@ class ChatBot {
                         };
                     }
                 }, 0);
+            } else if (widgets && widgets.log_hours_form) {
+                // Combined log hours form widget (activity dropdown, hours dropdown, description text box)
+                const uid = `lhf_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+                const activityId = `ns_activity_${uid}`;
+                const hoursId = `ns_hours_${uid}`;
+                const descriptionId = `ns_description_${uid}`;
+                const applyId = `ns_log_hours_apply_${uid}`;
+                
+                const activityOptions = Array.isArray(widgets.activity_options) ? widgets.activity_options : [];
+                const hoursOptions = Array.isArray(widgets.hours_options) ? widgets.hours_options : [];
+                
+                const activityOptsHtml = [`<option value="" disabled selected>Select activity</option>`]
+                    .concat(activityOptions.map(o => `<option value="${this.escapeHtml(o.value)}">${this.escapeHtml(o.label)}</option>`))
+                    .join('');
+                
+                const hoursOptsHtml = [`<option value="" disabled selected>Select hours</option>`]
+                    .concat(hoursOptions.map(o => `<option value="${this.escapeHtml(o.value)}">${this.escapeHtml(o.label)}</option>`))
+                    .join('');
+                
+                widgetsHtml = `
+                    <div class="mt-3 flex flex-col items-start gap-4 px-4 py-3">
+                        <div class="flex items-center justify-start gap-6 w-full">
+                            <label class="text-base font-medium" style="width: 100px; flex-shrink: 0;">Activity:</label>
+                            <select id="${activityId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 flex-1">
+                                ${activityOptsHtml}
+                            </select>
+                        </div>
+                        <div class="flex items-center justify-start gap-6 w-full">
+                            <label class="text-base font-medium" style="width: 100px; flex-shrink: 0;">Hours:</label>
+                            <div class="flex-1 relative">
+                                <input type="text" id="${hoursId}" list="${hoursId}_datalist" placeholder="e.g., 5 hours and 5 minutes (or select from suggestions)" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-full" />
+                                <datalist id="${hoursId}_datalist">
+                                    ${hoursOptions.map(o => `<option value="${this.escapeHtml(o.label)}">${this.escapeHtml(o.label)}</option>`).join('')}
+                                </datalist>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-start gap-6 w-full">
+                            <label class="text-base font-medium" style="width: 100px; flex-shrink: 0;">Description:</label>
+                            <input type="text" id="${descriptionId}" placeholder="Optional description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 flex-1" />
+                        </div>
+                        <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium" style="background: #8B5FBF; color: white; border: none; cursor: pointer;">Apply</button>
+                    </div>`;
+                setTimeout(() => {
+                    const applyBtn = document.getElementById(applyId);
+                    
+                    if (applyBtn) {
+                        applyBtn.onclick = () => {
+                            const activityEl = document.getElementById(activityId);
+                            const hoursEl = document.getElementById(hoursId);
+                            const descriptionEl = document.getElementById(descriptionId);
+                            
+                            const activityVal = activityEl ? activityEl.value : '';
+                            const hoursVal = hoursEl ? hoursEl.value.trim() : '';
+                            const descriptionVal = descriptionEl ? descriptionEl.value.trim() : '';
+                            
+                            if (!activityVal || !hoursVal) {
+                                alert('Please select an activity and enter hours.');
+                                return;
+                            }
+                            
+                            // Format: log_hours_form=activity_id|hours|description
+                            // Send the text value (backend will parse it)
+                            const outgoing = `log_hours_form=${activityVal}|${hoursVal}|${descriptionVal}`;
+                            this.messageInput.value = outgoing;
+                            this.sendMessage();
+                        };
+                    }
+                }, 0);
             } else if (widgets && widgets.select_dropdown) {
                 // Generic select dropdown widget with context_key
                 const uid = `sel_${Date.now()}_${Math.random().toString(36).slice(2)}`;
