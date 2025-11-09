@@ -369,16 +369,22 @@ class OvertimeService:
                     }
                 return self._continue_overtime(message, thread_id, active, employee_data, odoo_session_data)
 
-            # CRITICAL: Block if another flow is active (BEFORE intent detection)
-            if active and active.get('type') not in (None, 'overtime') and active.get('state') in ['started', 'active']:
-                other_flow = active.get('type', 'another')
-                self._log(f"Blocking overtime - active {other_flow} flow detected on thread {thread_id}")
-                return None  # Let the active flow handle the message
-
-            # Detect new intent
+            # Detect new intent first
             is_ot, conf = self.detect_intent(message)
             if not is_ot:
                 return None
+
+            # CRITICAL: Re-check active session after intent detection to ensure we have the latest state
+            # Block if another flow is active AND user is trying to start overtime
+            active = self.session_manager.get_session(thread_id)
+            if active and active.get('type') not in (None, 'overtime') and active.get('state') in ['started', 'active']:
+                other_flow = active.get('type', 'another')
+                self._log(f"Blocking overtime - active {other_flow} flow detected on thread {thread_id}")
+                return {
+                    'message': 'Sorry, I cannot start a new request until you finish or cancel the current one. To cancel the request, type ***Cancel***.',
+                    'thread_id': thread_id,
+                    'session_handled': True
+                }
 
             # Initialize new overtime session
             company_name = self._get_company_name(employee_data) or 'Company'

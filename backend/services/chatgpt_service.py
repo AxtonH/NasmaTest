@@ -951,14 +951,14 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 has_timeoff_session
             )
 
-            # Enforce single active flow per thread: block if another flow is active only when user is interacting with time-off
-            if wants_timeoff:
+            # Enforce single active flow per thread: block if another flow is active only when user is trying to start a NEW time-off request
+            if wants_timeoff and (is_timeoff and confidence >= 0.3) and not has_timeoff_session:
                 try:
                     active_any = self.session_manager.get_active_session(thread_id) if thread_id else None
                     if active_any and active_any.get('type') not in (None, 'timeoff') and active_any.get('state') in ['started', 'active']:
                         other = active_any.get('type', 'another')
                         return {
-                            'message': f"You're currently in an active {other} request. Please complete it or type 'cancel' before starting a new time-off request.",
+                            'message': 'Sorry, I cannot start a new request until you finish or cancel the current one. To cancel the request, type ***Cancel***.',
                             'thread_id': thread_id,
                             'source': self.model,
                             'confidence_score': 1.0,

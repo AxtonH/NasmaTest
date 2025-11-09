@@ -791,16 +791,21 @@ class ReimbursementService:
                 # Continue existing session
                 return self._continue_reimbursement_session(message, thread_id, active_session, employee_data, odoo_session_data)
 
-            # CRITICAL: Block if another flow is active (BEFORE intent detection)
-            # This prevents reimbursement from interrupting active timeoff/overtime flows
-            if active_session and active_session.get('type') not in (None, 'reimbursement') and active_session.get('state') in ['started', 'active']:
-                other_flow = active_session.get('type', 'another')
-                self._log(f"Blocking reimbursement - active {other_flow} flow detected on thread {thread_id}", "bot_logic")
-                # Return None to let the active flow handle the message
-                return None
-
-            # Detect new reimbursement intent
+            # Detect new reimbursement intent first
             is_reimbursement, confidence, extracted_data = self.detect_reimbursement_intent(message)
+
+            # CRITICAL: Block if another flow is active AND user is trying to start reimbursement
+            # This prevents reimbursement from interrupting active timeoff/overtime flows
+            if is_reimbursement and confidence >= 0.3:
+                if active_session and active_session.get('type') not in (None, 'reimbursement') and active_session.get('state') in ['started', 'active']:
+                    other_flow = active_session.get('type', 'another')
+                    self._log(f"Blocking reimbursement - active {other_flow} flow detected on thread {thread_id}", "bot_logic")
+                    return {
+                        'message': 'Sorry, I cannot start a new request until you finish or cancel the current one. To cancel the request, type ***Cancel***.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service',
+                        'session_handled': True
+                    }
 
             if is_reimbursement and confidence >= 0.3:
                 # Validate that we have employee data before starting session

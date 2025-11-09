@@ -804,7 +804,7 @@
                     </div>
                     <div class="flex justify-center mt-4">
                         <div class="flex items-center gap-2 text-sm text-gray-600">
-                            <span>Fast drafts, not final files. always review with your designer's eye</span>
+                            <span>If you want to cancel a request, type <strong>Cancel</strong></span>
                             <img src="/static/Nasma-Avatar.svg" alt="Nasma avatar" class="w-6 h-6"/>
                         </div>
                     </div>
@@ -924,7 +924,7 @@
                     </div>
                     <div class="flex justify-center mt-4">
                         <div class="flex items-center gap-2 text-sm text-gray-600">
-                            <span>Fast drafts, not final files. always review with your designer's eye</span>
+                            <span>If you want to cancel a request, type <strong>Cancel</strong></span>
                             <img src="/static/Nasma-Avatar.svg" alt="Nasma avatar" class="w-6 h-6"/>
                         </div>
                     </div>
@@ -1365,6 +1365,9 @@
         function renderMarkdown(text) {
             // First escape HTML to prevent XSS
             let escaped = escapeHtml(text);
+
+            // Convert ***text*** to bold and underlined (must be before other conversions)
+            escaped = escaped.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><u>$1</u></strong>');
 
             // Then convert **text** to bold
             escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
@@ -3421,10 +3424,115 @@
             currentThreadId = null;
          });
 
-        // Logout buttons
-        document.getElementById('logoutButton').addEventListener('click', logoutUser);
+        // Function to expand/enlarge avatar image
+        function expandAvatar(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            const avatarButton = event.currentTarget;
+            
+            // Extract URL from background-image style
+            let imageUrl = '';
+            const bgImage = avatarButton.style.backgroundImage;
+            if (bgImage) {
+                const match = bgImage.match(/url\(['"]?([^'"]+)['"]?\)/);
+                if (match && match[1]) {
+                    imageUrl = match[1];
+                }
+            }
+            
+            // If no URL found from style, try to get from userAvatarUrl global variable
+            if (!imageUrl && userAvatarUrl) {
+                imageUrl = userAvatarUrl;
+            }
+            
+            // Fallback to default avatar if still no URL
+            if (!imageUrl) {
+                imageUrl = '/Nasma-Avatar.svg';
+            }
+            
+            // Create overlay
+            const overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.inset = '0';
+            overlay.style.background = 'rgba(0, 0, 0, 0.75)';
+            overlay.style.zIndex = '2147483647';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.cursor = 'pointer';
+            overlay.style.opacity = '0';
+            overlay.style.transition = 'opacity 0.3s ease-in-out';
+            
+            // Create image container
+            const imageContainer = document.createElement('div');
+            imageContainer.style.position = 'relative';
+            imageContainer.style.maxWidth = '90vw';
+            imageContainer.style.maxHeight = '90vh';
+            imageContainer.style.display = 'flex';
+            imageContainer.style.alignItems = 'center';
+            imageContainer.style.justifyContent = 'center';
+            imageContainer.style.cursor = 'default';
+            
+            // Create image element
+            const expandedImage = document.createElement('img');
+            expandedImage.src = imageUrl;
+            expandedImage.style.maxWidth = '100%';
+            expandedImage.style.maxHeight = '90vh';
+            expandedImage.style.borderRadius = '50%';
+            expandedImage.style.boxShadow = '0 20px 60px rgba(0, 0, 0, 0.5)';
+            expandedImage.style.objectFit = 'cover';
+            expandedImage.style.width = 'auto';
+            expandedImage.style.height = 'auto';
+            expandedImage.onerror = function() {
+                this.src = '/Nasma-Avatar.svg';
+            };
+            
+            // Prevent clicks on image from closing
+            imageContainer.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+            
+            // Close function
+            let escapeHandler = null;
+            const closeModal = () => {
+                overlay.style.opacity = '0';
+                if (escapeHandler) {
+                    document.removeEventListener('keydown', escapeHandler);
+                }
+                setTimeout(() => {
+                    if (overlay.parentNode) {
+                        document.body.removeChild(overlay);
+                    }
+                }, 300);
+            };
+            
+            // Attach close handlers
+            overlay.addEventListener('click', closeModal);
+            
+            // Close on Escape key
+            escapeHandler = (e) => {
+                if (e.key === 'Escape') {
+                    closeModal();
+                }
+            };
+            document.addEventListener('keydown', escapeHandler);
+            
+            // Add elements
+            imageContainer.appendChild(expandedImage);
+            overlay.appendChild(imageContainer);
+            document.body.appendChild(overlay);
+            
+            // Trigger fade-in animation
+            setTimeout(() => {
+                overlay.style.opacity = '1';
+            }, 10);
+        }
 
-        document.getElementById('conversationLogoutButton').addEventListener('click', logoutUser);
+        // Avatar buttons - expand on click instead of logout
+        document.getElementById('logoutButton').addEventListener('click', expandAvatar);
+
+        document.getElementById('conversationLogoutButton').addEventListener('click', expandAvatar);
 
         document.addEventListener('DOMContentLoaded', function() {
             initializeConversationHistory();

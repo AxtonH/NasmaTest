@@ -377,6 +377,9 @@
             // First escape HTML to prevent XSS
             let escaped = escapeHtml(text);
 
+            // Convert ***text*** to bold and underlined (must be before other conversions)
+            escaped = escaped.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><u>$1</u></strong>');
+
             // Then convert **text** to bold
             escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 

@@ -316,6 +316,81 @@ def _fetch_timesheet_entries(odoo_service, employee_id: int, start_date: date, e
         return False, f"Error fetching timesheet entries: {str(e)}"
 
 
+def _fetch_timesheet_entry_counts(odoo_service, employee_id: int, start_date: date, end_date: date, subtask_id: int = None) -> Tuple[bool, Any]:
+    """
+    Fetch timesheet entry counts per date from account.analytic.line for a given employee and date range.
+    Optionally filter by subtask (project.task) ID.
+    
+    Args:
+        odoo_service: Active Odoo service instance
+        employee_id: Employee ID to match against employee_id field
+        start_date: Start date (inclusive)
+        end_date: End date (inclusive)
+        subtask_id: Optional subtask (project.task) ID to filter by
+    
+    Returns:
+        Tuple of (success: bool, data: dict mapping date -> count or error message)
+    """
+    try:
+        ok_session, msg = odoo_service.ensure_active_session()
+        if not ok_session:
+            return False, msg
+        
+        # Convert dates to strings for Odoo domain
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        
+        # Domain to find timesheet entries:
+        # - employee_id matches the employee
+        # - date is within the range (inclusive)
+        # - task_id matches the subtask if provided
+        domain = [
+            ('employee_id', '=', employee_id),
+            ('date', '>=', start_date_str),
+            ('date', '<=', end_date_str)
+        ]
+        
+        if subtask_id:
+            domain.append(('task_id', '=', subtask_id))
+        
+        params = {
+            'args': [domain],
+            'kwargs': {
+                'fields': ['id', 'date', 'employee_id', 'task_id'],
+                'limit': 1000,
+            }
+        }
+        
+        ok, data = _make_odoo_request(odoo_service, 'account.analytic.line', 'search_read', params)
+        
+        if not ok:
+            return False, data
+        
+        # Count entries per date
+        date_counts = {}
+        if isinstance(data, list):
+            for entry in data:
+                entry_date = entry.get('date')
+                if entry_date:
+                    # Parse date string (usually YYYY-MM-DD format)
+                    try:
+                        if isinstance(entry_date, str):
+                            parsed_date = datetime.strptime(entry_date[:10], '%Y-%m-%d').date()
+                        elif isinstance(entry_date, date):
+                            parsed_date = entry_date
+                        else:
+                            continue
+                        
+                        date_counts[parsed_date] = date_counts.get(parsed_date, 0) + 1
+                    except Exception:
+                        pass
+        
+        return True, date_counts
+        
+    except Exception as e:
+        return False, f"Error fetching timesheet entry counts: {str(e)}"
+
+
 def _get_date_range_days(start_date: date, end_date: date) -> List[date]:
     """
     Get all dates in a range (inclusive).
@@ -570,7 +645,7 @@ def _format_tasks_message(tasks: List[Dict], employee_name: str) -> str:
 def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict]) -> Dict[str, Any]:
     """Build a table widget payload to render tasks in the frontend.
 
-    Columns: Sub Task, Project, Dates, Allocated Hours
+    Columns: Sub Task, Project, Dates, Action
     Rows: one per unlogged day (tasks split by day if multi-day).
 
     Args:
@@ -585,7 +660,6 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
         { 'key': 'task_name', 'label': 'Sub Task', 'align': 'center' },
         { 'key': 'project', 'label': 'Project', 'align': 'center' },
         { 'key': 'dates', 'label': 'Dates', 'align': 'center' },
-        { 'key': 'hours', 'label': 'Allocated Hours', 'align': 'center' },
         { 'key': 'log_hours', 'label': 'Action', 'align': 'center' },
     ]
 
@@ -600,6 +674,11 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
     # Get current year for date formatting
     current_year = datetime.now().year
 
+    # First pass: Count tasks per (subtask_id, date) combination
+    # This helps us identify when multiple tasks share the same subtask on the same day
+    task_counts_by_subtask_date = {}
+    task_data_list = []
+    
     for task in tasks or []:
         # Get sub task from x_studio_sub_task_1 field
         sub_task = task.get('x_studio_sub_task_1')
@@ -641,6 +720,33 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
             # Skip tasks with invalid date formats
             continue
 
+        # Store task data for second pass
+        task_data_list.append({
+            'task': task,
+            'subtask_id': subtask_id,
+            'task_name': task_name,
+            'start_date': start_date_only,
+            'end_date': end_date_only
+        })
+        
+        # Count tasks per (subtask_id, date) combination
+        if subtask_id:
+            all_days = _get_date_range_days(start_date_only, end_date_only)
+            for day in all_days:
+                key = (subtask_id, day)
+                task_counts_by_subtask_date[key] = task_counts_by_subtask_date.get(key, 0) + 1
+
+    # Second pass: Build rows, checking timesheet entry counts against task counts
+    # Track how many rows we've added for each (subtask_id, date) to limit display
+    rows_added_by_subtask_date = {}
+    
+    for task_data in task_data_list:
+        task = task_data['task']
+        subtask_id = task_data['subtask_id']
+        task_name = task_data['task_name']
+        start_date_only = task_data['start_date']
+        end_date_only = task_data['end_date']
+
         # Get project name
         project_id = task.get('project_id')
         if isinstance(project_id, (list, tuple)) and len(project_id) > 1:
@@ -648,27 +754,45 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
         else:
             project_name = 'No Project'
 
-        # Get allocated hours
-        allocated_hours = task.get('allocated_hours', 0)
-        hours_display = f"{allocated_hours:.1f}h" if allocated_hours else "—"
-
-        # Fetch timesheet entries for this task's date range, filtered by subtask
-        ok_timesheet, logged_dates_result = _fetch_timesheet_entries(
+        # Fetch timesheet entry counts for this task's date range, filtered by subtask
+        ok_timesheet, timesheet_counts_result = _fetch_timesheet_entry_counts(
             odoo_service, employee_id, start_date_only, end_date_only, subtask_id=subtask_id
         )
         
         if not ok_timesheet:
             # If we can't fetch timesheet entries, assume all days are unlogged
             # This is safer than skipping the task entirely
-            logged_dates = set()
+            timesheet_counts = {}
         else:
-            logged_dates = logged_dates_result if isinstance(logged_dates_result, set) else set()
+            timesheet_counts = timesheet_counts_result if isinstance(timesheet_counts_result, dict) else {}
         
         # Get all days in the task's date range
         all_days = _get_date_range_days(start_date_only, end_date_only)
         
-        # Filter to only unlogged days
-        unlogged_days = [day for day in all_days if day not in logged_dates]
+        # Filter days: include a day if:
+        # 1. No subtask_id (always show these)
+        # 2. OR the number of timesheet entries for (subtask_id, date) is less than the number of tasks with that (subtask_id, date)
+        #    AND we haven't already shown enough rows for that (subtask_id, date)
+        unlogged_days = []
+        for day in all_days:
+            if not subtask_id:
+                # Tasks without subtask_id are always shown
+                unlogged_days.append(day)
+            else:
+                # Check if we have fewer timesheet entries than tasks for this (subtask_id, date)
+                key = (subtask_id, day)
+                task_count = task_counts_by_subtask_date.get(key, 0)
+                timesheet_count = timesheet_counts.get(day, 0)
+                rows_already_added = rows_added_by_subtask_date.get(key, 0)
+                
+                # Calculate how many rows we should show for this (subtask_id, date)
+                rows_to_show = task_count - timesheet_count
+                
+                # Only include if:
+                # 1. There are fewer timesheet entries than tasks (timesheet_count < task_count)
+                # 2. We haven't already shown enough rows (rows_already_added < rows_to_show)
+                if timesheet_count < task_count and rows_already_added < rows_to_show:
+                    unlogged_days.append(day)
         
         # Create a row for each unlogged day
         for day in unlogged_days:
@@ -681,9 +805,13 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
                 'task_name': task_name,
                 'project': project_name,
                 'dates': day_display,
-                'hours': hours_display,
                 'log_hours': f'<button class="log-hours-btn h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white" data-subtask-id="{subtask_id or ""}" data-date="{day.strftime("%Y-%m-%d")}" data-task-name="{_escape_html(task_name)}">Log Hours</button>' if subtask_id else '<span class="text-gray-400">—</span>',
             })
+            
+            # Track that we've added a row for this (subtask_id, date)
+            if subtask_id:
+                key = (subtask_id, day)
+                rows_added_by_subtask_date[key] = rows_added_by_subtask_date.get(key, 0) + 1
 
     return { 'columns': columns, 'rows': rows }
 
