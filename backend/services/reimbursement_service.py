@@ -373,6 +373,11 @@ class ReimbursementService:
                 'employee_id': employee_data.get('id'),
                 'state': 'draft'  # Start as draft
             }
+            
+            # Add currency_id if provided
+            currency_id = expense_data.get('currency_id')
+            if currency_id:
+                expense_values['currency_id'] = currency_id
 
             # Ensure hr.expense.company_id matches the employee's company
             try:
@@ -461,6 +466,76 @@ class ReimbursementService:
 
             self._log(f"Expense values: {expense_values}", "bot_logic")
 
+            # Helper function to submit expense to "Submitted" status
+            def _submit_expense(expense_id: int) -> Tuple[bool, str, Optional[Dict]]:
+                """Submit expense through the two-step process to reach 'Submitted' status."""
+                try:
+                    # Step 1: Call action_submit_expenses on hr.expense to create report/sheet
+                    self._log(f"Step 1: Calling action_submit_expenses on expense #{expense_id}", "bot_logic")
+                    params_submit_expenses = {
+                        'args': [[expense_id]],
+                        'kwargs': {}
+                    }
+                    ok_submit_expenses, res_submit_expenses, renewed_submit_expenses = _make_request(
+                        'hr.expense', 'action_submit_expenses', params_submit_expenses
+                    )
+                    if renewed_submit_expenses:
+                        odoo_session_data.update(renewed_submit_expenses)
+                    
+                    if not ok_submit_expenses:
+                        self._log(f"action_submit_expenses failed: {res_submit_expenses}", "bot_logic")
+                        return False, f"Failed to submit expenses: {res_submit_expenses}", renewed_submit_expenses
+                    
+                    # Step 2: Read expense to get sheet_id
+                    self._log(f"Step 2: Reading expense #{expense_id} to get sheet_id", "bot_logic")
+                    params_read = {
+                        'args': [[expense_id]],
+                        'kwargs': {'fields': ['sheet_id']}
+                    }
+                    ok_read, res_read, renewed_read = _make_request('hr.expense', 'read', params_read)
+                    if renewed_read:
+                        odoo_session_data.update(renewed_read)
+                    
+                    if not ok_read or not res_read:
+                        self._log(f"Failed to read expense: {res_read}", "bot_logic")
+                        return False, f"Failed to read expense: {res_read}", renewed_read
+                    
+                    # Extract sheet_id from read result
+                    expense_record = res_read[0] if isinstance(res_read, list) else res_read
+                    sheet_id_val = expense_record.get('sheet_id')
+                    
+                    if not sheet_id_val:
+                        self._log(f"No sheet_id found for expense #{expense_id}", "bot_logic")
+                        return False, "No expense sheet found after submission", renewed_read
+                    
+                    # sheet_id_val might be a list [id, name] or just an id
+                    sheet_id = sheet_id_val[0] if isinstance(sheet_id_val, (list, tuple)) else sheet_id_val
+                    
+                    # Step 3: Call action_submit_sheet on hr.expense.sheet
+                    self._log(f"Step 3: Calling action_submit_sheet on sheet #{sheet_id}", "bot_logic")
+                    params_submit_sheet = {
+                        'args': [[sheet_id]],
+                        'kwargs': {}
+                    }
+                    ok_submit_sheet, res_submit_sheet, renewed_submit_sheet = _make_request(
+                        'hr.expense.sheet', 'action_submit_sheet', params_submit_sheet
+                    )
+                    if renewed_submit_sheet:
+                        odoo_session_data.update(renewed_submit_sheet)
+                    
+                    if not ok_submit_sheet:
+                        self._log(f"action_submit_sheet failed: {res_submit_sheet}", "bot_logic")
+                        return False, f"Failed to submit sheet: {res_submit_sheet}", renewed_submit_sheet
+                    
+                    self._log(f"Successfully submitted expense #{expense_id} to 'Submitted' status", "bot_logic")
+                    return True, "Expense submitted successfully", renewed_submit_sheet
+                    
+                except Exception as e:
+                    self._log(f"Error submitting expense: {e}", "general")
+                    import traceback
+                    traceback.print_exc()
+                    return False, f"Error submitting expense: {str(e)}", None
+
             # Create strategy
             if (expense_data.get('category') or '').lower() == 'per_diem':
                 # Prefer single create with final PER_DIEM values first (best outcome)
@@ -472,7 +547,14 @@ class ReimbursementService:
                         odoo_session_data.update(renewed_sc)  # Update session for subsequent requests
                     if ok_sc:
                         expense_id = res_sc
-                        return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, renewed_sc
+                        # Submit expense to "Submitted" status
+                        submit_ok, submit_msg, submit_renewed = _submit_expense(expense_id)
+                        if submit_renewed:
+                            odoo_session_data.update(submit_renewed)
+                        if not submit_ok:
+                            self._log(f"Expense created but submission failed: {submit_msg}", "bot_logic")
+                            # Still return success since expense was created
+                        return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, submit_renewed or renewed_sc
                     else:
                         self._log(f"Single-create failed, falling back to two-phase: {res_sc}", "bot_logic")
                 except Exception as e:
@@ -538,7 +620,14 @@ class ReimbursementService:
                     
                     # Return the latest renewed session
                     latest_renewed = renewed_write2 if ok_write2 else renewed_write
-                    return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, latest_renewed
+                    # Submit expense to "Submitted" status
+                    submit_ok, submit_msg, submit_renewed = _submit_expense(expense_id)
+                    if submit_renewed:
+                        odoo_session_data.update(submit_renewed)
+                    if not submit_ok:
+                        self._log(f"Expense created but submission failed: {submit_msg}", "bot_logic")
+                        # Still return success since expense was created
+                    return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, submit_renewed or latest_renewed
                 except Exception as e:
                     self._log(f"Two-phase create error: {e}", "general")
                     # Fallback to single create
@@ -547,7 +636,14 @@ class ReimbursementService:
                     success, result, renewed_fallback = _make_request('hr.expense', 'create', params)
                     if success:
                         expense_id = result
-                        return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, renewed_fallback
+                        # Submit expense to "Submitted" status
+                        submit_ok, submit_msg, submit_renewed = _submit_expense(expense_id)
+                        if submit_renewed:
+                            odoo_session_data.update(submit_renewed)
+                        if not submit_ok:
+                            self._log(f"Expense created but submission failed: {submit_msg}", "bot_logic")
+                            # Still return success since expense was created
+                        return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, submit_renewed or renewed_fallback
                     else:
                         return False, result, renewed_fallback
             else:
@@ -563,10 +659,17 @@ class ReimbursementService:
                 if success:
                     expense_id = result
                     self._log(f"Expense record created successfully with ID: {expense_id}", "bot_logic")
+                    # Submit expense to "Submitted" status
+                    submit_ok, submit_msg, submit_renewed = _submit_expense(expense_id)
+                    if submit_renewed:
+                        odoo_session_data.update(submit_renewed)
+                    if not submit_ok:
+                        self._log(f"Expense created but submission failed: {submit_msg}", "bot_logic")
+                        # Still return success since expense was created
                     return True, {
                         'id': expense_id,
                         'message': f"Expense record #{expense_id} created successfully."
-                    }, renewed
+                    }, submit_renewed or renewed
                 else:
                     self._log(f"Failed to create expense record: {result}", "bot_logic")
                     return False, result, renewed
@@ -950,9 +1053,25 @@ class ReimbursementService:
                         session_data['step'] = 'ta_amount'
                         if self.session_manager:
                             self.session_manager.update_session(thread_id, session_data)
+                        
+                        # Fetch currency options
+                        currency_options, currency_error = self._get_currency_options()
+                        if currency_error:
+                            self._log(f"Error fetching currencies: {currency_error}", "bot_logic")
+                            currency_options = []
+                        
+                        # Determine default currency based on company
+                        default_currency_code = self._get_default_currency_for_company(employee_data)
+                        
                         return {
-                            'message': "Please enter the total amount for Travel & Accommodation (e.g., 150.00):",
+                            'message': "Enter payment amount (use the same currency you paid in)",
                             'thread_id': thread_id,
+                            'widgets': {
+                                'reimbursement_amount_form': True,
+                                'currency_options': currency_options,
+                                'default_currency': default_currency_code,
+                                'context_key': 'reimbursement_amount_currency'
+                            },
                             'source': 'reimbursement_service'
                         }
                     # For MISCELLANEOUS, skip early description/link and go to amount
@@ -960,9 +1079,25 @@ class ReimbursementService:
                         session_data['step'] = 'amount'
                         if self.session_manager:
                             self.session_manager.update_session(thread_id, session_data)
+                        
+                        # Fetch currency options
+                        currency_options, currency_error = self._get_currency_options()
+                        if currency_error:
+                            self._log(f"Error fetching currencies: {currency_error}", "bot_logic")
+                            currency_options = []
+                        
+                        # Determine default currency based on company
+                        default_currency_code = self._get_default_currency_for_company(employee_data)
+                        
                         return {
-                            'message': "Please enter the amount you paid (e.g., 50.00):",
+                            'message': "Enter payment amount (use the same currency you paid in)",
                             'thread_id': thread_id,
+                            'widgets': {
+                                'reimbursement_amount_form': True,
+                                'currency_options': currency_options,
+                                'default_currency': default_currency_code,
+                                'context_key': 'reimbursement_amount_currency'
+                            },
                             'source': 'reimbursement_service'
                         }
                     # Default flow for other categories
@@ -1090,26 +1225,69 @@ class ReimbursementService:
                 return self._show_supporting_additions(thread_id)
 
             elif current_step == 'ta_amount':
-                # Handle numeric total for Travel & Accommodation
+                # Handle amount input from widget or chat for Travel & Accommodation
                 try:
-                    extracted = self._extract_amount((message or '').lower())
+                    # Check if input is from widget format: "reimbursement_amount_currency=AMOUNT|CURRENCY_ID"
+                    amount_value = None
+                    currency_id = None
+                    
+                    if message.strip().startswith('reimbursement_amount_currency='):
+                        # Widget format: "reimbursement_amount_currency=50.00|123"
+                        widget_data = message.strip().split('=', 1)[1].strip()
+                        parts = widget_data.split('|')
+                        if len(parts) >= 2:
+                            amount_value = parts[0].strip()
+                            currency_id = parts[1].strip()
+                        elif len(parts) == 1:
+                            amount_value = parts[0].strip()
+                    else:
+                        # Chat input: extract amount only
+                        amount_value = self._extract_amount((message or '').lower())
+                    
+                    # Extract amount
+                    if amount_value:
+                        if isinstance(amount_value, str):
+                            extracted = self._extract_amount(amount_value.lower())
+                        else:
+                            extracted = amount_value
+                    else:
+                        extracted = self._extract_amount((message or '').lower())
+                    
                     if extracted is None or extracted <= 0:
                         return {
                             'message': "Please enter a valid amount (numbers only, e.g., 150.00).",
                             'thread_id': thread_id,
                             'source': 'reimbursement_service'
                         }
+                    
                     expense_data['amount'] = float(extracted)
-                    # For TRANS & ACC, go straight to confirmation (use today's date by default)
+                    
+                    # Store currency_id if provided
+                    if currency_id:
+                        try:
+                            expense_data['currency_id'] = int(currency_id)
+                        except (ValueError, TypeError):
+                            self._log(f"Invalid currency_id: {currency_id}", "bot_logic")
+                    
+                    # For TRANS & ACC, go straight to link step (use today's date by default)
                     from datetime import datetime as _dt
                     expense_data['date'] = _dt.now().strftime('%d/%m/%Y')
                     session_data['expense_data'] = expense_data
-                    # After amount, offer supporting additions (description/link/next)
-                    session_data['step'] = 'ta_supporting_additions'
+                    # After amount, go to link step
+                    session_data['step'] = 'ta_link'
                     if self.session_manager:
                         self.session_manager.update_session(thread_id, session_data)
-                    return self._show_supporting_additions(thread_id)
-                except Exception:
+                    return {
+                        'message': "Please provide a link to the receipt or supporting document:",
+                        'thread_id': thread_id,
+                        'widgets': {
+                            'reimbursement_link_form': True,
+                            'context_key': 'reimbursement_link'
+                        },
+                        'source': 'reimbursement_service'
+                    }
+                except Exception as e:
+                    self._log(f"Error processing amount: {e}", "bot_logic")
                     return {
                         'message': "Please enter a valid amount (numbers only, e.g., 150.00).",
                         'thread_id': thread_id,
@@ -1165,16 +1343,56 @@ class ReimbursementService:
                 if hasattr(self, 'session_manager'):
                     self.session_manager.update_session(thread_id, session_data)
 
+                # Fetch currency options
+                currency_options, currency_error = self._get_currency_options()
+                if currency_error:
+                    self._log(f"Error fetching currencies: {currency_error}", "bot_logic")
+                    currency_options = []
+
+                # Determine default currency based on company
+                default_currency_code = self._get_default_currency_for_company(employee_data)
+
                 return {
-                    'message': "Please enter the amount you paid (e.g., 50.00):",
+                    'message': "Enter payment amount (use the same currency you paid in)",
                     'thread_id': thread_id,
+                    'widgets': {
+                        'reimbursement_amount_form': True,
+                        'currency_options': currency_options,
+                        'default_currency': default_currency_code,
+                        'context_key': 'reimbursement_amount_currency'
+                    },
                     'source': 'reimbursement_service'
                 }
 
             elif current_step == 'amount':
-                # Handle amount input
+                # Handle amount input from widget or chat
                 try:
-                    extracted = self._extract_amount((message or '').lower())
+                    # Check if input is from widget format: "reimbursement_amount_currency=AMOUNT|CURRENCY_ID"
+                    amount_value = None
+                    currency_id = None
+                    
+                    if message.strip().startswith('reimbursement_amount_currency='):
+                        # Widget format: "reimbursement_amount_currency=50.00|123"
+                        widget_data = message.strip().split('=', 1)[1].strip()
+                        parts = widget_data.split('|')
+                        if len(parts) >= 2:
+                            amount_value = parts[0].strip()
+                            currency_id = parts[1].strip()
+                        elif len(parts) == 1:
+                            amount_value = parts[0].strip()
+                    else:
+                        # Chat input: extract amount only
+                        amount_value = self._extract_amount((message or '').lower())
+                    
+                    # Extract amount
+                    if amount_value:
+                        if isinstance(amount_value, str):
+                            extracted = self._extract_amount(amount_value.lower())
+                        else:
+                            extracted = amount_value
+                    else:
+                        extracted = self._extract_amount((message or '').lower())
+                    
                     if extracted is None or extracted <= 0:
                         return {
                             'message': "Please enter a valid amount (numbers only, e.g., 50.00).",
@@ -1183,6 +1401,14 @@ class ReimbursementService:
                         }
 
                     expense_data['amount'] = float(extracted)
+                    
+                    # Store currency_id if provided
+                    if currency_id:
+                        try:
+                            expense_data['currency_id'] = int(currency_id)
+                        except (ValueError, TypeError):
+                            self._log(f"Invalid currency_id: {currency_id}", "bot_logic")
+                    
                     session_data['expense_data'] = expense_data
                     session_data['step'] = 'date'
 
@@ -1198,7 +1424,8 @@ class ReimbursementService:
                         },
                         'source': 'reimbursement_service'
                     }
-                except Exception:
+                except Exception as e:
+                    self._log(f"Error processing amount: {e}", "bot_logic")
                     return {
                         'message': "Please enter a valid amount (numbers only, e.g., 50.00).",
                         'thread_id': thread_id,
@@ -1474,7 +1701,36 @@ class ReimbursementService:
                 else:
                     return self._show_ta_confirmation(expense_data, thread_id)
 
-            # TRANS & ACC: supporting additions after amount
+            elif current_step == 'ta_link':
+                # Handle link input from widget or chat for Travel & Accommodation
+                raw = (message or '').strip()
+                
+                # Check if input is from widget format: "reimbursement_link=URL"
+                if raw.startswith('reimbursement_link='):
+                    raw = raw.split('=', 1)[1].strip()
+                
+                if raw and raw.lower() not in ['skip', 'none']:
+                    if raw.startswith(('http://', 'https://')):
+                        expense_data['attached_link'] = raw
+                        session_data['expense_data'] = expense_data
+                    else:
+                        # Ask again if invalid URL
+                        return {
+                            'message': "Please provide a valid URL starting with http:// or https://:",
+                            'thread_id': thread_id,
+                            'widgets': {
+                                'reimbursement_link_form': True,
+                                'context_key': 'reimbursement_link'
+                            },
+                            'source': 'reimbursement_service'
+                        }
+                # After link, go to supporting additions (without Links button)
+                session_data['step'] = 'ta_supporting_additions'
+                if self.session_manager:
+                    self.session_manager.update_session(thread_id, session_data)
+                return self._show_supporting_additions(thread_id, category='travel_accommodation')
+
+            # TRANS & ACC: supporting additions after link
             elif current_step == 'ta_supporting_additions':
                 normalized = (message or '').strip().lower()
                 if normalized in ['descriptions', 'description', 'add_description', 'support_add_desc']:
@@ -1503,7 +1759,7 @@ class ReimbursementService:
                 # Re-show additions menu on unrecognized input
                 if self.session_manager:
                     self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
+                return self._show_supporting_additions(thread_id, category='travel_accommodation')
 
             elif current_step == 'ta_supporting_additions_description':
                 # Save description and return to additions menu
@@ -1513,7 +1769,7 @@ class ReimbursementService:
                 session_data['step'] = 'ta_supporting_additions'
                 if self.session_manager:
                     self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
+                return self._show_supporting_additions(thread_id, category='travel_accommodation')
 
             elif current_step == 'ta_supporting_additions_link':
                 # Save valid link and return to additions menu
@@ -1532,7 +1788,7 @@ class ReimbursementService:
                 session_data['step'] = 'ta_supporting_additions'
                 if self.session_manager:
                     self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
+                return self._show_supporting_additions(thread_id, category='travel_accommodation')
 
             elif current_step == 'per_diem_confirmation':
                 # Submit PER_DIEM with collected fields
@@ -1607,12 +1863,24 @@ class ReimbursementService:
             except Exception:
                 pass
             link = expense_data.get('attached_link', '')
+            
+            # Get currency name if currency_id is provided
+            currency_name = ''
+            currency_id = expense_data.get('currency_id')
+            if currency_id:
+                currency_name = self._resolve_currency_name(currency_id) or ''
+            
+            # Format amount with currency
+            if currency_name:
+                amount_display = f"{amount:.2f} {currency_name}"
+            else:
+                amount_display = f"${amount:.2f}"
 
             confirmation_text = f"""Almost there! Let's review your reimbursement request:
 
 📂 **Category:** {category_display}
 📝 **Description:** {description}
-💰 **Amount:** ${amount:.2f}
+💰 **Amount:** {amount_display}
 📅 **Date:** {date}
 🔗 **Receipt Link:** {link if link else 'None'}
 
@@ -1636,16 +1904,22 @@ Do you want to submit this request? Reply or click 'Yes' to confirm or 'No' to c
                 'source': 'reimbursement_service'
             }
 
-    def _show_supporting_additions(self, thread_id: str) -> Dict:
-        """Show the supporting additions bubble with Descriptions, Links, Next."""
+    def _show_supporting_additions(self, thread_id: str, category: str = None) -> Dict:
+        """Show the supporting additions bubble with Descriptions, Links, Next.
+        For Travel & Accommodation category, Links button is hidden."""
+        buttons = [
+            {'text': 'Descriptions', 'value': 'support_add_desc', 'type': 'action_reimbursement'},
+            {'text': 'Next', 'value': 'support_next', 'type': 'action_reimbursement'}
+        ]
+        
+        # Only show Links button if not Travel & Accommodation
+        if category != 'travel_accommodation':
+            buttons.insert(1, {'text': 'Links', 'value': 'support_add_link', 'type': 'action_reimbursement'})
+        
         return {
             'message': "Would you like to add any supporting additions?",
             'thread_id': thread_id,
-            'buttons': [
-                {'text': 'Descriptions', 'value': 'support_add_desc', 'type': 'action_reimbursement'},
-                {'text': 'Links', 'value': 'support_add_link', 'type': 'action_reimbursement'},
-                {'text': 'Next', 'value': 'support_next', 'type': 'action_reimbursement'}
-            ],
+            'buttons': buttons,
             'source': 'reimbursement_service'
         }
 
@@ -1694,6 +1968,79 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
                 'source': 'reimbursement_service'
             }
 
+    def _get_default_currency_for_company(self, employee_data: Dict) -> Optional[str]:
+        """Get default currency code based on company name.
+        Returns currency code (JOD, SAR, AED) or None.
+        """
+        try:
+            company_details = employee_data.get('company_id_details')
+            company_name = ''
+            
+            if isinstance(company_details, dict):
+                company_name = company_details.get('name', '')
+            elif isinstance(company_details, (list, tuple)) and len(company_details) > 1:
+                company_name = company_details[1]
+            
+            if not company_name:
+                # Try to get from company_id field directly
+                company_val = employee_data.get('company_id')
+                if isinstance(company_val, (list, tuple)) and len(company_val) > 1:
+                    company_name = company_val[1]
+            
+            if not company_name:
+                return None
+            
+            company_name_normalized = company_name.strip()
+            
+            # Map company names to currencies
+            if company_name_normalized in ['Prezlab FZ LLC - Regional Office', 'ALOROD AL TAQADAMIAH LEL TASMEM CO']:
+                return 'JOD'
+            elif company_name_normalized == 'Prezlab Advanced Design Company':
+                return 'SAR'
+            elif company_name_normalized in ['Prezlab FZ LLC', 'Prezlab Digital Design Firm L.L.C. - O.P.C']:
+                return 'AED'
+            
+            return None
+        except Exception as e:
+            self._log(f"Error determining default currency: {e}", "bot_logic")
+            return None
+
+    def _get_currency_options(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """Fetch currency options from res.currency for dropdown.
+        Returns (options, error_message) where options is a list of {label, value}.
+        """
+        try:
+            params = {
+                'args': [[]],  # empty domain
+                'kwargs': {
+                    'fields': ['name'],
+                    'limit': 2000,
+                    'order': 'name asc'
+                }
+            }
+            success, result = self._make_odoo_request('res.currency', 'search_read', params)
+            if not success:
+                return [], str(result)
+            options = [{'label': r.get('name') or f"Currency {r.get('id')}", 'value': r.get('id')} for r in (result or [])]
+            return options, None
+        except Exception as e:
+            return [], str(e)
+
+    def _resolve_currency_name(self, currency_id: int) -> Optional[str]:
+        """Resolve currency name from currency_id"""
+        try:
+            params = {
+                'args': [[currency_id]],
+                'kwargs': {'fields': ['name']}
+            }
+            success, result = self._make_odoo_request('res.currency', 'read', params)
+            if success and result:
+                rec = result[0] if isinstance(result, list) else result
+                return rec.get('name')
+            return None
+        except Exception:
+            return None
+
     def _get_destination_options(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Fetch destination options from res.country.state for dropdown.
         Returns (options, error_message) where options is a list of {label, value}.
@@ -1740,12 +2087,24 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
         if not description:
             description = '[TRANS & ACC] Travel & Accommodation'
         link = expense_data.get('attached_link', '')
+        
+        # Get currency name if currency_id is provided
+        currency_name = ''
+        currency_id = expense_data.get('currency_id')
+        if currency_id:
+            currency_name = self._resolve_currency_name(currency_id) or ''
+        
+        # Format amount with currency
+        if currency_name:
+            amount_display = f"{amount:.2f} {currency_name}"
+        else:
+            amount_display = f"${amount:.2f}"
 
         msg = f"""Great! Here's a summary of your Travel & Accommodation request:
 
 📂 **Category:** {category_display}
 📝 **Description:** {description}
-💰 **Amount:** ${amount:.2f}
+💰 **Amount:** {amount_display}
 📅 **Date:** {date}
 🔗 **Receipt Link:** {link if link else 'None'}
 

@@ -48,7 +48,20 @@ def _parse_hours_from_text(text: str) -> Optional[float]:
     text = re.sub(r'\b(spent|on|this|task|work|for)\b', '', text)
     text = text.strip()
     
-    # Try direct float parsing first
+    # Check for "X:Y" format FIRST (e.g., "7:20" meaning 7 hours 20 minutes)
+    # This must be checked before standalone number parsing to avoid matching just "7"
+    match_time = re.search(r'(\d+):(\d+)', text)
+    if match_time:
+        try:
+            h = int(match_time.group(1))
+            m = int(match_time.group(2))
+            # Validate minutes are between 0-59
+            if 0 <= m < 60:
+                return float(h) + (m / 60.0)
+        except (ValueError, IndexError):
+            pass
+    
+    # Try direct float parsing (for decimal hours like "5.5")
     try:
         return float(text)
     except ValueError:
@@ -141,16 +154,6 @@ def _parse_hours_from_text(text: str) -> Optional[float]:
         if minutes_value is not None:
             total_hours += minutes_value / 60.0
         return total_hours
-    
-    # Pattern 3: "X:Y" format (e.g., "5:30" meaning 5 hours 30 minutes)
-    match_time = re.search(r'(\d+):(\d+)', text)
-    if match_time:
-        try:
-            h = int(match_time.group(1))
-            m = int(match_time.group(2))
-            return float(h) + (m / 60.0)
-        except ValueError:
-            pass
     
     return None
 
@@ -906,7 +909,6 @@ def start_log_hours_for_task(odoo_service, employee_data: dict, subtask_id: int,
                 },
                 'log_hours_form': True,
                 'activity_options': activity_options,
-                'hours_options': _generate_hours_options(),
                 'context_key': 'log_hours_form'
             }
         }
@@ -941,7 +943,8 @@ def handle_log_hours_form_step(odoo_service, employee_data: dict, context: dict,
         
         # Extract form data
         task_activity_id = form_data.get('activity_id')
-        hours_str = form_data.get('hours', '')
+        hours_str = form_data.get('hours', '').strip()
+        minutes_str = form_data.get('minutes', '').strip()
         description = form_data.get('description', '').strip()
         
         # Validate activity
@@ -960,30 +963,73 @@ def handle_log_hours_form_step(odoo_service, employee_data: dict, context: dict,
                     },
                     'log_hours_form': True,
                     'activity_options': activity_options,
-                    'hours_options': _generate_hours_options(),
                     'context_key': 'log_hours_form'
                 }
             }
         
-        # Validate hours - parse from natural language text
+        # Parse hours and minutes from separate fields
         hours = None
-        if hours_str:
-            # First try parsing as natural language (e.g., "5 hours and 5 minutes")
-            hours = _parse_hours_from_text(hours_str)
-            
-            # If natural language parsing failed, try direct float parsing
-            if hours is None:
-                try:
-                    hours = float(hours_str)
-                except (ValueError, TypeError):
-                    pass
+        if hours_str or minutes_str:
+            try:
+                hours_num = int(hours_str) if hours_str else 0
+                minutes_num = int(minutes_str) if minutes_str else 0
+                
+                # Validate ranges
+                if hours_num < 0 or minutes_num < 0 or minutes_num > 59:
+                    ok, activity_options = _fetch_task_activity_options(odoo_service)
+                    if not ok:
+                        activity_options = []
+                    return {
+                        'message': 'Please enter valid hours (≥0) and minutes (0-59).',
+                        'success': False,
+                        'widgets': {
+                            'log_hours_flow': {
+                                'step': 'log_hours_form',
+                                **context
+                            },
+                            'log_hours_form': True,
+                            'activity_options': activity_options,
+                            'context_key': 'log_hours_form'
+                        }
+                    }
+                
+                # Convert to decimal hours
+                hours = float(hours_num) + (float(minutes_num) / 60.0)
+                
+                if hours <= 0:
+                    ok, activity_options = _fetch_task_activity_options(odoo_service)
+                    if not ok:
+                        activity_options = []
+                    return {
+                        'message': 'Please enter at least some hours or minutes.',
+                        'success': False,
+                        'widgets': {
+                            'log_hours_flow': {
+                                'step': 'log_hours_form',
+                                **context
+                            },
+                            'log_hours_form': True,
+                            'activity_options': activity_options,
+                            'context_key': 'log_hours_form'
+                        }
+                    }
+            except (ValueError, TypeError):
+                # Fallback: try parsing as natural language text (for backward compatibility)
+                combined_str = f"{hours_str} {minutes_str}".strip()
+                if combined_str:
+                    hours = _parse_hours_from_text(combined_str)
+                    if hours is None:
+                        try:
+                            hours = float(hours_str) if hours_str else 0.0
+                        except (ValueError, TypeError):
+                            pass
         
         if hours is None or hours <= 0:
             ok, activity_options = _fetch_task_activity_options(odoo_service)
             if not ok:
                 activity_options = []
             return {
-                'message': 'Please enter valid hours (e.g., "5 hours and 5 minutes", "5.5", or "5 hours 30 minutes").',
+                'message': 'Please enter valid hours and minutes.',
                 'success': False,
                 'widgets': {
                     'log_hours_flow': {
@@ -992,7 +1038,6 @@ def handle_log_hours_form_step(odoo_service, employee_data: dict, context: dict,
                     },
                     'log_hours_form': True,
                     'activity_options': activity_options,
-                    'hours_options': _generate_hours_options(),
                     'context_key': 'log_hours_form'
                 }
             }
@@ -1451,11 +1496,33 @@ def create_timesheet_entry(odoo_service, employee_data: dict, context: dict, odo
                 # Don't let metrics failure affect the actual timesheet creation
                 debug_log(f"[LogHours] Metrics logging error: {e}", "bot_logic")
         
-        return {
+        # Check if there are remaining tasks to log
+        employee_name = employee_data.get('name', '')
+        employee_id = employee_data.get('id')
+        ok, remaining_tasks = _fetch_current_month_tasks(odoo_service, employee_name, employee_id=employee_id)
+        
+        response_data = {
             'message': f'✅ Successfully logged {hours:.1f} hours for {context.get("task_name", "the task")}!',
             'success': True,
             'timesheet_id': timesheet_id
         }
+        
+        # If there are remaining tasks, show the task table with a message and cancel button
+        if ok and remaining_tasks and len(remaining_tasks) > 0:
+            # Build task table widget (this filters out already logged tasks)
+            tasks_table = build_tasks_table_widget(odoo_service, employee_data, remaining_tasks)
+            
+            # Check if there are any unlogged tasks in the table
+            if tasks_table.get('rows') and len(tasks_table.get('rows', [])) > 0:
+                response_data['message'] += '\n\n**Would you like to log another task?**'
+                response_data['widgets'] = {
+                    'tasks_table': tasks_table
+                }
+                response_data['buttons'] = [
+                    {'text': 'Cancel', 'value': 'log_hours_cancel', 'type': 'action'}
+                ]
+        
+        return response_data
 
     except Exception as e:
         return {

@@ -2253,22 +2253,18 @@
                         }
                     }, 0);
                 } else if (buttons && buttons.widgets && buttons.widgets.log_hours_form) {
-                    // Combined log hours form widget (activity dropdown, hours dropdown, description text box)
+                    // Combined log hours form widget (activity dropdown, hours input, minutes input, description text box)
                     const wid = `lhf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
                     const activityId = `${wid}_activity`;
                     const hoursId = `${wid}_hours`;
+                    const minutesId = `${wid}_minutes`;
                     const descriptionId = `${wid}_description`;
                     const applyId = `${wid}_apply`;
                     
                     const activityOptions = Array.isArray(buttons.widgets.activity_options) ? buttons.widgets.activity_options : [];
-                    const hoursOptions = Array.isArray(buttons.widgets.hours_options) ? buttons.widgets.hours_options : [];
                     
                     const activityOptsHtml = [`<option value="" disabled selected>Select activity</option>`]
                         .concat(activityOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`))
-                        .join('');
-                    
-                    const hoursOptsHtml = [`<option value="" disabled selected>Select hours</option>`]
-                        .concat(hoursOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`))
                         .join('');
                     
                     widgetsHtml = `
@@ -2280,17 +2276,21 @@
                                 </select>
                             </div>
                             <div class="flex items-center justify-start gap-6 w-full">
-                                <label class="text-base font-medium" style="width: 100px; flex-shrink: 0;">Hours:</label>
-                                <div class="flex-1 relative">
-                                    <input type="text" id="${hoursId}" list="${hoursId}_datalist" placeholder="e.g., 5 hours and 5 minutes (or select from suggestions)" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] w-full" />
-                                    <datalist id="${hoursId}_datalist">
-                                        ${hoursOptions.map(o => `<option value="${escapeHtml(o.label)}">${escapeHtml(o.label)}</option>`).join('')}
-                                    </datalist>
-                                </div>
-                            </div>
-                            <div class="flex items-center justify-start gap-6 w-full">
                                 <label class="text-base font-medium" style="width: 100px; flex-shrink: 0;">Description:</label>
                                 <input type="text" id="${descriptionId}" placeholder="Optional description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" />
+                            </div>
+                            <div class="flex items-center justify-start gap-6 w-full">
+                                <label class="text-base font-medium" style="width: 100px; flex-shrink: 0;">Time:</label>
+                                <div class="flex-1 flex items-center gap-3">
+                                    <div class="flex items-center gap-2">
+                                        <label class="text-sm font-medium text-gray-700">Hours:</label>
+                                        <input type="number" id="${hoursId}" min="0" step="1" placeholder="0" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" style="width: 100px;" />
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <label class="text-sm font-medium text-gray-700">Minutes:</label>
+                                        <input type="number" id="${minutesId}" min="0" max="59" step="1" placeholder="0" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" style="width: 100px;" />
+                                    </div>
+                                </div>
                             </div>
                             <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-blue-700 transition-colors">Apply</button>
                         </div>
@@ -2302,23 +2302,139 @@
                             applyBtn.addEventListener('click', () => {
                                 const activityEl = document.getElementById(activityId);
                                 const hoursEl = document.getElementById(hoursId);
+                                const minutesEl = document.getElementById(minutesId);
                                 const descriptionEl = document.getElementById(descriptionId);
                                 
                                 const activityVal = activityEl ? activityEl.value : '';
-                                const hoursVal = hoursEl ? hoursEl.value.trim() : '';
+                                const hoursVal = hoursEl ? hoursEl.value.trim() : '0';
+                                const minutesVal = minutesEl ? minutesEl.value.trim() : '0';
                                 const descriptionVal = descriptionEl ? descriptionEl.value.trim() : '';
                                 
-                                if (!activityVal || !hoursVal) {
-                                    alert('Please select an activity and enter hours.');
+                                if (!activityVal) {
+                                    alert('Please select an activity.');
                                     return;
                                 }
                                 
-                                // Format: log_hours_form=activity_id|hours|description
-                                // Send the text value (backend will parse it)
-                                const outgoing = `log_hours_form=${activityVal}|${hoursVal}|${descriptionVal}`;
+                                // Validate hours and minutes
+                                const hoursNum = parseInt(hoursVal) || 0;
+                                const minutesNum = parseInt(minutesVal) || 0;
+                                
+                                if (hoursNum < 0 || minutesNum < 0 || minutesNum > 59) {
+                                    alert('Please enter valid hours (≥0) and minutes (0-59).');
+                                    return;
+                                }
+                                
+                                if (hoursNum === 0 && minutesNum === 0) {
+                                    alert('Please enter at least some hours or minutes.');
+                                    return;
+                                }
+                                
+                                // Format: log_hours_form=activity_id|hours|minutes|description
+                                // Backend will combine hours and minutes into decimal hours
+                                const outgoing = `log_hours_form=${activityVal}|${hoursNum}|${minutesNum}|${descriptionVal}`;
                                 // Show user-friendly message in chat
                                 const activityLabel = activityEl && activityEl.options && activityEl.selectedIndex >= 0 ? activityEl.options[activityEl.selectedIndex].text : activityVal;
-                                const userMsg = `Activity: ${activityLabel}, Hours: ${hoursVal}${descriptionVal ? `, Description: ${descriptionVal}` : ''}`;
+                                const timeDisplay = minutesNum === 0 ? `${hoursNum} hour${hoursNum !== 1 ? 's' : ''}` : hoursNum === 0 ? `${minutesNum} minute${minutesNum !== 1 ? 's' : ''}` : `${hoursNum} hour${hoursNum !== 1 ? 's' : ''} and ${minutesNum} minute${minutesNum !== 1 ? 's' : ''}`;
+                                const userMsg = `Activity: ${activityLabel}, Time: ${timeDisplay}${descriptionVal ? `, Description: ${descriptionVal}` : ''}`;
+                                addMessageToChat(userMsg, true);
+                                conversationHistory.push({role: 'user', content: userMsg});
+                                // Send internal format silently
+                                sendToBackend(outgoing);
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.reimbursement_amount_form) {
+                    // Reimbursement amount form widget (amount input, currency dropdown, apply button)
+                    const wid = `raf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const amountId = `${wid}_amount`;
+                    const currencyId = `${wid}_currency`;
+                    const applyId = `${wid}_apply`;
+                    
+                    const currencyOptions = Array.isArray(buttons.widgets.currency_options) ? buttons.widgets.currency_options : [];
+                    
+                    // Find default currency based on backend-provided default_currency code
+                    let defaultCurrencyValue = '';
+                    let defaultCurrencyLabel = '';
+                    const defaultCurrencyCode = buttons.widgets.default_currency; // e.g., 'JOD', 'SAR', 'AED'
+                    if (defaultCurrencyCode) {
+                        const defaultOption = currencyOptions.find(o => o.label && o.label.toUpperCase() === defaultCurrencyCode.toUpperCase());
+                        if (defaultOption) {
+                            defaultCurrencyValue = defaultOption.value;
+                            defaultCurrencyLabel = defaultOption.label;
+                        }
+                    }
+                    
+                    const currencyOptsHtml = [`<option value="" disabled ${!defaultCurrencyValue ? 'selected' : ''}>Select currency</option>`]
+                        .concat(currencyOptions.map(o => {
+                            const isSelected = defaultCurrencyValue && String(o.value) === String(defaultCurrencyValue) ? 'selected' : '';
+                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                        }))
+                        .join('');
+                    
+                    widgetsHtml = `
+                        <div class="mt-3 flex items-center justify-start gap-3">
+                            <input type="number" id="${amountId}" step="0.01" min="0" placeholder="Amount" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" style="width: 192px;" />
+                            <select id="${currencyId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" style="min-width: 90px;">
+                                ${currencyOptsHtml}
+                            </select>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-blue-700 transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const applyBtn = document.getElementById(applyId);
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const amountEl = document.getElementById(amountId);
+                                const currencyEl = document.getElementById(currencyId);
+                                
+                                const amountVal = amountEl ? amountEl.value.trim() : '';
+                                const currencyVal = currencyEl ? currencyEl.value : '';
+                                
+                                if (!amountVal) {
+                                    alert('Please enter an amount.');
+                                    return;
+                                }
+                                
+                                // Format: reimbursement_amount_currency=AMOUNT|CURRENCY_ID
+                                const contextKey = buttons.widgets.context_key || 'reimbursement_amount_currency';
+                                const outgoing = `${contextKey}=${amountVal}${currencyVal ? `|${currencyVal}` : ''}`;
+                                
+                                // Show user-friendly message in chat
+                                const currencyLabel = currencyEl && currencyEl.options && currencyEl.selectedIndex >= 0 ? currencyEl.options[currencyEl.selectedIndex].text : (currencyVal || '');
+                                const userMsg = `Amount: ${amountVal}${currencyLabel ? ` ${currencyLabel}` : ''}`;
+                                addMessageToChat(userMsg, true);
+                                conversationHistory.push({role: 'user', content: userMsg});
+                                // Send internal format silently
+                                sendToBackend(outgoing);
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.reimbursement_link_form) {
+                    // Reimbursement link form widget (link input, apply button)
+                    const wid = `rlf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const linkId = `${wid}_link`;
+                    const applyId = `${wid}_apply`;
+                    
+                    widgetsHtml = `
+                        <div class="mt-3 flex items-center justify-start gap-3">
+                            <input type="url" id="${linkId}" placeholder="https://example.com/receipt" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" />
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-blue-700 transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const applyBtn = document.getElementById(applyId);
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const linkEl = document.getElementById(linkId);
+                                
+                                const linkVal = linkEl ? linkEl.value.trim() : '';
+                                
+                                // Format: reimbursement_link=URL (or empty to skip)
+                                const contextKey = buttons.widgets.context_key || 'reimbursement_link';
+                                const outgoing = linkVal ? `${contextKey}=${linkVal}` : `${contextKey}=skip`;
+                                
+                                // Show user-friendly message in chat
+                                const userMsg = linkVal ? `Link: ${linkVal}` : 'Skipped link';
                                 addMessageToChat(userMsg, true);
                                 conversationHistory.push({role: 'user', content: userMsg});
                                 // Send internal format silently

@@ -7,6 +7,14 @@ except Exception:
 from typing import Dict, Any, Tuple, Optional, List
 
 
+def debug_log(message: str, category: str = "general"):
+    """Debug logging helper"""
+    try:
+        print(f"DEBUG: {message}")
+    except Exception:
+        pass
+
+
 def _to_datetime_str(dmy: str, hour_key: str) -> str:
     """Combine a date string (YYYY-MM-DD) and an hour selection key ('16' or '16.5')
     into an ISO datetime string suitable for Odoo: 'YYYY-MM-DD HH:MM:SS'."""
@@ -106,6 +114,8 @@ class OvertimeService:
         if not text:
             return False, 0.0
         s = (text or '').lower()
+        
+        debug_log(f"Overtime detection for message: '{text}'", "bot_logic")
 
         # If the user is asking about policy/rules/information, don't start the flow
         policy_keywords = [
@@ -113,6 +123,7 @@ class OvertimeService:
             'what is', 'how does', 'how do', 'tell me about', 'explain', 'information about', 'details about'
         ]
         if any(k in s for k in policy_keywords):
+            debug_log(f"Overtime detection blocked by policy keywords", "bot_logic")
             return False, 0.0
 
         # Require action-oriented phrasing if "overtime" is present
@@ -134,7 +145,9 @@ class OvertimeService:
                 if p in s:
                     score = max(score, 0.7 if p == 'overtime' else 0.5)
 
-        return (score >= 0.5), min(1.0, score)
+        result = (score >= 0.5), min(1.0, score)
+        debug_log(f"Overtime detection result: {result[0]}, confidence: {result[1]:.2f}", "bot_logic")
+        return result
 
     # -------------------------- Odoo utilities ---------------------------
     def _make_odoo_request_stateless(self, model: str, method: str, params: Dict,
@@ -226,16 +239,26 @@ class OvertimeService:
             return None
         return None
 
-    def _find_overtime_category(self, company_name: str) -> Tuple[bool, Any]:
+    def _find_overtime_category(self, company_name: str, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
         name = f"Overtime - {company_name}".strip()
         domain = [["name", "=", name]]
         params = {
             'args': [domain],
             'kwargs': {'fields': ['id', 'name'], 'limit': 1}
         }
+        # Use stateless if session data provided, otherwise fallback to regular
+        if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+            ok, res, _ = self._make_odoo_request_stateless(
+                'approval.category', 'search_read', params,
+                session_id=odoo_session_data['session_id'],
+                user_id=odoo_session_data['user_id'],
+                username=odoo_session_data.get('username'),
+                password=odoo_session_data.get('password')
+            )
+            return ok, res
         return self._make_odoo_request('approval.category', 'search_read', params)
 
-    def _list_projects(self) -> Tuple[bool, Any]:
+    def _list_projects(self, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
         """Fetch a large list of projects using robust fallbacks.
 
         Strategy:
@@ -243,24 +266,37 @@ class OvertimeService:
         2) If still empty, try explicit search -> read on project.project.
         3) If model missing/empty, try alternative model names ('project', 'x_project') using search+read.
         """
+        # Helper to make request (stateless or regular)
+        def _make_req(model, method, req_params):
+            if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+                ok, res, _ = self._make_odoo_request_stateless(
+                    model, method, req_params,
+                    session_id=odoo_session_data['session_id'],
+                    user_id=odoo_session_data['user_id'],
+                    username=odoo_session_data.get('username'),
+                    password=odoo_session_data.get('password')
+                )
+                return ok, res
+            return self._make_odoo_request(model, method, req_params)
+        
         # 1) search_read active
         sr_args = {'args': [[]], 'kwargs': {'fields': ['id', 'name', 'display_name', 'active'], 'domain': [["active", "=", True]], 'order': 'name asc', 'limit': 1000}}
-        ok, result = self._make_odoo_request('project.project', 'search_read', sr_args)
+        ok, result = _make_req('project.project', 'search_read', sr_args)
         if ok and isinstance(result, list) and len(result) > 0:
             return True, result
         # 1b) search_read without domain
         sr_args_nd = {'args': [[]], 'kwargs': {'fields': ['id', 'name', 'display_name', 'active'], 'order': 'name asc', 'limit': 1000}}
-        ok2, result2 = self._make_odoo_request('project.project', 'search_read', sr_args_nd)
+        ok2, result2 = _make_req('project.project', 'search_read', sr_args_nd)
         if ok2 and isinstance(result2, list) and len(result2) > 0:
             return True, result2
         # 2) search -> read on project.project
         try_models = ['project.project', 'project', 'x_project']
         for model in try_models:
             # search (no domain to be safe)
-            ok_s, ids = self._make_odoo_request(model, 'search', {'args': [[]], 'kwargs': {'limit': 1000}})
+            ok_s, ids = _make_req(model, 'search', {'args': [[]], 'kwargs': {'limit': 1000}})
             if not ok_s or not isinstance(ids, list) or len(ids) == 0:
                 continue
-            ok_r, recs = self._make_odoo_request(model, 'read', {'args': [ids], 'kwargs': {'fields': ['id', 'name', 'display_name', 'active']}})
+            ok_r, recs = _make_req(model, 'read', {'args': [ids], 'kwargs': {'fields': ['id', 'name', 'display_name', 'active']}})
             if ok_r and isinstance(recs, list) and len(recs) > 0:
                 # Normalize field names for consistency
                 for r in recs:
@@ -371,6 +407,7 @@ class OvertimeService:
 
             # Detect new intent first
             is_ot, conf = self.detect_intent(message)
+            debug_log(f"Overtime intent detection result: is_ot={is_ot}, confidence={conf:.2f}", "bot_logic")
             if not is_ot:
                 return None
 
@@ -379,7 +416,7 @@ class OvertimeService:
             active = self.session_manager.get_session(thread_id)
             if active and active.get('type') not in (None, 'overtime') and active.get('state') in ['started', 'active']:
                 other_flow = active.get('type', 'another')
-                self._log(f"Blocking overtime - active {other_flow} flow detected on thread {thread_id}")
+                debug_log(f"Blocking overtime - active {other_flow} flow detected on thread {thread_id}", "bot_logic")
                 return {
                     'message': 'Sorry, I cannot start a new request until you finish or cancel the current one. To cancel the request, type ***Cancel***.',
                     'thread_id': thread_id,
@@ -387,8 +424,21 @@ class OvertimeService:
                 }
 
             # Initialize new overtime session
+            debug_log(f"Initializing overtime session for company: {employee_data.get('company_id_details', {}).get('name', 'Unknown')}", "bot_logic")
             company_name = self._get_company_name(employee_data) or 'Company'
-            ok, cat = self._find_overtime_category(company_name)
+            debug_log(f"Resolved company name: {company_name}", "bot_logic")
+            try:
+                ok, cat = self._find_overtime_category(company_name, odoo_session_data)
+                debug_log(f"Overtime category lookup result: ok={ok}, cat={cat if ok else 'N/A'}", "bot_logic")
+            except Exception as e:
+                debug_log(f"Exception in _find_overtime_category: {str(e)}", "bot_logic")
+                import traceback
+                debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                return {
+                    'message': f"Sorry, I encountered an error while looking up the overtime category. Please try again later.",
+                    'session_handled': True
+                }
+            
             if not ok or not cat:
                 return {
                     'message': f"Sorry, I couldn't find the overtime category for {company_name}. Please contact HR.",
@@ -397,7 +447,15 @@ class OvertimeService:
             category = cat[0] if isinstance(cat, list) else cat
             category_id = category.get('id')
 
-            okp, projects = self._list_projects()
+            try:
+                okp, projects = self._list_projects(odoo_session_data)
+            except Exception as e:
+                debug_log(f"Exception in _list_projects: {str(e)}", "bot_logic")
+                import traceback
+                debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                projects = []
+                okp = False
+            
             project_options = []
             if okp and isinstance(projects, list):
                 project_options = [
@@ -425,8 +483,14 @@ class OvertimeService:
                     'context_key': 'overtime_date_range'
                 }
             }
-        except Exception:
-            return None
+        except Exception as e:
+            debug_log(f"Exception in handle_flow: {str(e)}", "bot_logic")
+            import traceback
+            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+            return {
+                'message': 'Sorry, I encountered an error while processing your overtime request. Please try again.',
+                'session_handled': True
+            }
 
     def _continue_overtime(self, message: str, thread_id: str, session: Dict, employee_data: Dict, odoo_session_data: Dict = None) -> Optional[Dict[str, Any]]:
         try:

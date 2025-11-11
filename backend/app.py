@@ -1634,22 +1634,48 @@ def create_app():
                             response_data['buttons'] = log_hours_resp['buttons']
                         return jsonify(response_data)
                 
+                # Handle cancel button (can be clicked even without active session)
+                if message == 'log_hours_cancel':
+                    session.pop('log_hours_flow', None)
+                    step_resp = {
+                        'message': 'Log hours cancelled.',
+                        'success': True
+                    }
+                    response_data = {
+                        'response': step_resp.get('message', ''),
+                        'status': 'success' if step_resp.get('success') else 'error',
+                        'has_employee_context': employee_data is not None,
+                        'thread_id': thread_id
+                    }
+                    return jsonify(response_data)
+                
                 # Check for log hours flow step inputs
                 log_hours_session = session.get('log_hours_flow', {})
                 if log_hours_session.get('started'):
                     context = log_hours_session.get('context', {})
                     current_step = context.get('step', '')
                     
-                    # Handle combined form submission format: log_hours_form=activity_id|hours|description
+                    # Handle combined form submission format: log_hours_form=activity_id|hours|minutes|description
                     if message.startswith('log_hours_form='):
                         form_data_str = message.replace('log_hours_form=', '')
-                        # Parse format: activity_id|hours|description
-                        form_parts = form_data_str.split('|', 2)
-                        form_data = {
-                            'activity_id': form_parts[0] if len(form_parts) > 0 else '',
-                            'hours': form_parts[1] if len(form_parts) > 1 else '',
-                            'description': form_parts[2] if len(form_parts) > 2 else ''
-                        }
+                        # Parse format: activity_id|hours|minutes|description (new format) or activity_id|hours|description (old format for backward compatibility)
+                        form_parts = form_data_str.split('|')
+                        if len(form_parts) >= 4:
+                            # New format with separate hours and minutes
+                            form_data = {
+                                'activity_id': form_parts[0] if len(form_parts) > 0 else '',
+                                'hours': form_parts[1] if len(form_parts) > 1 else '',
+                                'minutes': form_parts[2] if len(form_parts) > 2 else '',
+                                'description': form_parts[3] if len(form_parts) > 3 else ''
+                            }
+                        else:
+                            # Old format (backward compatibility): activity_id|hours|description
+                            form_data = {
+                                'activity_id': form_parts[0] if len(form_parts) > 0 else '',
+                                'hours': form_parts[1] if len(form_parts) > 1 else '',
+                                'minutes': '',  # No minutes in old format
+                                'description': form_parts[2] if len(form_parts) > 2 else ''
+                            }
                         step_resp = handle_log_hours_form_step(odoo_service, employee_data, context, form_data, get_odoo_session_data(), metrics_service)
                     # Handle dropdown selection format: context_key=value
                     elif '=' in message:
@@ -1681,12 +1707,6 @@ def create_app():
                         step_resp = handle_log_hours_step(odoo_service, employee_data, 'confirmation', context, 'log_hours_confirm', get_odoo_session_data(), metrics_service)
                         # Clear session after confirmation
                         session.pop('log_hours_flow', None)
-                    elif message == 'log_hours_cancel':
-                        session.pop('log_hours_flow', None)
-                        step_resp = {
-                            'message': 'Log hours cancelled.',
-                            'success': True
-                        }
                     else:
                         # Check if this is a direct input for the current step (chat input)
                         # Safeguard: if message looks like hours (contains hour-related words),
@@ -1849,7 +1869,9 @@ def create_app():
 
             # Overtime flow: handle before document intents
             try:
+                debug_log(f"Checking overtime flow for message: {message[:50]}...", "bot_logic")
                 ot_resp = overtime_service.handle_flow(message, thread_id, employee_data or {}, get_odoo_session_data())
+                debug_log(f"Overtime flow response: {ot_resp is not None}", "bot_logic")
                 if ot_resp:
                     resp_thread = ot_resp.get('thread_id') or thread_id
                     assistant_text = ot_resp.get('message', '')
@@ -1861,16 +1883,7 @@ def create_app():
                             employee_data,
                             {'source': 'overtime'}
                         )
-                    # Log overtime metric
-                    _log_usage_metric(
-                        'overtime',
-                        resp_thread,
-                        {
-                            'user_message': message[:200] if message else '',
-                            'status': ot_resp.get('status', 'active')
-                        },
-                        employee_data
-                    )
+                    # Note: Metrics are logged by overtime_service._log_metric() when request is successfully created
                     return jsonify({
                         'response': ot_resp.get('message', ''),
                         'status': 'success',
@@ -1879,7 +1892,11 @@ def create_app():
                         'widgets': ot_resp.get('widgets'),
                         'buttons': ot_resp.get('buttons')
                     })
-            except Exception:
+            except Exception as e:
+                debug_log(f"Error in overtime flow: {str(e)}", "bot_logic")
+                import traceback
+                debug_log(f"Overtime flow traceback: {traceback.format_exc()}", "bot_logic")
+                # Don't pass silently - let it continue to other flows or show error
                 pass
 
             # Quick entry: generic "generate letters" should open the document picker
@@ -2652,16 +2669,7 @@ def create_app():
                                 employee_data,
                                 {'source': 'reimbursement'}
                             )
-                        # Log reimbursement metric
-                        _log_usage_metric(
-                            'reimbursement',
-                            resp_thread,
-                            {
-                                'user_message': message[:200] if message else '',
-                                'status': reimb_resp.get('status', 'active')
-                            },
-                            employee_data
-                        )
+                        # Note: Metrics are logged by reimbursement_service._log_metric() when expense is created
                         return jsonify({
                             'response': reimb_resp.get('message', ''),
                             'status': 'success',
