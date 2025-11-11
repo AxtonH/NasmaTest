@@ -44,6 +44,7 @@ class OdooService:
         try:
             # Odoo authentication endpoint
             auth_url = f"{self.odoo_url}/web/session/authenticate"
+            print(f"DEBUG ODOO AUTH: Attempting authentication for {username} against {auth_url} (DB: {self.odoo_db})")
 
             # Prepare authentication data
             auth_data = {
@@ -66,11 +67,27 @@ class OdooService:
 
             if response.status_code == 200:
                 result = response.json()
+                
+                # Check for Odoo error response
+                if 'error' in result:
+                    error_data = result.get('error', {})
+                    error_msg = error_data.get('message', 'Unknown error')
+                    error_data_details = error_data.get('data', {})
+                    print(f"DEBUG ODOO AUTH ERROR: {error_msg} - Details: {error_data_details}")
+                    return False, f"Odoo error: {error_msg}", None
 
                 if 'result' in result and result['result']:
                     # Authentication successful - return session data without storing
+                    session_id = response.cookies.get('session_id')
+                    if not session_id:
+                        print(f"DEBUG ODOO AUTH WARNING: No session_id in cookies. Response cookies: {response.cookies}")
+                        # Try to get from Set-Cookie header
+                        set_cookie = response.headers.get('Set-Cookie', '')
+                        if 'session_id=' in set_cookie:
+                            session_id = set_cookie.split('session_id=')[1].split(';')[0]
+                    
                     session_data = {
-                        'session_id': response.cookies.get('session_id'),
+                        'session_id': session_id,
                         'user_id': result['result'].get('uid'),
                         'username': username,
                         'password': password,  # For re-authentication
@@ -86,9 +103,11 @@ class OdooService:
 
                     return True, "Authentication successful", session_data
                 else:
-                    # Authentication failed
+                    # Authentication failed - log the actual response for debugging
+                    print(f"DEBUG ODOO AUTH FAILED: Odoo returned 200 but result is empty. Full response: {result}")
                     return False, "Invalid username or password", None
             else:
+                print(f"DEBUG ODOO AUTH HTTP ERROR: Status {response.status_code}, Response: {response.text[:500]}")
                 return False, f"Connection error: {response.status_code}", None
 
         except requests.exceptions.Timeout:
