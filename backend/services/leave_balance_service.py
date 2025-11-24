@@ -150,9 +150,9 @@ class LeaveBalanceService:
             return holiday_status_id.get('id')
         return None
 
-    def get_total_allocated_leave(self, employee_id: int, current_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
+    def get_total_allocated_leave(self, employee_id: int, start_year: int, end_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
-        Get total allocated leave for the current year from hr.leave.allocation.
+        Get total allocated leave for the specified period (start_year to end_year) from hr.leave.allocation.
         
         Returns:
             Tuple of (allocated_dict, error_message)
@@ -185,8 +185,8 @@ class LeaveBalanceService:
                 return {}, error_msg
 
             allocated = {}
-            current_year_start = date(current_year, 1, 1)
-            current_year_end = date(current_year, 12, 31)
+            period_start = date(start_year, 1, 1)
+            period_end = date(end_year, 12, 31)
 
             for allocation in allocations:
                 try:
@@ -206,11 +206,11 @@ class LeaveBalanceService:
                         try:
                             if date_from_str:
                                 date_from = datetime.strptime(date_from_str.split(' ')[0], '%Y-%m-%d').date()
-                                if date_from > current_year_end:
+                                if date_from > period_end:
                                     valid_for_year = False
                             if date_to_str:
                                 date_to = datetime.strptime(date_to_str.split(' ')[0], '%Y-%m-%d').date()
-                                if date_to < current_year_start:
+                                if date_to < period_start:
                                     valid_for_year = False
                         except Exception:
                             pass  # If date parsing fails, assume valid
@@ -246,23 +246,19 @@ class LeaveBalanceService:
             debug_log(error_msg, "odoo_data")
             return {}, error_msg
 
-    def _count_days_in_year(self, start_date: date, end_date: date, target_year: int) -> float:
+    def _count_days_in_period(self, start_date: date, end_date: date, period_start: date, period_end: date) -> float:
         """
-        Count how many days of a leave fall within the target year.
-        Handles leaves that span across years.
+        Count how many days of a leave fall within the target period.
+        Handles leaves that span across periods.
         """
         try:
-            # Clamp dates to target year boundaries
-            year_start = date(target_year, 1, 1)
-            year_end = date(target_year, 12, 31)
-
-            # If leave is completely outside the year, return 0
-            if end_date < year_start or start_date > year_end:
+            # If leave is completely outside the period, return 0
+            if end_date < period_start or start_date > period_end:
                 return 0.0
 
             # Calculate overlap
-            effective_start = max(start_date, year_start)
-            effective_end = min(end_date, year_end)
+            effective_start = max(start_date, period_start)
+            effective_end = min(end_date, period_end)
 
             # Calculate days (inclusive)
             days = (effective_end - effective_start).days + 1
@@ -271,11 +267,11 @@ class LeaveBalanceService:
         except Exception:
             return 0.0
 
-    def get_taken_leave(self, employee_id: int, current_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
+    def get_taken_leave(self, employee_id: int, start_year: int, end_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
-        Get total taken leave for the current year from hr.leave.
+        Get total taken leave for the specified period (start_year to end_year) from hr.leave.
         Only includes leaves with state 'validate' (Approved) or 'validate1' (Second Approval).
-        Handles leaves spanning multiple years.
+        Handles leaves spanning multiple periods.
         
         Returns:
             Tuple of (taken_dict, error_message)
@@ -284,15 +280,15 @@ class LeaveBalanceService:
             - error_message: None if successful, error string if there was a problem fetching data
         """
         try:
-            # Domain: filter by employee, approved states, and dates within current year
-            current_year_start = date(current_year, 1, 1)
-            current_year_end = date(current_year, 12, 31)
+            # Domain: filter by employee, approved states, and dates within period
+            period_start = date(start_year, 1, 1)
+            period_end = date(end_year, 12, 31)
 
             domain = [
                 ('employee_id', '=', employee_id),
                 ('state', 'in', ['validate', 'validate1']),  # Approved or Second Approval
-                ('date_from', '<=', current_year_end.strftime('%Y-%m-%d')),
-                ('date_to', '>=', current_year_start.strftime('%Y-%m-%d'))
+                ('date_from', '<=', period_end.strftime('%Y-%m-%d')),
+                ('date_to', '>=', period_start.strftime('%Y-%m-%d'))
             ]
 
             params = {
@@ -342,26 +338,26 @@ class LeaveBalanceService:
                             date_from = datetime.strptime(date_from_str.split(' ')[0], '%Y-%m-%d').date()
                             date_to = datetime.strptime(date_to_str.split(' ')[0], '%Y-%m-%d').date()
                             
-                            # Check if leave spans multiple years
-                            if date_from.year == date_to.year == current_year:
-                                # Leave is entirely within current year - use number_of_days directly
+                            # Check if leave spans multiple years/periods
+                            if date_from >= period_start and date_to <= period_end:
+                                # Leave is entirely within period - use number_of_days directly
                                 days = total_days
-                                debug_log(f"Leave entirely in year {current_year}: using number_of_days={total_days}", "odoo_data")
-                            elif date_from.year != current_year and date_to.year != current_year:
-                                # Leave is entirely outside current year - skip
+                                debug_log(f"Leave entirely in period {start_year}-{end_year}: using number_of_days={total_days}", "odoo_data")
+                            elif date_from > period_end or date_to < period_start:
+                                # Leave is entirely outside period - skip (should be caught by domain but safety check)
                                 days = 0.0
                             else:
-                                # Leave spans across years - apportion number_of_days proportionally
+                                # Leave spans across period boundaries - apportion number_of_days proportionally
                                 # Calculate total calendar days in the leave period
                                 total_calendar_days = (date_to - date_from).days + 1
                                 if total_calendar_days <= 0:
                                     days = 0.0
                                 else:
-                                    # Calculate calendar days within current year
-                                    calendar_days_in_year = self._count_days_in_year(date_from, date_to, current_year)
+                                    # Calculate calendar days within period
+                                    calendar_days_in_period = self._count_days_in_period(date_from, date_to, period_start, period_end)
                                     # Apportion number_of_days proportionally
-                                    days = (total_days * calendar_days_in_year) / total_calendar_days
-                                    debug_log(f"Leave spans years: total_days={total_days}, calendar_days_in_year={calendar_days_in_year}, total_calendar_days={total_calendar_days}, apportioned={days}", "odoo_data")
+                                    days = (total_days * calendar_days_in_period) / total_calendar_days
+                                    debug_log(f"Leave spans period: total_days={total_days}, calendar_days_in_period={calendar_days_in_period}, total_calendar_days={total_calendar_days}, apportioned={days}", "odoo_data")
                         except Exception as e:
                             # Fallback to number_of_days if date parsing fails
                             debug_log(f"Date parsing error, using number_of_days directly: {str(e)}", "odoo_data")
@@ -404,10 +400,12 @@ class LeaveBalanceService:
         """
         try:
             current_year = datetime.now().year
+            start_year = current_year - 1
+            end_year = current_year
 
-            # Get allocations and taken leave
-            allocated, alloc_error = self.get_total_allocated_leave(employee_id, current_year, odoo_session_data)
-            taken, taken_error = self.get_taken_leave(employee_id, current_year, odoo_session_data)
+            # Get allocations and taken leave for the 2-year period
+            allocated, alloc_error = self.get_total_allocated_leave(employee_id, start_year, end_year, odoo_session_data)
+            taken, taken_error = self.get_taken_leave(employee_id, start_year, end_year, odoo_session_data)
 
             # Check if we got errors
             if alloc_error:
