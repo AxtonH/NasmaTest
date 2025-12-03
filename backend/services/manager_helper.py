@@ -392,7 +392,7 @@ def build_main_overview_table_widget(odoo_service, overview: List[Dict], user_tz
 def build_overtime_table_widget(odoo_service, team: List[Dict], days_ahead: int = 60) -> Tuple[bool, Any]:
     """Build an overtime table widget (using approval.request) for direct reports.
 
-    Columns: Member, Start, End, Duration (Hours), Type, Status
+    Columns: Member, Start, End, Duration (Hours), Project, Status
     We approximate duration in hours from date_start/date_end when both exist.
     Uses request_status filter and create_date for display; compatible with instances
     that don't have custom date fields on approval.request.
@@ -434,7 +434,7 @@ def build_overtime_table_widget(odoo_service, team: List[Dict], days_ahead: int 
             read_params = {
                 'args': [request_ids],
                 'kwargs': {
-                    'fields': ['id', 'name', 'request_owner_id', 'category_id', 'request_status', 'create_date', 'x_studio_hours', 'date_start', 'date_end']
+                    'fields': ['id', 'name', 'request_owner_id', 'category_id', 'request_status', 'create_date', 'x_studio_hours', 'date_start', 'date_end', 'x_studio_project']
                 }
             }
             ok, rows = _make_odoo_request(odoo_service, 'approval.request', 'read', read_params)
@@ -449,8 +449,8 @@ def build_overtime_table_widget(odoo_service, team: List[Dict], days_ahead: int 
         columns = [
             { 'key': 'member', 'label': 'Member' },
             { 'key': 'dates', 'label': 'Dates' },
-            { 'key': 'duration', 'label': 'Duration (Hours)' },
-            { 'key': 'type', 'label': 'Type' },
+            { 'key': 'duration', 'label': 'Duration<br/>(Hours)' },
+            { 'key': 'project', 'label': 'Project' },
             { 'key': 'status', 'label': 'Status' },
             { 'key': 'approval', 'label': 'Approval' },
         ]
@@ -491,9 +491,19 @@ def build_overtime_table_widget(odoo_service, team: List[Dict], days_ahead: int 
             except Exception:
                 pass
 
-            # Type and status mapping
-            # Force type label to 'Overtime'
-            typ = 'Overtime'
+            # Project from x_studio_project field (Many2one format: [id, 'name'])
+            project_name = '—'
+            try:
+                project_val = r.get('x_studio_project')
+                if project_val:
+                    if isinstance(project_val, (list, tuple)) and len(project_val) > 1:
+                        project_name = str(project_val[1])
+                    elif isinstance(project_val, (list, tuple)) and len(project_val) == 1:
+                        project_name = str(project_val[0])
+                    else:
+                        project_name = str(project_val)
+            except Exception:
+                pass
 
             status_raw = r.get('request_status') or r.get('state') or ''
             status_map = {
@@ -519,7 +529,7 @@ def build_overtime_table_widget(odoo_service, team: List[Dict], days_ahead: int 
                 'member': member_name,
                 'dates': dates,
                 'duration': dur,
-                'type': typ,
+                'project': project_name,
                 'status': state_txt,
                 'approval': approval_html,
             })
@@ -539,7 +549,7 @@ def build_team_overview_table_widget(overview: List[Dict]) -> Dict[str, Any]:
     columns = [
         { 'key': 'member', 'label': 'Member' },
         { 'key': 'dates', 'label': 'Dates' },
-        { 'key': 'duration', 'label': 'Duration (Hours)' },
+        { 'key': 'duration', 'label': 'Duration<br/>(Hours)' },
         { 'key': 'type', 'label': 'Type' },
         { 'key': 'status', 'label': 'Status' },
         { 'key': 'approval', 'label': 'Approval' },

@@ -2643,7 +2643,9 @@
                         const head = cols.map(c => {
                             const isDates = c.key === 'dates';
                             const alignClass = isDates ? 'text-center' : 'text-left';
-                            return `<th class="px-3 py-2 ${alignClass} text-sm font-semibold text-gray-700">${escapeHtml(c.label || '')}</th>`;
+                            // Allow HTML in labels (trusted backend data) for multi-line headers
+                            const labelHtml = String(c.label || '').replace(/<br\/>/g, '<br>');
+                            return `<th class="px-3 py-2 ${alignClass} text-sm font-semibold text-gray-700">${labelHtml}</th>`;
                         }).join('');
                         const body = rows.map(r => `
                             <tr class="border-t border-gray-200/70">
@@ -3100,7 +3102,9 @@
                 const header = cols.map(c => {
                     const isDates = c.key === 'dates';
                     const alignClass = isDates ? 'text-center' : 'text-left';
-                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${(c.label || '')}</th>`;
+                    // Allow HTML in labels (trusted backend data) for multi-line headers
+                    const labelHtml = String(c.label || '').replace(/<br\/>/g, '<br>');
+                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${labelHtml}</th>`;
                 }).join('');
                 const body = rows.map(r => `<tr class=\"border-t\">${cols.map(c => {
                     const isDates = c.key === 'dates';
@@ -3255,7 +3259,9 @@
                 const header = cols.map(c => {
                     const isDates = c.key === 'dates';
                     const alignClass = isDates ? 'text-center' : 'text-left';
-                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${(c.label || '')}</th>`;
+                    // Allow HTML in labels (trusted backend data) for multi-line headers
+                    const labelHtml = String(c.label || '').replace(/<br\/>/g, '<br>');
+                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${labelHtml}</th>`;
                 }).join('');
                 const body = rows.map(r => `<tr class=\"border-t\">${cols.map(c => {
                     const isDates = c.key === 'dates';
