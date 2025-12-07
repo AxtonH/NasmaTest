@@ -174,11 +174,18 @@ class OvertimeService:
             if 'error' in result:
                 error_data = result.get('error', {})
                 error_msg = error_data.get('message', 'Unknown error') if isinstance(error_data, dict) else str(error_data)
+                error_code = error_data.get('code', 'Unknown') if isinstance(error_data, dict) else 'Unknown'
+                error_name = error_data.get('name', 'Unknown') if isinstance(error_data, dict) else 'Unknown'
+                debug_log(f"Odoo error in {model}.{method}: code={error_code}, name={error_name}, message={error_msg}", "bot_logic")
+                debug_log(f"Full error data: {error_data}", "bot_logic")
                 return False, error_msg, renewed_session
 
             return True, result.get('result'), renewed_session
 
         except Exception as e:
+            debug_log(f"Exception in _make_odoo_request_stateless: {str(e)}", "bot_logic")
+            import traceback
+            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
             return False, str(e), None
 
     def _make_odoo_request(self, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
@@ -258,6 +265,24 @@ class OvertimeService:
             return ok, res
         return self._make_odoo_request('approval.category', 'search_read', params)
 
+    def _generate_hour_options(self) -> List[Dict[str, str]]:
+        """Generate hour options with 15-minute intervals covering 24 hours (0:00 to 23:45)."""
+        options = []
+        def _push_hour(val: float):
+            key = str(int(val)) if abs(val - int(val)) < 1e-9 else f"{val:.2f}".rstrip('0').rstrip('.')
+            h = int(val)
+            m = int(round((val - h) * 60))  # Calculate minutes from decimal part
+            label = f"{h:02d}:{m:02d}"
+            options.append({'value': key, 'label': label})
+        
+        # Generate all 15-minute intervals from 0:00 to 23:45
+        v = 0.0
+        while v <= 23.75 + 1e-9:  # 23.75 = 23:45
+            _push_hour(v)
+            v += 0.25  # 15 minutes = 0.25 hours
+        
+        return options
+
     def _list_projects(self, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
         """Fetch a large list of projects using robust fallbacks.
 
@@ -280,7 +305,7 @@ class OvertimeService:
             return self._make_odoo_request(model, method, req_params)
         
         # 1) search_read active
-        sr_args = {'args': [[]], 'kwargs': {'fields': ['id', 'name', 'display_name', 'active'], 'domain': [["active", "=", True]], 'order': 'name asc', 'limit': 1000}}
+        sr_args = {'args': [[["active", "=", True]]], 'kwargs': {'fields': ['id', 'name', 'display_name', 'active'], 'order': 'name asc', 'limit': 1000}}
         ok, result = _make_req('project.project', 'search_read', sr_args)
         if ok and isinstance(result, list) and len(result) > 0:
             return True, result
@@ -315,11 +340,16 @@ class OvertimeService:
             'name': 'Overtime request via Nasma chatbot',
             'date_start': date_start,
             'date_end': date_end,
-            'x_studio_project': project_id,
         }
+        
+        # Only include project if it's a valid integer (not False or None)
+        if project_id and isinstance(project_id, int):
+            payload['x_studio_project'] = project_id
         
         # Use stateless if session data provided, otherwise fallback to regular
         use_stateless = odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id')
+        
+        debug_log(f"Creating approval request with payload: {payload}", "bot_logic")
         
         if use_stateless:
             ok_create, rid, renewed_create = self._make_odoo_request_stateless(
@@ -330,22 +360,35 @@ class OvertimeService:
                 password=odoo_session_data.get('password')
             )
             if not ok_create:
+                debug_log(f"Failed to create approval request: {rid}", "bot_logic")
                 return False, rid, renewed_create
+            
+            debug_log(f"Approval request created successfully with ID: {rid}", "bot_logic")
             
             # Immediately submit the request for approval
             try:
-                ok_confirm, _, renewed_confirm = self._make_odoo_request_stateless(
+                ok_confirm, confirm_result, renewed_confirm = self._make_odoo_request_stateless(
                     'approval.request', 'action_confirm', {'args': [[rid]], 'kwargs': {}},
                     session_id=odoo_session_data['session_id'],
                     user_id=odoo_session_data['user_id'],
                     username=odoo_session_data.get('username'),
                     password=odoo_session_data.get('password')
                 )
+                if not ok_confirm:
+                    debug_log(f"Failed to confirm approval request: {confirm_result}", "bot_logic")
+                    # Request was created but confirmation failed - return error
+                    error_msg = str(confirm_result) if confirm_result else "Failed to submit request for approval"
+                    return False, error_msg, renewed_create
                 # Return latest renewed session
                 latest_renewed = renewed_confirm or renewed_create
+                debug_log(f"Approval request confirmed successfully", "bot_logic")
                 return True, rid, latest_renewed
-            except Exception:
-                return True, rid, renewed_create
+            except Exception as e:
+                debug_log(f"Exception during confirmation: {str(e)}", "bot_logic")
+                import traceback
+                debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                # Request was created but confirmation had exception - return error
+                return False, f"Failed to submit request: {str(e)}", renewed_create
         else:
             # Legacy fallback
             ok_create, rid = self._make_odoo_request('approval.request', 'create', {'args': [payload], 'kwargs': {}})
@@ -403,6 +446,10 @@ class OvertimeService:
                         'thread_id': thread_id,
                         'session_handled': True
                     }
+                # Route form submissions to form handler
+                if message.startswith('overtime_form='):
+                    return self.handle_overtime_form_step(message, thread_id, active, employee_data, odoo_session_data)
+                # Otherwise continue with confirmation step
                 return self._continue_overtime(message, thread_id, active, employee_data, odoo_session_data)
 
             # Detect new intent first
@@ -446,6 +493,14 @@ class OvertimeService:
                 }
             category = cat[0] if isinstance(cat, list) else cat
             category_id = category.get('id')
+            
+            # Validate category_id exists
+            if not category_id:
+                debug_log(f"ERROR: category_id is None after lookup! Category object: {category}", "bot_logic")
+                return {
+                    'message': f"Sorry, I couldn't find a valid overtime category for {company_name}. Please contact HR.",
+                    'session_handled': True
+                }
 
             try:
                 okp, projects = self._list_projects(odoo_session_data)
@@ -466,21 +521,41 @@ class OvertimeService:
                     for p in projects if p.get('id')
                 ]
 
+            # Store category_id and other metadata at top level AND in data
+            # Note: start_session stores the data dict in session['data'], so we need to store
+            # category_id at top level separately for easy access
             session_data = {
                 'category_id': category_id,
                 'category_name': category.get('name'),
                 'projects': project_options,
                 'user_tz': (employee_data or {}).get('tz') or 'Asia/Amman'
             }
-            self.session_manager.start_session(thread_id, 'overtime', session_data)
+            # Start session with data dict
+            session_obj = self.session_manager.start_session(thread_id, 'overtime', session_data)
+            # Also store category_id at top level for easy access
+            self.session_manager.update_session(thread_id, {
+                'category_id': category_id,
+                'category_name': category.get('name')
+            })
+
+            # Generate hour options for dropdown with 15-minute intervals covering 24 hours
+            hour_options = self._generate_hour_options()
 
             return {
-                'message': 'Please select the overtime date.',
+                'message': '**Request Overtime**\n\nPlease fill in the details below:',
                 'thread_id': thread_id,
                 'session_handled': True,
                 'widgets': {
-                    'single_date_picker': True,
-                    'context_key': 'overtime_date_range'
+                    'overtime_flow': {
+                        'step': 'overtime_form',
+                        'category_id': category_id,
+                        'category_name': category.get('name'),
+                        'user_tz': session_data['user_tz']
+                    },
+                    'overtime_form': True,
+                    'hour_options': hour_options,
+                    'project_options': project_options,
+                    'context_key': 'overtime_form'
                 }
             }
         except Exception as e:
@@ -492,13 +567,23 @@ class OvertimeService:
                 'session_handled': True
             }
 
-    def _continue_overtime(self, message: str, thread_id: str, session: Dict, employee_data: Dict, odoo_session_data: Dict = None) -> Optional[Dict[str, Any]]:
+    def handle_overtime_form_step(self, message: str, thread_id: str, session: Dict, employee_data: Dict, odoo_session_data: Dict = None) -> Optional[Dict[str, Any]]:
+        """Handle single-step overtime form submission.
+        
+        Args:
+            message: Form data in format: overtime_form=date|hour_from|hour_to|project_id
+            thread_id: Thread ID for session management
+            session: Current session data
+            employee_data: Employee data dict
+            odoo_session_data: Optional Odoo session data for stateless requests
+        
+        Returns:
+            Response dict with confirmation or error
+        """
         try:
-            step = session.get('step', 1)
-            data = session.get('data', {})
             msg = (message or '').strip()
-
-            # Early cancellation check before any parsing/validation
+            
+            # Early cancellation check
             def _is_cancel_intent(txt: str) -> bool:
                 try:
                     import difflib
@@ -512,6 +597,205 @@ class OvertimeService:
                     return False
                 except Exception:
                     return txt in {'cancel','stop','exit','quit','abort','end','undo','nevermind','no thanks','no','n'}
+            
+            if _is_cancel_intent(msg):
+                try:
+                    self.session_manager.cancel_session(thread_id, 'User cancelled overtime flow')
+                finally:
+                    self.session_manager.clear_session(thread_id)
+                return {
+                    'message': 'request cancelled, can i help you with anything else',
+                    'thread_id': thread_id,
+                    'session_handled': True
+                }
+            
+            # Parse form data: overtime_form=date|hour_from|hour_to|project_id
+            if not msg.startswith('overtime_form='):
+                # Invalid format, show form again
+                hour_options = self._generate_hour_options()
+                project_options = session.get('projects', [])
+                return {
+                    'message': 'Please fill in all required fields.',
+                    'thread_id': thread_id,
+                    'session_handled': True,
+                    'widgets': {
+                        'overtime_flow': session.get('overtime_flow', {}),
+                        'overtime_form': True,
+                        'hour_options': hour_options,
+                        'project_options': project_options,
+                        'context_key': 'overtime_form'
+                    }
+                }
+            
+            # Extract form fields
+            form_data_str = msg.replace('overtime_form=', '')
+            parts = form_data_str.split('|')
+            
+            if len(parts) < 4:
+                # Regenerate hour options and get project options
+                hour_options = self._generate_hour_options()
+                project_options = session.get('projects', [])
+                return {
+                    'message': 'Please fill in all required fields: date, start time, end time, and project.',
+                    'thread_id': thread_id,
+                    'session_handled': True,
+                    'widgets': {
+                        'overtime_flow': session.get('overtime_flow', {}),
+                        'overtime_form': True,
+                        'hour_options': hour_options,
+                        'project_options': project_options,
+                        'context_key': 'overtime_form'
+                    }
+                }
+            
+            date_str = parts[0].strip()
+            hour_from_str = parts[1].strip()
+            hour_to_str = parts[2].strip()
+            project_id_str = parts[3].strip()
+            
+            # Validate date
+            date_dmy = self._parse_date_input(date_str)
+            if not date_dmy:
+                # Regenerate hour options and get project options
+                hour_options = []
+                def _push_hour(val: float):
+                    key = str(int(val)) if abs(val - int(val)) < 1e-9 else str(val)
+                    h = int(val)
+                    m = 30 if abs(val - h - 0.5) < 1e-9 else 0
+                    label = f"{h:02d}:{m:02d}"
+                    hour_options.append({'value': key, 'label': label})
+                
+                v = 9.0
+                while v <= 23.5 + 1e-9:
+                    _push_hour(v)
+                    v += 0.5
+                v = 0.0
+                while v <= 1.0 + 1e-9:
+                    _push_hour(v)
+                    v += 0.5
+                
+                project_options = session.get('projects', [])
+                return {
+                    'message': 'Please enter a valid date (DD/MM/YYYY format).',
+                    'thread_id': thread_id,
+                    'session_handled': True,
+                    'widgets': {
+                        'overtime_flow': session.get('overtime_flow', {}),
+                        'overtime_form': True,
+                        'hour_options': hour_options,
+                        'project_options': project_options,
+                        'context_key': 'overtime_form'
+                    }
+                }
+            
+            # Parse hour range (supports both typed input like "9 to 9:30" and dropdown values)
+            debug_log(f"Parsing hour range: from='{hour_from_str}', to='{hour_to_str}'", "bot_logic")
+            hour_from, hour_to = self._parse_hour_range_from_form(hour_from_str, hour_to_str)
+            debug_log(f"Parsed hour range: from='{hour_from}', to='{hour_to}'", "bot_logic")
+            if not hour_from or not hour_to:
+                # Regenerate hour options and get project options
+                hour_options = self._generate_hour_options()
+                project_options = session.get('projects', [])
+                return {
+                    'message': 'Please enter a valid time range (e.g., "9:15" to "9:30" or select from dropdown). End time must be after start time.',
+                    'thread_id': thread_id,
+                    'session_handled': True,
+                    'widgets': {
+                        'overtime_flow': session.get('overtime_flow', {}),
+                        'overtime_form': True,
+                        'hour_options': hour_options,
+                        'project_options': project_options,
+                        'context_key': 'overtime_form'
+                    }
+                }
+            
+            # Validate project
+            try:
+                project_id = int(project_id_str) if project_id_str.isdigit() else None
+            except Exception:
+                project_id = None
+            
+            if not project_id:
+                # Regenerate hour options and get project options
+                hour_options = self._generate_hour_options()
+                project_options = session.get('projects', [])
+                return {
+                    'message': 'Please select a project from the dropdown.',
+                    'thread_id': thread_id,
+                    'session_handled': True,
+                    'widgets': {
+                        'overtime_flow': session.get('overtime_flow', {}),
+                        'overtime_form': True,
+                        'hour_options': hour_options,
+                        'project_options': project_options,
+                        'context_key': 'overtime_form'
+                    }
+                }
+            
+            # Store form data in session
+            # Ensure hour values are strings (they should already be, but ensure for safety)
+            hour_from_str = str(hour_from) if hour_from else '9'
+            hour_to_str = str(hour_to) if hour_to else '17'
+            
+            debug_log(f"Storing form data: hour_from='{hour_from_str}', hour_to='{hour_to_str}'", "bot_logic")
+            
+            # Get category_id from session - check both top level and data dict
+            # (start_session stores initial data in session['data'], but we also store it at top level)
+            category_id = session.get('category_id') or session.get('data', {}).get('category_id')
+            if not category_id:
+                debug_log(f"WARNING: category_id missing from session during form submission! Session keys: {list(session.keys())}, Data keys: {list(session.get('data', {}).keys())}", "bot_logic")
+            
+            form_data = {
+                'date_dmy': date_dmy,
+                'hour_from': hour_from_str,
+                'hour_to': hour_to_str,
+                'project_id': project_id,
+                'category_id': category_id,  # Store the category_id explicitly
+                'category_name': session.get('category_name'),
+                'user_tz': session.get('user_tz') or (employee_data or {}).get('tz') or 'Asia/Amman',
+                'projects': session.get('projects', [])
+            }
+            # Update session: preserve category_id at session level AND store in data
+            update_dict = {'data': form_data, 'step': 'confirmation'}
+            if category_id:
+                update_dict['category_id'] = category_id  # Preserve at session level
+            self.session_manager.update_session(thread_id, update_dict)
+            
+            # Show confirmation
+            return self._confirmation_response(thread_id, form_data)
+            
+        except Exception as e:
+            debug_log(f"Error in handle_overtime_form_step: {str(e)}", "bot_logic")
+            import traceback
+            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+            return {
+                'message': 'Sorry, something went wrong processing your overtime form. Please try again.',
+                'thread_id': thread_id,
+                'session_handled': True
+            }
+
+    def _continue_overtime(self, message: str, thread_id: str, session: Dict, employee_data: Dict, odoo_session_data: Dict = None) -> Optional[Dict[str, Any]]:
+        """Continue overtime flow - handles confirmation step."""
+        try:
+            step = session.get('step', 'confirmation')
+            data = session.get('data', {})
+            msg = (message or '').strip().lower()
+
+            # Early cancellation check
+            def _is_cancel_intent(txt: str) -> bool:
+                try:
+                    import difflib
+                    txt = (txt or '').strip().lower()
+                    hard = {'cancel','stop','exit','quit','abort','end','undo','nevermind','no thanks','no','n'}
+                    if txt in hard:
+                        return True
+                    for token in ['cancel','stop','exit','quit','abort','end','undo']:
+                        if difflib.SequenceMatcher(a=txt, b=token).ratio() >= 0.8:
+                            return True
+                    return False
+                except Exception:
+                    return txt in {'cancel','stop','exit','quit','abort','end','undo','nevermind','no thanks','no','n'}
+            
             if _is_cancel_intent(msg):
                 try:
                     self.session_manager.cancel_session(thread_id, 'User cancelled overtime flow')
@@ -523,157 +807,53 @@ class OvertimeService:
                     'session_handled': True
                 }
 
-            # Step 1: Expect date range reply
-            if step == 1:
-                value = None
-                if msg.lower().startswith('overtime_date_range='):
-                    value = msg.split('=', 1)[1].strip()
-                else:
-                    # Accept natural input like "24/09/2025 to 24/09/2025" or with '-'
-                    value = msg
-                if value:
-                    import re
-                    parts = [p.strip() for p in re.split(r"\s*(?:to|until|till|[-–—])\s*", value, flags=re.IGNORECASE) if p.strip()]
-                    def _norm(token: str) -> Optional[str]:
-                        from datetime import datetime
-                        token = token.replace('.', '/').replace('-', '/').strip()
-                        fmts = ['%d/%m/%Y', '%d/%m/%y', '%d/%m']
-                        for f in fmts:
-                            try:
-                                dt = datetime.strptime(token, f)
-                                year = dt.year if '%Y' in f or '%y' in f else date.today().year
-                                return datetime(year, dt.month, dt.day).strftime('%d/%m/%Y')
-                            except Exception:
-                                continue
-                        return None
-                    if len(parts) == 1:
-                        single = _norm(parts[0])
-                        if single:
-                            data['date_start_dmy'] = single
-                            data['date_end_dmy'] = single
-                            self.session_manager.update_session(thread_id, {'data': data, 'step': 2})
-                            # Ask for hour range next
-                            return self._hour_picker_response('Please choose your overtime hours (from/to).', thread_id)
-                    elif len(parts) == 2:
-                        s = _norm(parts[0])
-                        e = _norm(parts[1])
-                        if s and e:
-                            if s != e:
-                                return {
-                                    'message': 'Overtime must be submitted for a single day. Please pick one date.',
-                                    'thread_id': thread_id,
-                                    'session_handled': True,
-                                    'widgets': { 'single_date_picker': True, 'context_key': 'overtime_date_range' }
-                                }
-                            data['date_start_dmy'] = s
-                            data['date_end_dmy'] = e
-                            self.session_manager.update_session(thread_id, {'data': data, 'step': 2})
-                            # Ask for hour range next
-                            return self._hour_picker_response('Please choose your overtime hours (from/to).', thread_id)
-                # Re-ask with widget if not understood
-                return {
-                    'message': 'Please pick a single overtime date.',
-                    'thread_id': thread_id,
-                    'session_handled': True,
-                    'widgets': { 'single_date_picker': True, 'context_key': 'overtime_date_range' }
-                }
-
-            # Step 2: Capture hour range (hour_from/hour_to pairs)
-            if step == 2:
-                if 'hour_from=' in msg and 'hour_to=' in msg:
-                    def _get_param(k: str, s: str) -> str:
-                        try:
-                            parts = {p.split('=')[0]: p.split('=')[1] for p in s.split('&') if '=' in p}
-                            return parts.get(k, '')
-                        except Exception:
-                            return ''
-                    hf = _get_param('hour_from', msg)
-                    ht = _get_param('hour_to', msg)
-                    if hf and ht:
-                        data['hour_from'] = hf
-                        data['hour_to'] = ht
-                        self.session_manager.update_session(thread_id, {'data': data, 'step': 3})
-                        # Ask for project
-                        options = data.get('projects') or []
-                        if not options:
-                            okp2, projects2 = self._list_projects()
-                            if okp2 and isinstance(projects2, list):
-                                options = [{'label': p.get('name', f"Project {p.get('id')}") or f"Project {p.get('id')}", 'value': str(p.get('id'))} for p in projects2 if p.get('id')]
-                                data['projects'] = options
-                                self.session_manager.update_session(thread_id, {'data': data})
-                        return {
-                            'message': 'Select the related project.',
-                            'thread_id': thread_id,
-                            'session_handled': True,
-                            'widgets': {
-                                'select_dropdown': True,
-                                'options': options,
-                                'context_key': 'overtime_project_id',
-                                'placeholder': 'Select a project'
-                            }
-                        }
-                else:
-                    # Accept natural language hour ranges like "17:00 to 18:00" or "5pm - 7pm"
-                    frm, to = self._parse_hour_range_text(msg)
-                    if frm and to:
-                        data['hour_from'] = frm
-                        data['hour_to'] = to
-                        self.session_manager.update_session(thread_id, {'data': data, 'step': 3})
-                        options = data.get('projects') or []
-                        return {
-                            'message': 'Select the related project.',
-                            'thread_id': thread_id,
-                            'session_handled': True,
-                            'widgets': {
-                                'select_dropdown': True,
-                                'options': options,
-                                'context_key': 'overtime_project_id',
-                                'placeholder': 'Select a project'
-                            }
-                        }
-                # Re-open picker
-                return self._hour_picker_response('Please choose a valid hours range (end must be after start).', thread_id)
-
-            # Step 3: Capture project selection
-            if step == 3:
-                if msg.lower().startswith('overtime_project_id='):
-                    proj_id = msg.split('=', 1)[1].strip()
-                    data['project_id'] = int(proj_id) if proj_id.isdigit() else proj_id
-                    self.session_manager.update_session(thread_id, {'data': data, 'step': 4})
-                    # Show confirmation
-                    return self._confirmation_response(thread_id, data)
-                # Re-ask with dropdown
-                options = data.get('projects') or []
-                if not options:
-                    okp3, projects3 = self._list_projects()
-                    if okp3 and isinstance(projects3, list):
-                        options = [{'label': p.get('name', f"Project {p.get('id')}") or f"Project {p.get('id')}", 'value': str(p.get('id'))} for p in projects3 if p.get('id')]
-                        data['projects'] = options
-                        self.session_manager.update_session(thread_id, {'data': data})
-                return {
-                    'message': 'Please select a project from the list.',
-                    'thread_id': thread_id,
-                    'session_handled': True,
-                    'widgets': {
-                        'select_dropdown': True,
-                        'options': options,
-                        'context_key': 'overtime_project_id',
-                        'placeholder': 'Select a project'
-                    }
-                }
-
-            # Step 4: Confirm/cancel
-            if step == 4:
-                low = msg.lower()
-                if low in {'yes', 'y', 'confirm', 'submit'}:
+            # Confirmation step only
+            if step == 'confirmation':
+                if msg in {'yes', 'y', 'confirm', 'submit', 'overtime_confirm'}:
                     # Build datetimes
-                    start_iso = self._parse_dmy(data.get('date_start_dmy'))
-                    end_iso = self._parse_dmy(data.get('date_end_dmy'))
+                    hour_from_val = data.get('hour_from', '9')
+                    hour_to_val = data.get('hour_to', '17')
+                    debug_log(f"Submitting overtime: hour_from='{hour_from_val}', hour_to='{hour_to_val}'", "bot_logic")
+                    
+                    start_iso = self._parse_dmy(data.get('date_dmy'))
+                    end_iso = self._parse_dmy(data.get('date_dmy'))  # Same date for overtime
                     tzname = data.get('user_tz') or (employee_data or {}).get('tz') or 'Asia/Amman'
-                    start_dt = self._local_to_utc_datetime_str(start_iso, data.get('hour_from', '9'), tzname)
-                    end_dt = self._local_to_utc_datetime_str(end_iso, data.get('hour_to', '17'), tzname)
+                    start_dt = self._local_to_utc_datetime_str(start_iso, hour_from_val, tzname)
+                    end_dt = self._local_to_utc_datetime_str(end_iso, hour_to_val, tzname)
+                    debug_log(f"Converted to UTC: start_dt='{start_dt}', end_dt='{end_dt}'", "bot_logic")
+                    
+                    # Validate that end_dt is after start_dt
+                    try:
+                        start_dt_obj = datetime.strptime(start_dt, '%Y-%m-%d %H:%M:%S')
+                        end_dt_obj = datetime.strptime(end_dt, '%Y-%m-%d %H:%M:%S')
+                        if end_dt_obj <= start_dt_obj:
+                            return {
+                                'message': '❌ Invalid time range: End time must be after start time.',
+                                'thread_id': thread_id,
+                                'session_handled': True
+                            }
+                    except Exception as e:
+                        debug_log(f"Error validating datetime range: {str(e)}", "bot_logic")
+                    
+                    # Get category_id from data first (it's stored in form_data), then fallback to session level
+                    category_id_from_data = data.get('category_id') if data else None
+                    category_id_from_session = session.get('category_id')
+                    category_id = category_id_from_data or category_id_from_session
+                    
+                    debug_log(f"Category ID check: data.get('category_id')={category_id_from_data}, session.get('category_id')={category_id_from_session}, final={category_id}", "bot_logic")
+                    
+                    if not category_id:
+                        debug_log(f"Category ID missing! Session keys: {list(session.keys())}, Data keys: {list(data.keys()) if data else 'No data'}, Data values: {data if data else 'No data'}", "bot_logic")
+                        return {
+                            'message': '❌ Error: Category ID is missing. Please try starting the overtime request again.',
+                            'thread_id': thread_id,
+                            'session_handled': True
+                        }
+                    
+                    debug_log(f"Using category_id: {category_id} (type: {type(category_id)}, from: {'data' if category_id_from_data else 'session'})", "bot_logic")
+                    
                     ok, result, renewed_session = self._create_approval_request(
-                        category_id=data.get('category_id'),
+                        category_id=int(category_id) if category_id else None,
                         date_start=start_dt,
                         date_end=end_dt,
                         project_id=int(data.get('project_id')) if data.get('project_id') else False,
@@ -698,8 +878,8 @@ class OvertimeService:
                             'category_id': data.get('category_id'),
                             'project_id': data.get('project_id'),
                             'date_local': {
-                                'start': data.get('date_start_dmy'),
-                                'end': data.get('date_end_dmy'),
+                                'start': data.get('date_dmy'),
+                                'end': data.get('date_dmy'),
                                 'hour_from': data.get('hour_from'),
                                 'hour_to': data.get('hour_to'),
                                 'timezone': data.get('user_tz') or (employee_data or {}).get('tz'),
@@ -725,8 +905,14 @@ class OvertimeService:
                         self.session_manager.clear_session(thread_id)
                     except Exception:
                         pass
+                    
+                    # Format error message more clearly
+                    error_msg = str(result) if result else "Unknown error"
+                    if "Odoo Server Error" in error_msg or not error_msg:
+                        error_msg = "Odoo Server Error - Please check that the time range is valid and try again."
+                    
                     return {
-                        'message': f"❌ Failed to submit overtime request: {result}",
+                        'message': f"❌ Failed to submit overtime request: {error_msg}",
                         'thread_id': thread_id,
                         'session_handled': True
                     }
@@ -764,6 +950,12 @@ class OvertimeService:
 
         Odoo stores datetimes in UTC; to display the same local time in the UI,
         we must convert the provided local time to UTC before submission.
+        
+        hour_key can be:
+        - "9" -> 9:00
+        - "9.25" -> 9:15
+        - "9.5" -> 9:30
+        - "9.75" -> 9:45
         """
         # Build local datetime
         try:
@@ -780,7 +972,12 @@ class OvertimeService:
         except Exception:
             hfloat = 0.0
         h = int(hfloat)
-        minutes = 30 if abs(hfloat - h - 0.5) < 1e-9 else 0
+        # Calculate minutes from decimal hours (e.g., 9.25 -> 15 minutes, 9.5 -> 30 minutes)
+        minutes = int((hfloat - h) * 60)
+        # Round minutes to nearest 5-minute increment (0, 5, 10, 15, ..., 55) as per Odoo requirements
+        minutes = round(minutes / 5) * 5
+        # Ensure minutes are within valid range (0-55)
+        minutes = max(0, min(55, minutes))
         naive = datetime(y, m, d, h, minutes)
         # Attach timezone
         try:
@@ -821,6 +1018,16 @@ class OvertimeService:
         }
 
     def _parse_hour_value(self, token: str) -> float:
+        """Parse hour value from string, preserving minutes.
+        
+        Supports formats like:
+        - "9" -> 9.0
+        - "9:15" -> 9.25
+        - "9:30" -> 9.5
+        - "17:45" -> 17.75
+        - "9am" -> 9.0
+        - "5pm" -> 17.0
+        """
         try:
             import re
             s = token.strip().lower()
@@ -838,8 +1045,9 @@ class OvertimeService:
                 if h != 12:
                     h += 12
             h = max(0, min(23, h))
-            mins = 30 if 15 <= mins < 45 else 0
-            return h + (0.5 if mins == 30 else 0.0)
+            # Preserve actual minutes instead of rounding to 30 or 0
+            # Convert minutes to decimal hours
+            return h + (mins / 60.0)
         except Exception:
             return float('nan')
 
@@ -866,14 +1074,22 @@ class OvertimeService:
             return None, None
 
     def _format_hour_12(self, hour_key: str) -> str:
-        """Convert hour key (like '14' or '14.5') to 12-hour format (like '2:00 PM' or '2:30 PM')."""
+        """Convert hour key (like '14', '14.5', '9.25') to 12-hour format (like '2:00 PM', '2:30 PM', '9:15 AM').
+        
+        Supports decimal hours:
+        - "9" -> 9:00 AM
+        - "9.25" -> 9:15 AM (15 minutes)
+        - "9.5" -> 9:30 AM (30 minutes)
+        - "9.75" -> 9:45 AM (45 minutes)
+        """
         try:
             if not hour_key:
                 return "N/A"
 
             hour_float = float(hour_key)
             hours = int(hour_float)
-            minutes = 30 if abs(hour_float - hours - 0.5) < 1e-9 else 0
+            # Calculate minutes from decimal hours (e.g., 9.25 -> 15 minutes, 9.5 -> 30 minutes)
+            minutes = int((hour_float - hours) * 60)
 
             # Convert to 12-hour format
             if hours == 0:
@@ -918,11 +1134,87 @@ class OvertimeService:
         except Exception:
             return "N/A"
 
+    def _parse_date_input(self, date_str: str) -> Optional[str]:
+        """Parse date input from various formats to DD/MM/YYYY."""
+        if not date_str:
+            return None
+        try:
+            # Try parsing DD/MM/YYYY or DD/MM/YY
+            date_str = date_str.strip().replace('.', '/').replace('-', '/')
+            for fmt in ['%d/%m/%Y', '%d/%m/%y', '%d/%m']:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    year = dt.year if '%Y' in fmt or '%y' in fmt else date.today().year
+                    return datetime(year, dt.month, dt.day).strftime('%d/%m/%Y')
+                except Exception:
+                    continue
+            # Try YYYY-MM-DD format
+            try:
+                dt = datetime.strptime(date_str, '%Y-%m-%d')
+                return dt.strftime('%d/%m/%Y')
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return None
+
+    def _parse_hour_range_from_form(self, hour_from_str: str, hour_to_str: str) -> Tuple[Optional[str], Optional[str]]:
+        """Parse hour range from form inputs.
+        
+        Supports:
+        - Dropdown values: "9", "9.5", "17", "17.25" (decimal hours)
+        - Typed input: "9", "9:15", "9:30", "17:00", "5pm"
+        - Preserves actual minutes (e.g., "9:15" -> 9.25, "9:30" -> 9.5)
+        """
+        if not hour_from_str or not hour_to_str:
+            return None, None
+        
+        # First, try parsing as decimal numbers (dropdown values like "17.25")
+        # This must come BEFORE _parse_hour_value because _parse_hour_value converts "." to ":"
+        # which would incorrectly parse "17.25" as "17:25" (17 hours 25 minutes) instead of 17.25 hours (17:15)
+        try:
+            from_val = float(hour_from_str)
+            to_val = float(hour_to_str)
+            # Check if these look like decimal hours (not just whole numbers that could be time strings)
+            # If they're valid floats and to > from, use them directly
+            if to_val > from_val:
+                def _to_key(v: float) -> str:
+                    # If it's a whole number, return as integer string
+                    if abs(v - int(v)) < 1e-9:
+                        return str(int(v))
+                    # Otherwise return with up to 2 decimal places
+                    return f"{v:.2f}".rstrip('0').rstrip('.')
+                return _to_key(from_val), _to_key(to_val)
+        except (ValueError, TypeError):
+            pass
+        
+        # Fallback: Try parsing as typed time strings (handles "9:15" format)
+        from_parsed = self._parse_hour_value(hour_from_str)
+        to_parsed = self._parse_hour_value(hour_to_str)
+        
+        # If both parsed successfully as time strings, use those
+        if from_parsed == from_parsed and to_parsed == to_parsed:  # Check not NaN
+            if to_parsed > from_parsed:
+                # Convert to string preserving decimal precision
+                def _to_key(v: float) -> str:
+                    # If it's a whole number, return as integer string
+                    if abs(v - int(v)) < 1e-9:
+                        return str(int(v))
+                    # Otherwise return with up to 2 decimal places
+                    return f"{v:.2f}".rstrip('0').rstrip('.')
+                return _to_key(from_parsed), _to_key(to_parsed)
+        
+        return None, None
+
     def _confirmation_response(self, thread_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        start_iso = self._parse_dmy(data.get('date_start_dmy'))
-        end_iso = self._parse_dmy(data.get('date_end_dmy'))
+        """Generate confirmation message for overtime request."""
+        date_dmy = data.get('date_dmy', '')
         def fmt(d: str) -> str:
             try:
+                # If already in DD/MM/YYYY format, return as is
+                if '/' in d:
+                    return d
+                # Otherwise parse and format
                 return datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m/%Y')
             except Exception:
                 return d
@@ -933,19 +1225,29 @@ class OvertimeService:
 
         # Calculate total time requested
         total_time = self._calculate_time_duration(data.get('hour_from'), data.get('hour_to'))
+        
+        # Get project name
+        project_id = data.get('project_id')
+        project_name = f"Project {project_id}" if project_id else "N/A"
+        projects = data.get('projects', [])
+        if projects:
+            for p in projects:
+                if str(p.get('value')) == str(project_id):
+                    project_name = p.get('label', project_name)
+                    break
 
         msg = (
             "Here are the details for your overtime request:\n\n"
             f"📂 **Category:** {data.get('category_name', 'Overtime')}\n"
-            f"📅 **Period:** {fmt(start_iso)} → {fmt(end_iso)}\n"
+            f"📅 **Date:** {fmt(date_dmy)}\n"
             f"⏰ **Hours:** {hour_from_12} → {hour_to_12}\n"
             f"🕒 **Time Requested:** {total_time}\n"
-            f"📁 **Project:** {data.get('project_id')}\n\n"
+            f"📁 **Project:** {project_name}\n\n"
             "Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to cancel"
         )
         buttons = [
-            {'text': 'Yes', 'value': 'yes', 'type': 'confirmation_choice'},
-            {'text': 'No', 'value': 'no', 'type': 'confirmation_choice'}
+            {'text': 'Yes', 'value': 'overtime_confirm', 'type': 'action'},
+            {'text': 'No', 'value': 'overtime_cancel', 'type': 'action'}
         ]
         return {
             'message': msg,

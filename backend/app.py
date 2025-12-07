@@ -1707,6 +1707,49 @@ def create_app():
                         step_resp = handle_log_hours_step(odoo_service, employee_data, 'confirmation', context, 'log_hours_confirm', get_odoo_session_data(), metrics_service)
                         # Clear session after confirmation
                         session.pop('log_hours_flow', None)
+                    elif message == 'overtime_confirm':
+                        # Handle overtime confirmation - directly call _continue_overtime to avoid restarting flow
+                        try:
+                            active_session = session_manager.get_session(thread_id)
+                            if active_session and active_session.get('type') == 'overtime':
+                                # Call _continue_overtime directly with 'overtime_confirm' to handle confirmation
+                                ot_resp = overtime_service._continue_overtime('overtime_confirm', thread_id, active_session, employee_data or {}, get_odoo_session_data())
+                                if ot_resp:
+                                    resp_thread = ot_resp.get('thread_id') or thread_id
+                                    assistant_text = ot_resp.get('message', '')
+                                    if assistant_text:
+                                        _log_chat_message_event(
+                                            resp_thread,
+                                            'assistant',
+                                            assistant_text,
+                                            employee_data,
+                                            {'source': 'overtime'}
+                                        )
+                                    return jsonify({
+                                        'response': ot_resp.get('message', ''),
+                                        'status': 'success',
+                                        'has_employee_context': employee_data is not None,
+                                        'thread_id': resp_thread,
+                                        'widgets': ot_resp.get('widgets'),
+                                        'buttons': ot_resp.get('buttons')
+                                    })
+                        except Exception as e:
+                            debug_log(f"Error handling overtime confirmation: {str(e)}", "bot_logic")
+                            import traceback
+                            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                    elif message == 'overtime_cancel':
+                        # Handle overtime cancellation
+                        try:
+                            session_manager.cancel_session(thread_id, 'User cancelled overtime flow')
+                            session_manager.clear_session(thread_id)
+                            return jsonify({
+                                'response': 'Overtime request cancelled.',
+                                'status': 'success',
+                                'has_employee_context': employee_data is not None,
+                                'thread_id': thread_id
+                            })
+                        except Exception as e:
+                            debug_log(f"Error handling overtime cancellation: {str(e)}", "bot_logic")
                     else:
                         # Check if this is a direct input for the current step (chat input)
                         # Safeguard: if message looks like hours (contains hour-related words),

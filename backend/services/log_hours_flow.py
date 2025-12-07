@@ -645,10 +645,140 @@ def _format_tasks_message(tasks: List[Dict], employee_name: str) -> str:
         return f'Your tasks for this month:\n\n*What would you like to do next?*'
 
 
+def _fetch_subtask_details(odoo_service, subtask_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    """
+    Fetch subtask details by getting parent task's partner_id and sale_line_id from project.task model.
+    
+    Args:
+        odoo_service: Active Odoo service instance
+        subtask_ids: List of subtask (project.task) IDs to fetch
+    
+    Returns:
+        Dict mapping subtask_id -> {'client': client_name, 'project_id': project_id}
+    """
+    if not subtask_ids:
+        return {}
+    
+    try:
+        ok_session, msg = odoo_service.ensure_active_session()
+        if not ok_session:
+            return {}
+        
+        # Remove duplicates and None values
+        unique_ids = list(set([sid for sid in subtask_ids if sid]))
+        if not unique_ids:
+            return {}
+        
+        # Step 1: Fetch subtasks to get their parent_id
+        domain = [('id', 'in', unique_ids)]
+        params = {
+            'args': [domain],
+            'kwargs': {
+                'fields': ['id', 'parent_id'],
+                'limit': len(unique_ids)
+            }
+        }
+        
+        ok, subtask_data = _make_odoo_request(odoo_service, 'project.task', 'search_read', params)
+        
+        if not ok or not isinstance(subtask_data, list):
+            return {}
+        
+        # Build mapping of subtask_id -> parent_id
+        subtask_to_parent = {}
+        parent_ids_to_fetch = set()
+        
+        for subtask in subtask_data:
+            subtask_id = subtask.get('id')
+            if not subtask_id:
+                continue
+            
+            # Extract parent_id (Many2one format: [id, 'name'] or False)
+            parent_id = None
+            parent_field = subtask.get('parent_id')
+            if parent_field:
+                if isinstance(parent_field, (list, tuple)) and len(parent_field) > 0:
+                    parent_id = parent_field[0] if isinstance(parent_field[0], int) else None
+            
+            if parent_id:
+                subtask_to_parent[subtask_id] = parent_id
+                parent_ids_to_fetch.add(parent_id)
+        
+        # If no parent tasks found, return empty result
+        if not parent_ids_to_fetch:
+            return {}
+        
+        # Step 2: Fetch parent tasks to get partner_id and sale_line_id
+        parent_domain = [('id', 'in', list(parent_ids_to_fetch))]
+        parent_params = {
+            'args': [parent_domain],
+            'kwargs': {
+                'fields': ['id', 'partner_id', 'sale_line_id'],
+                'limit': len(parent_ids_to_fetch)
+            }
+        }
+        
+        ok_parent, parent_data = _make_odoo_request(odoo_service, 'project.task', 'search_read', parent_params)
+        
+        if not ok_parent or not isinstance(parent_data, list):
+            return {}
+        
+        # Build mapping of parent_id -> {client, project_id}
+        parent_details = {}
+        for parent_task in parent_data:
+            parent_id = parent_task.get('id')
+            if not parent_id:
+                continue
+            
+            # Extract client name from partner_id (Many2one format: [id, 'name'])
+            client_name = '—'
+            partner_id = parent_task.get('partner_id')
+            if partner_id:
+                if isinstance(partner_id, (list, tuple)) and len(partner_id) > 1:
+                    client_name = str(partner_id[1]).strip()
+                elif isinstance(partner_id, (list, tuple)) and len(partner_id) == 1:
+                    if not isinstance(partner_id[0], int):
+                        client_name = str(partner_id[0]).strip()
+            
+            # Extract project ID (display name) from sale_line_id (Many2one format: [id, 'name'])
+            project_id = '—'
+            sale_line_id = parent_task.get('sale_line_id')
+            if sale_line_id:
+                if isinstance(sale_line_id, (list, tuple)) and len(sale_line_id) > 1:
+                    # Get the display name (second element) like "S02118 - Concept Creation  (AL TOUFEEQ CONTRACTING & GENERAL MAINTENANCE COMPANY WLL)"
+                    project_id = str(sale_line_id[1]).strip() if sale_line_id[1] else '—'
+                elif isinstance(sale_line_id, (list, tuple)) and len(sale_line_id) == 1:
+                    # Only ID available, use it as fallback
+                    project_id = str(sale_line_id[0]) if sale_line_id[0] else '—'
+            
+            parent_details[parent_id] = {
+                'client': client_name,
+                'project_id': project_id
+            }
+        
+        # Step 3: Map subtask_id -> parent details
+        result = {}
+        for subtask_id, parent_id in subtask_to_parent.items():
+            if parent_id in parent_details:
+                result[subtask_id] = parent_details[parent_id]
+            else:
+                # Parent task not found, use defaults
+                result[subtask_id] = {
+                    'client': '—',
+                    'project_id': '—'
+                }
+        
+        return result
+        
+    except Exception as e:
+        debug_log(f"Error fetching subtask details: {str(e)}", "bot_logic")
+        return {}
+
+
 def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict]) -> Dict[str, Any]:
     """Build a table widget payload to render tasks in the frontend.
 
-    Columns: Sub Task, Project, Dates, Action
+    Columns: Sub Task, Client, Project, Project ID, Dates, Action
     Rows: one per unlogged day (tasks split by day if multi-day).
 
     Args:
@@ -660,8 +790,10 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
         Dict with 'columns' and 'rows' keys
     """
     columns = [
-        { 'key': 'task_name', 'label': 'Sub Task', 'align': 'center' },
+        { 'key': 'project_id', 'label': 'Project ID', 'align': 'center' },
         { 'key': 'project', 'label': 'Project', 'align': 'center' },
+        { 'key': 'client', 'label': 'Client', 'align': 'center' },
+        { 'key': 'task_name', 'label': 'Sub Task', 'align': 'center' },
         { 'key': 'dates', 'label': 'Dates', 'align': 'center' },
         { 'key': 'log_hours', 'label': 'Action', 'align': 'center' },
     ]
@@ -681,6 +813,7 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
     # This helps us identify when multiple tasks share the same subtask on the same day
     task_counts_by_subtask_date = {}
     task_data_list = []
+    subtask_ids_to_fetch = set()
     
     for task in tasks or []:
         # Get sub task from x_studio_sub_task_1 field
@@ -704,6 +837,10 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
                 task_name = str(sub_task).strip()
         else:
             task_name = '—'
+        
+        # Collect subtask IDs for batch fetching
+        if subtask_id:
+            subtask_ids_to_fetch.add(subtask_id)
 
         # Parse dates
         start_dt = task.get('start_datetime', '')
@@ -738,6 +875,9 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
             for day in all_days:
                 key = (subtask_id, day)
                 task_counts_by_subtask_date[key] = task_counts_by_subtask_date.get(key, 0) + 1
+
+    # Fetch subtask details (client and project ID) in batch
+    subtask_details = _fetch_subtask_details(odoo_service, list(subtask_ids_to_fetch))
 
     # Second pass: Build rows, checking timesheet entry counts against task counts
     # Track how many rows we've added for each (subtask_id, date) to limit display
@@ -797,6 +937,14 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
                 if timesheet_count < task_count and rows_already_added < rows_to_show:
                     unlogged_days.append(day)
         
+        # Get client and project ID from subtask details
+        client_name = '—'
+        project_id_display = '—'
+        if subtask_id and subtask_id in subtask_details:
+            details = subtask_details[subtask_id]
+            client_name = details.get('client', '—')
+            project_id_display = details.get('project_id', '—')
+
         # Create a row for each unlogged day
         for day in unlogged_days:
             # Format the date for display
@@ -806,7 +954,9 @@ def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict
             
             rows.append({
                 'task_name': task_name,
+                'client': client_name,
                 'project': project_name,
+                'project_id': project_id_display,
                 'dates': day_display,
                 'log_hours': f'<button class="log-hours-btn h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white" data-subtask-id="{subtask_id or ""}" data-date="{day.strftime("%Y-%m-%d")}" data-task-name="{_escape_html(task_name)}">Log Hours</button>' if subtask_id else '<span class="text-gray-400">—</span>',
             })

@@ -2343,6 +2343,137 @@
                             });
                         }
                     }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.overtime_form) {
+                    // Single-step overtime form widget (date picker, hour from/to inputs/dropdowns, project dropdown)
+                    const wid = `otf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const dateId = `${wid}_date`;
+                    const hourFromId = `${wid}_hour_from`;
+                    const hourToId = `${wid}_hour_to`;
+                    const projectId = `${wid}_project`;
+                    const applyId = `${wid}_apply`;
+                    
+                    const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
+                    const projectOptions = Array.isArray(buttons.widgets.project_options) ? buttons.widgets.project_options : [];
+                    
+                    const hourOptsHtml = [`<option value="" disabled selected>Select time</option>`]
+                        .concat(hourOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`))
+                        .join('');
+                    
+                    const projectOptsHtml = [`<option value="" disabled selected>Select project</option>`]
+                        .concat(projectOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`))
+                        .join('');
+                    
+                    widgetsHtml = `
+                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">Date:</label>
+                                <input type="text" id="${dateId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select a date" style="box-sizing: border-box; max-width: calc(100% - 90px);" />
+                            </div>
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">From:</label>
+                                <select id="${hourFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                                    <option value="" disabled selected>Select time</option>
+                                    ${hourOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">To:</label>
+                                <select id="${hourToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                                    <option value="" disabled selected>Select time</option>
+                                    ${hourOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">Project:</label>
+                                <select id="${projectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                                    ${projectOptsHtml}
+                                </select>
+                            </div>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const applyBtn = document.getElementById(applyId);
+                        const dateEl = document.getElementById(dateId);
+                        const hourFromEl = document.getElementById(hourFromId);
+                        const hourToEl = document.getElementById(hourToId);
+                        const projectEl = document.getElementById(projectId);
+                        
+                        // Initialize flatpickr for date input (matching time off flow)
+                        if (dateEl && window.flatpickr) {
+                            const fp = window.flatpickr(`#${dateId}`, {
+                                dateFormat: 'd/m/Y',
+                                static: false,
+                                appendTo: document.body,
+                                onChange: (selectedDates) => {
+                                    const input = document.getElementById(dateId);
+                                    if (!input) return;
+                                    if (Array.isArray(selectedDates) && selectedDates.length > 0) {
+                                        const d = selectedDates[0];
+                                        const dd = String(d.getDate()).padStart(2,'0');
+                                        const mm = String(d.getMonth()+1).padStart(2,'0');
+                                        const yyyy = d.getFullYear();
+                                        input.value = `${dd}/${mm}/${yyyy}`;
+                                    }
+                                },
+                                onOpen: function() {
+                                    setTimeout(() => {
+                                        const cal = document.querySelector('.flatpickr-calendar');
+                                        if (cal) {
+                                            cal.style.zIndex = '2147483647';
+                                            cal.style.position = 'fixed';
+                                        }
+                                        // Scroll to give calendar more space
+                                        const chatContainer = document.querySelector('#conversationState main');
+                                        if (chatContainer) {
+                                            chatContainer.scrollTo({
+                                                top: chatContainer.scrollHeight,
+                                                behavior: 'smooth'
+                                            });
+                                        }
+                                    }, 10);
+                                }
+                            });
+                        }
+                        
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const dateVal = dateEl ? dateEl.value.trim() : '';
+                                const hourFromVal = hourFromEl ? hourFromEl.value.trim() : '';
+                                const hourToVal = hourToEl ? hourToEl.value.trim() : '';
+                                const projectVal = projectEl ? projectEl.value : '';
+                                
+                                if (!dateVal) {
+                                    alert('Please select a date.');
+                                    return;
+                                }
+                                
+                                if (!hourFromVal || !hourToVal) {
+                                    alert('Please enter or select start and end times.');
+                                    return;
+                                }
+                                
+                                if (!projectVal) {
+                                    alert('Please select a project.');
+                                    return;
+                                }
+                                
+                                // Date is already formatted as DD/MM/YYYY by flatpickr
+                                const formattedDate = dateVal;
+                                
+                                // Format: overtime_form=date|hour_from|hour_to|project_id
+                                const outgoing = `overtime_form=${formattedDate}|${hourFromVal}|${hourToVal}|${projectVal}`;
+                                
+                                // Show user-friendly message in chat
+                                const projectLabel = projectEl && projectEl.options && projectEl.selectedIndex >= 0 ? projectEl.options[projectEl.selectedIndex].text : projectVal;
+                                const userMsg = `Date: ${formattedDate}, Time: ${hourFromVal} to ${hourToVal}, Project: ${projectLabel}`;
+                                addMessageToChat(userMsg, true);
+                                conversationHistory.push({role: 'user', content: userMsg});
+                                // Send internal format silently
+                                sendToBackend(outgoing);
+                            });
+                        }
+                    }, 0);
                 } else if (buttons && buttons.widgets && buttons.widgets.reimbursement_amount_form) {
                     // Reimbursement amount form widget (amount input, currency dropdown, apply button)
                     const wid = `raf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
