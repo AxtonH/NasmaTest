@@ -1727,10 +1727,14 @@ def create_app():
                             active_session = session_manager.get_session(thread_id)
                             if active_session and active_session.get('type') == 'overtime':
                                 # Call _continue_overtime directly with 'overtime_confirm' to handle confirmation
-                                ot_resp = overtime_service._continue_overtime('overtime_confirm', thread_id, active_session, employee_data or {}, get_odoo_session_data())
+                                odoo_session_data = get_odoo_session_data()
+                                ot_resp = overtime_service._continue_overtime('overtime_confirm', thread_id, active_session, employee_data or {}, odoo_session_data)
                                 if ot_resp:
                                     resp_thread = ot_resp.get('thread_id') or thread_id
                                     assistant_text = ot_resp.get('message', '')
+                                    
+                                    # Check if session was renewed (overtime service updates Flask session internally)
+                                    
                                     if assistant_text:
                                         _log_chat_message_event(
                                             resp_thread,
@@ -2500,45 +2504,50 @@ def create_app():
                                 debug_log(f"Error parsing confirmation data: {ve}", "bot_logic")
                                 response = { 'message': 'Invalid confirmation data format' }
                             else:
-                                # Get leave balance service
-                                try:
-                                    from .services.leave_balance_service import LeaveBalanceService
-                                except Exception:
-                                    from services.leave_balance_service import LeaveBalanceService
-                                
-                                leave_balance_service = LeaveBalanceService(odoo_service)
-                                
-                                # Handle file attachment if provided (for Sick Leave)
-                                file_attachment_data = None
-                                if file_attachment and isinstance(file_attachment, dict):
-                                    file_attachment_data = file_attachment
-                                
-                                # Build confirmation message
-                                try:
-                                    debug_log(f"Building confirmation message for leave_type_id={leave_type_id}, date_from={date_from}, date_to={date_to}, is_custom_hours={is_custom_hours}", "bot_logic")
-                                    ok, confirmation_data = timeoff_service.build_timeoff_confirmation_message(
-                                        leave_type_id, date_from, date_to, is_custom_hours,
-                                        hour_from, hour_to, employee_data, leave_balance_service
-                                    )
+                                # Get Odoo session data (includes refresh token retrieval if needed)
+                                odoo_session_data = get_odoo_session_data()
+                                if not odoo_session_data or not odoo_session_data.get('session_id') or not odoo_session_data.get('user_id'):
+                                    response = { 'message': 'Session expired. Please refresh the page and try again.' }
+                                else:
+                                    # Get leave balance service
+                                    try:
+                                        from .services.leave_balance_service import LeaveBalanceService
+                                    except Exception:
+                                        from services.leave_balance_service import LeaveBalanceService
                                     
-                                    debug_log(f"Confirmation message build result: ok={ok}, confirmation_data type={type(confirmation_data)}", "bot_logic")
+                                    leave_balance_service = LeaveBalanceService(odoo_service)
                                     
-                                    if ok:
-                                        # Add file attachment to confirmation data if present
-                                        if file_attachment_data:
-                                            confirmation_data['file_attachment'] = file_attachment_data
+                                    # Handle file attachment if provided (for Sick Leave)
+                                    file_attachment_data = None
+                                    if file_attachment and isinstance(file_attachment, dict):
+                                        file_attachment_data = file_attachment
+                                    
+                                    # Build confirmation message (pass session data for leave balance check)
+                                    try:
+                                        debug_log(f"Building confirmation message for leave_type_id={leave_type_id}, date_from={date_from}, date_to={date_to}, is_custom_hours={is_custom_hours}", "bot_logic")
+                                        ok, confirmation_data = timeoff_service.build_timeoff_confirmation_message(
+                                            leave_type_id, date_from, date_to, is_custom_hours,
+                                            hour_from, hour_to, employee_data, leave_balance_service, odoo_session_data
+                                        )
                                         
-                                        response = {
-                                            'message': confirmation_data.get('message', ''),
-                                            'buttons': confirmation_data.get('buttons', []),
-                                            'widgets': {
-                                                'timeoff_confirmation_data': confirmation_data
+                                        debug_log(f"Confirmation message build result: ok={ok}, confirmation_data type={type(confirmation_data)}", "bot_logic")
+                                        
+                                        if ok:
+                                            # Add file attachment to confirmation data if present
+                                            if file_attachment_data:
+                                                confirmation_data['file_attachment'] = file_attachment_data
+                                            
+                                            response = {
+                                                'message': confirmation_data.get('message', ''),
+                                                'buttons': confirmation_data.get('buttons', []),
+                                                'widgets': {
+                                                    'timeoff_confirmation_data': confirmation_data
+                                                }
                                             }
-                                        }
-                                        debug_log(f"Response created successfully with message length={len(response.get('message', ''))}, buttons count={len(response.get('buttons', []))}", "bot_logic")
-                                    else:
-                                        debug_log(f"Failed to build confirmation: {confirmation_data}", "bot_logic")
-                                        response = { 'message': f"Could not build confirmation: {confirmation_data}" }
+                                            debug_log(f"Response created successfully with message length={len(response.get('message', ''))}, buttons count={len(response.get('buttons', []))}", "bot_logic")
+                                        else:
+                                            debug_log(f"Failed to build confirmation: {confirmation_data}", "bot_logic")
+                                            response = { 'message': f"Could not build confirmation: {confirmation_data}" }
                                 except Exception as build_error:
                                     import traceback
                                     debug_log(f"Error building confirmation message: {str(build_error)}", "bot_logic")
@@ -2623,33 +2632,52 @@ def create_app():
                                 if not employee_id:
                                     response = { 'message': 'Employee ID not found' }
                                 else:
-                                    ok, result = timeoff_service.submit_leave_request(
-                                        employee_id, leave_type_id, date_from_ymd, date_to_ymd,
-                                        description="Time off request submitted via Nasma chatbot",
-                                        extra_fields=extra_fields if extra_fields else None,
-                                        supporting_attachments=supporting_attachments
-                                    )
-                                    if ok:
-                                        leave_id = result.get('leave_id') if isinstance(result, dict) else result
-                                        response = { 'message': f'Your time off request has been submitted successfully! Request ID: #{leave_id}' }
-                                        # Log timeoff metric
-                                        _log_usage_metric('timeoff', thread_id, {
-                                            'leave_id': leave_id,
-                                            'leave_type_id': leave_type_id,
-                                            'date_from': date_from_ymd,
-                                            'date_to': date_to_ymd,
-                                            'is_custom_hours': is_custom_hours,
-                                            'hour_from': hour_from if is_custom_hours else None,
-                                            'hour_to': hour_to if is_custom_hours else None
-                                        }, employee_data)
-                                        # Clear time off session after successful submission
-                                        try:
-                                            session_manager.clear_session(thread_id)
-                                            debug_log(f"Cleared time off session for thread_id: {thread_id}", "bot_logic")
-                                        except Exception as e:
-                                            debug_log(f"Error clearing time off session: {str(e)}", "bot_logic")
+                                    # Get Odoo session data (includes refresh token retrieval if needed)
+                                    odoo_session_data = get_odoo_session_data()
+                                    if not odoo_session_data or not odoo_session_data.get('session_id') or not odoo_session_data.get('user_id'):
+                                        response = { 'message': 'Session expired. Please refresh the page and try again.' }
                                     else:
-                                        response = { 'message': f"Could not submit request: {result}" }
+                                        # Use stateless method that can refresh sessions
+                                        ok, result, renewed_session = timeoff_service.submit_leave_request_stateless(
+                                            employee_id, leave_type_id, date_from_ymd, date_to_ymd,
+                                            description="Time off request submitted via Nasma chatbot",
+                                            extra_fields=extra_fields if extra_fields else None,
+                                            supporting_attachments=supporting_attachments,
+                                            session_id=odoo_session_data.get('session_id'),
+                                            user_id=odoo_session_data.get('user_id'),
+                                            username=odoo_session_data.get('username'),
+                                            password=odoo_session_data.get('password')
+                                        )
+                                        
+                                        # Update Flask session if session was renewed
+                                        if renewed_session:
+                                            try:
+                                                session['odoo_session_id'] = renewed_session['session_id']
+                                                session['user_id'] = renewed_session['user_id']
+                                                session.modified = True
+                                            except Exception:
+                                                pass
+                                        if ok:
+                                            leave_id = result.get('leave_id') if isinstance(result, dict) else result
+                                            response = { 'message': f'Your time off request has been submitted successfully! Request ID: #{leave_id}' }
+                                            # Log timeoff metric
+                                            _log_usage_metric('timeoff', thread_id, {
+                                                'leave_id': leave_id,
+                                                'leave_type_id': leave_type_id,
+                                                'date_from': date_from_ymd,
+                                                'date_to': date_to_ymd,
+                                                'is_custom_hours': is_custom_hours,
+                                                'hour_from': hour_from if is_custom_hours else None,
+                                                'hour_to': hour_to if is_custom_hours else None
+                                            }, employee_data)
+                                            # Clear time off session after successful submission
+                                            try:
+                                                session_manager.clear_session(thread_id)
+                                                debug_log(f"Cleared time off session for thread_id: {thread_id}", "bot_logic")
+                                            except Exception as e:
+                                                debug_log(f"Error clearing time off session: {str(e)}", "bot_logic")
+                                        else:
+                                            response = { 'message': f"Could not submit request: {result}" }
                 except Exception as e:
                     import traceback
                     debug_log(f"Error in timeoff confirm: {str(e)}", "bot_logic")

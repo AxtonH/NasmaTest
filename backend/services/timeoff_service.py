@@ -843,7 +843,7 @@ class TimeOffService:
     def build_timeoff_confirmation_message(self, leave_type_id: int, date_from: str, date_to: str, 
                                           is_custom_hours: bool, hour_from: str = '', hour_to: str = '',
                                           employee_data: Optional[Dict] = None,
-                                          leave_balance_service=None) -> Tuple[bool, Any]:
+                                          leave_balance_service=None, odoo_session_data: Optional[Dict] = None) -> Tuple[bool, Any]:
         """Build confirmation message for time off request with all details.
         
         Args:
@@ -905,7 +905,7 @@ class TimeOffService:
                 try:
                     employee_id = employee_data.get('id')
                     remaining, error = leave_balance_service.calculate_remaining_leave(
-                        employee_id, leave_type_name, None
+                        employee_id, leave_type_name, odoo_session_data
                     )
                     if not error and remaining:
                         formatted_msg = leave_balance_service.format_remaining_leave_message(remaining)
