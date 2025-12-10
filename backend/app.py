@@ -1470,6 +1470,14 @@ def create_app():
                     })
                 
                 try:
+                    # Initialize leave balance service
+                    try:
+                        from .services.leave_balance_service import LeaveBalanceService
+                    except Exception:
+                        from services.leave_balance_service import LeaveBalanceService
+                    
+                    leave_balance_service = LeaveBalanceService(odoo_service)
+                    
                     # Extract leave type from message if mentioned
                     leave_type_name = None
                     message_lower = normalized_msg.lower()
@@ -1494,11 +1502,29 @@ def create_app():
                             'thread_id': thread_id
                         })
                     
+                    # Get Odoo session data (includes refresh token retrieval if needed)
+                    odoo_session_data = get_odoo_session_data()
+                    if not odoo_session_data or not odoo_session_data.get('session_id') or not odoo_session_data.get('user_id'):
+                        assistant_text = "Session expired. Please refresh the page and try again."
+                        _log_chat_message_event(
+                            thread_id,
+                            'assistant',
+                            assistant_text,
+                            employee_data,
+                            {'source': 'leave_balance', 'error': 'session_expired'}
+                        )
+                        return jsonify({
+                            'response': assistant_text,
+                            'status': 'error',
+                            'has_employee_context': True,
+                            'thread_id': thread_id
+                        })
+                    
                     # Calculate remaining leave
                     remaining, error = leave_balance_service.calculate_remaining_leave(
                         employee_data.get('id'),
                         leave_type_name,
-                        get_odoo_session_data()
+                        odoo_session_data
                     )
                     
                     if error:
