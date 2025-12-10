@@ -27,7 +27,18 @@ try:
         build_overtime_table_widget,
         build_main_overview_table_widget,
     )
-    from .services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step, handle_log_hours_form_step
+    from .services.my_requests_service import (
+        get_my_requests,
+        build_my_requests_table_widget,
+        format_my_requests_message,
+        get_overtime_request_for_edit,
+        update_overtime_request,
+        cancel_overtime_request,
+        get_timeoff_request_for_edit,
+        update_timeoff_request,
+        cancel_timeoff_request,
+    )
+    from .services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step, handle_log_hours_form_step, has_unlogged_tasks
 except Exception:
     # Local import style when running as script from backend/ directory
     from services.chatgpt_service import ChatGPTService
@@ -52,7 +63,18 @@ except Exception:
         build_overtime_table_widget,
         build_main_overview_table_widget,
     )
-    from services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step, handle_log_hours_form_step
+    from services.my_requests_service import (
+        get_my_requests,
+        build_my_requests_table_widget,
+        format_my_requests_message,
+        get_overtime_request_for_edit,
+        update_overtime_request,
+        cancel_overtime_request,
+        get_timeoff_request_for_edit,
+        update_timeoff_request,
+        cancel_timeoff_request,
+    )
+    from services.log_hours_flow import start_log_hours_flow, is_log_hours_trigger, start_log_hours_for_task, handle_log_hours_step, handle_log_hours_form_step, has_unlogged_tasks
 import os
 import sys
 import logging
@@ -392,14 +414,11 @@ def create_app():
     def _log_chat_message_event(thread_id: str, role: str, content: str, employee: dict = None, metadata: dict = None):
         """Record chat messages (user/assistant) into Supabase."""
         if not metrics_service or not thread_id:
-            print(f"[DEBUG] _log_chat_message_event skipped: metrics_service={metrics_service is not None}, thread_id={thread_id}")
             return
         text = (content or '').strip()
         if not text:
-            print(f"[DEBUG] _log_chat_message_event skipped: empty content")
             return
         tenant_id, tenant_name, user_id, user_name = _extract_identity(employee or {})
-        print(f"[DEBUG] _log_chat_message_event: role={role}, user_id={user_id}, thread_id={thread_id}, content_length={len(text)}")
 
         # IMPORTANT: Upsert thread FIRST before storing message
         # The chat_messages table has a foreign key constraint on thread_id
@@ -416,7 +435,6 @@ def create_app():
             existing_title = existing_thread.get('title') if existing_thread else None
             thread_kwargs["title"] = update_title_if_needed(existing_title, text)
         thread_kwargs["last_message_at"] = datetime.now(timezone.utc).isoformat()
-        print(f"[DEBUG] Upserting thread with title: {thread_kwargs.get('title', 'N/A')}")
         metrics_service.upsert_thread(thread_id, **thread_kwargs)
 
         # Now store the message (thread must exist first due to FK constraint)
@@ -1320,6 +1338,7 @@ def create_app():
             data = request.get_json()
             message = data.get('message', '')
             thread_id = data.get('thread_id')
+            file_attachment = data.get('file_attachment')  # File data from request body
             
             if not message:
                 return jsonify({'error': 'Message is required'}), 400
@@ -1330,7 +1349,6 @@ def create_app():
             
             # Only try to fetch employee data if user is properly authenticated
             if session.get('authenticated') and odoo_service.is_authenticated():
-                debug_log("User is authenticated, ensuring active Odoo session...", "bot_logic")
 
                 # Ensure session is active (with automatic renewal if needed)
                 session_valid, session_message = odoo_service.ensure_active_session()
@@ -1339,16 +1357,12 @@ def create_app():
                     employee_data = None
                 else:
                     # Now try to fetch employee data
-                    debug_log("Odoo session is active, fetching employee data...", "bot_logic")
                     employee_success, employee_data = employee_service.get_current_user_employee_data()
 
                     if not employee_success:
                         # If we can't get employee data, still proceed but without context
                         print(f"ERROR: Could not fetch employee data: {employee_data}")
                         employee_data = None
-                    else:
-                        print(f"SUCCESS: Fetched employee data for user: {employee_data.get('name', 'Unknown')}")
-                        debug_log(f"Employee data keys: {list(employee_data.keys()) if employee_data else 'None'}", "odoo_data")
             else:
                 debug_log("User not authenticated - skipping employee data fetch", "bot_logic")
             
@@ -1750,6 +1764,12 @@ def create_app():
                             })
                         except Exception as e:
                             debug_log(f"Error handling overtime cancellation: {str(e)}", "bot_logic")
+                            return jsonify({
+                                'response': 'Overtime request cancelled.',
+                                'status': 'success',
+                                'has_employee_context': employee_data is not None,
+                                'thread_id': thread_id
+                            })
                     else:
                         # Check if this is a direct input for the current step (chat input)
                         # Safeguard: if message looks like hours (contains hour-related words),
@@ -1910,37 +1930,81 @@ def create_app():
                 debug_log(f"Error in log hours flow step: {str(e)}", "bot_logic")
                 pass
 
-            # Overtime flow: handle before document intents
-            try:
-                debug_log(f"Checking overtime flow for message: {message[:50]}...", "bot_logic")
-                ot_resp = overtime_service.handle_flow(message, thread_id, employee_data or {}, get_odoo_session_data())
-                debug_log(f"Overtime flow response: {ot_resp is not None}", "bot_logic")
-                if ot_resp:
-                    resp_thread = ot_resp.get('thread_id') or thread_id
-                    assistant_text = ot_resp.get('message', '')
-                    if assistant_text:
-                        _log_chat_message_event(
-                            resp_thread,
-                            'assistant',
-                            assistant_text,
-                            employee_data,
-                            {'source': 'overtime'}
-                        )
-                    # Note: Metrics are logged by overtime_service._log_metric() when request is successfully created
-                    return jsonify({
-                        'response': ot_resp.get('message', ''),
-                        'status': 'success',
-                        'has_employee_context': employee_data is not None,
-                        'thread_id': resp_thread,
-                        'widgets': ot_resp.get('widgets'),
-                        'buttons': ot_resp.get('buttons')
-                    })
-            except Exception as e:
-                debug_log(f"Error in overtime flow: {str(e)}", "bot_logic")
-                import traceback
-                debug_log(f"Overtime flow traceback: {traceback.format_exc()}", "bot_logic")
-                # Don't pass silently - let it continue to other flows or show error
-                pass
+            # Overtime flow: handle before document intents (skip if it's an edit/update/cancel request)
+            # Also skip overtime_cancel - it's handled explicitly below
+            # Check for active overtime session first - if "No" is typed and there's an active session, handle it
+            active_overtime_session = session_manager.get_session(thread_id) if session_manager else None
+            is_active_overtime = active_overtime_session and active_overtime_session.get('type') == 'overtime'
+            
+            if (message != 'overtime_cancel' and
+                not normalized_msg.startswith('edit_overtime_request:') and 
+                not normalized_msg.startswith('update_overtime_request:') and
+                not normalized_msg.startswith('cancel_overtime_request:') and
+                not normalized_msg.startswith('edit_timeoff_request:') and
+                not normalized_msg.startswith('update_timeoff_request:') and
+                not normalized_msg.startswith('submit_timeoff_request:') and
+                not normalized_msg.startswith('confirm_timeoff_request:') and
+                not normalized_msg.startswith('cancel_timeoff_request:') and
+                normalized_msg != 'timeoff_confirm' and
+                normalized_msg != 'timeoff_cancel'):
+                try:
+                    ot_resp = overtime_service.handle_flow(message, thread_id, employee_data or {}, get_odoo_session_data())
+                    if ot_resp:
+                        resp_thread = ot_resp.get('thread_id') or thread_id
+                        assistant_text = ot_resp.get('message', '')
+                        if assistant_text:
+                            _log_chat_message_event(
+                                resp_thread,
+                                'assistant',
+                                assistant_text,
+                                employee_data,
+                                {'source': 'overtime'}
+                            )
+                        # Note: Metrics are logged by overtime_service._log_metric() when request is successfully created
+                        return jsonify({
+                            'response': ot_resp.get('message', ''),
+                            'status': 'success',
+                            'has_employee_context': employee_data is not None,
+                            'thread_id': resp_thread,
+                            'widgets': ot_resp.get('widgets'),
+                            'buttons': ot_resp.get('buttons')
+                        })
+                    # If there's an active overtime session and message is "No", don't let it fall through to other handlers
+                    if not ot_resp and is_active_overtime and normalized_msg in {'no', 'n'}:
+                        debug_log(f"Active overtime session detected with 'No' response, but overtime flow didn't handle it", "bot_logic")
+                        # Try to cancel the session manually
+                        try:
+                            session_manager.cancel_session(thread_id, 'User cancelled overtime flow')
+                            session_manager.clear_session(thread_id)
+                        except Exception:
+                            pass
+                        return jsonify({
+                            'response': 'Overtime request cancelled.',
+                            'status': 'success',
+                            'has_employee_context': employee_data is not None,
+                            'thread_id': thread_id
+                        })
+                except Exception as e:
+                    debug_log(f"Error in overtime flow: {str(e)}", "bot_logic")
+                    import traceback
+                    debug_log(f"Overtime flow traceback: {traceback.format_exc()}", "bot_logic")
+                    # If there's an active overtime session and an error occurred, try to handle cancellation
+                    if is_active_overtime and normalized_msg in {'no', 'n', 'overtime_cancel'}:
+                        try:
+                            session_manager.cancel_session(thread_id, 'User cancelled overtime flow')
+                            session_manager.clear_session(thread_id)
+                            return jsonify({
+                                'response': 'Overtime request cancelled.',
+                                'status': 'success',
+                                'has_employee_context': employee_data is not None,
+                                'thread_id': thread_id
+                            })
+                        except Exception:
+                            pass
+                    # Don't pass silently - let it continue to other flows or show error
+
+            # Initialize response variable (will be set by handlers)
+            response = None
 
             # Quick entry: generic "generate letters" should open the document picker
             # Guard: do NOT trigger for internal action values used by buttons
@@ -2272,6 +2336,615 @@ def create_app():
                         response = { 'message': f"I couldn't retrieve your team overview right now: {overview}" }
                 except Exception as e:
                     response = { 'message': f"An error occurred preparing the team overview: {e}" }
+            elif normalized_msg.startswith('edit_timeoff_request:'):
+                # Handle edit time off request - fetch request details and show form
+                try:
+                    # Format: edit_timeoff_request:LEAVE_ID
+                    parts = normalized_msg.split(':', 1)
+                    if len(parts) < 2:
+                        response = { 'message': 'Invalid edit request format' }
+                    else:
+                        leave_id = int(parts[1])
+                        # Get user timezone for timezone conversion
+                        user_tz = None
+                        try:
+                            user_tz = (employee_data or {}).get('tz') if isinstance(employee_data, dict) else None
+                        except Exception:
+                            user_tz = None
+                        ok, request_data = get_timeoff_request_for_edit(odoo_service, leave_id, user_tz)
+                        if ok:
+                            # Fetch leave types for dropdown
+                            ok_leave_types, leave_types = timeoff_service.get_leave_types()
+                            leave_type_options = []
+                            if ok_leave_types and isinstance(leave_types, list):
+                                # Filter to only show Annual Leave, Sick Leave, Unpaid Leave
+                                main_types = ['Annual Leave', 'Sick Leave', 'Unpaid Leave']
+                                for lt in leave_types:
+                                    lt_name = lt.get('name', '')
+                                    if lt_name in main_types:
+                                        leave_type_options.append({
+                                            'value': str(lt.get('id')),
+                                            'label': lt_name
+                                        })
+                            
+                            # Generate hour options (similar to overtime)
+                            try:
+                                from .services.overtime_service import OvertimeService
+                            except Exception:
+                                from services.overtime_service import OvertimeService
+                            
+                            edit_timeoff_service = OvertimeService(odoo_service, employee_service, session_manager, metrics_service)
+                            # Use 30-minute intervals for time off custom hours
+                            hour_options = edit_timeoff_service._generate_hour_options_30min()
+                            
+                            response = {
+                                'message': '**Edit Time Off Request**\n\nPlease update the details below:',
+                                'widgets': {
+                                    'edit_timeoff_form': True,
+                                    'leave_id': leave_id,
+                                    'leave_type_id': str(request_data.get('leave_type_id', '')),
+                                    'date_from': request_data.get('date_from', ''),
+                                    'date_to': request_data.get('date_to', ''),
+                                    'is_custom_hours': request_data.get('is_custom_hours', False),
+                                    'hour_from': request_data.get('hour_from', ''),
+                                    'hour_to': request_data.get('hour_to', ''),
+                                    'has_existing_attachments': len(request_data.get('existing_attachment_ids', [])) > 0,
+                                    'leave_type_options': leave_type_options,
+                                    'hour_options': hour_options,
+                                    'context_key': 'update_timeoff_request'
+                                }
+                            }
+                        else:
+                            response = { 'message': f"Could not fetch request details: {request_data}" }
+                except Exception as e:
+                    import traceback
+                    debug_log(f"Error in edit time off request: {str(e)}", "bot_logic")
+                    debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                    response = { 'message': f"An error occurred: {e}" }
+            elif normalized_msg.startswith('update_timeoff_request:'):
+                # Handle update time off request - apply changes
+                try:
+                    # Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                    parts = normalized_msg.split(':', 1)
+                    if len(parts) < 2:
+                        response = { 'message': 'Invalid update request format' }
+                    else:
+                        data_parts = parts[1].split('|')
+                        if len(data_parts) < 5:
+                            response = { 'message': 'Invalid update data format' }
+                        else:
+                            leave_id = int(data_parts[0])
+                            leave_type_id = int(data_parts[1])
+                            date_from = data_parts[2]  # DD/MM/YYYY format
+                            date_to = data_parts[3]  # DD/MM/YYYY format
+                            is_custom_hours = data_parts[4].lower() == 'true'
+                            hour_from = data_parts[5] if len(data_parts) > 5 else ''
+                            hour_to = data_parts[6] if len(data_parts) > 6 else ''
+                            
+                            # Get user timezone for timezone conversion
+                            user_tz = None
+                            try:
+                                user_tz = (employee_data or {}).get('tz') if isinstance(employee_data, dict) else None
+                            except Exception:
+                                user_tz = None
+                            
+                            # Fetch existing attachment IDs to preserve them
+                            existing_attachment_ids = []
+                            new_attachment_data = None
+                            try:
+                                ok_fetch, request_data_fetch = get_timeoff_request_for_edit(odoo_service, leave_id, user_tz)
+                                if ok_fetch and isinstance(request_data_fetch, dict):
+                                    existing_attachment_ids = request_data_fetch.get('existing_attachment_ids', [])
+                                    
+                                    # Check if file data was sent in request body (preferred method)
+                                    if file_attachment and isinstance(file_attachment, dict):
+                                        new_attachment_data = file_attachment
+                                    # Fallback: check if file data was sent in command string (8th part)
+                                    elif len(data_parts) > 7 and data_parts[7]:
+                                        try:
+                                            import json
+                                            import urllib.parse
+                                            file_data_str = urllib.parse.unquote(data_parts[7])
+                                            new_attachment_data = json.loads(file_data_str)
+                                        except Exception:
+                                            pass
+                            except Exception:
+                                pass
+                            
+                            ok, result = update_timeoff_request(odoo_service, leave_id, leave_type_id, 
+                                                               date_from, date_to, is_custom_hours,
+                                                               hour_from, hour_to, 
+                                                               existing_attachment_ids=existing_attachment_ids,
+                                                               new_attachment_data=new_attachment_data,
+                                                               user_tz=user_tz)
+                            if ok:
+                                response = { 'message': 'Your time off request has been updated successfully!' }
+                                # Log timeoff_edit metric
+                                _log_usage_metric('timeoff_edit', thread_id, {
+                                    'leave_id': leave_id,
+                                    'leave_type_id': leave_type_id,
+                                    'date_from': date_from,
+                                    'date_to': date_to,
+                                    'is_custom_hours': is_custom_hours,
+                                    'hour_from': hour_from if is_custom_hours else None,
+                                    'hour_to': hour_to if is_custom_hours else None
+                                }, employee_data)
+                            else:
+                                response = { 'message': f"Could not update request: {result}" }
+                except Exception as e:
+                    response = { 'message': f"An error occurred: {e}" }
+            elif normalized_msg.startswith('confirm_timeoff_request:'):
+                # Handle time off request confirmation - show confirmation message
+                debug_log(f"Processing confirm_timeoff_request: message={normalized_msg[:100]}", "bot_logic")
+                try:
+                    # Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                    parts = normalized_msg.split(':', 1)
+                    if len(parts) < 2:
+                        debug_log("Invalid confirmation request format: parts < 2", "bot_logic")
+                        response = { 'message': 'Invalid confirmation request format' }
+                    else:
+                        data_parts = parts[1].split('|')
+                        debug_log(f"Parsed data_parts: count={len(data_parts)}, parts={data_parts}", "bot_logic")
+                        if len(data_parts) < 4:
+                            debug_log(f"Invalid confirmation data format: only {len(data_parts)} parts", "bot_logic")
+                            response = { 'message': 'Invalid confirmation data format' }
+                        else:
+                            try:
+                                leave_type_id = int(data_parts[0])
+                                date_from = data_parts[1]  # DD/MM/YYYY format
+                                date_to = data_parts[2]  # DD/MM/YYYY format
+                                is_custom_hours = data_parts[3].lower() == 'true'
+                                hour_from = data_parts[4] if len(data_parts) > 4 else ''
+                                hour_to = data_parts[5] if len(data_parts) > 5 else ''
+                            except (ValueError, IndexError) as ve:
+                                debug_log(f"Error parsing confirmation data: {ve}", "bot_logic")
+                                response = { 'message': 'Invalid confirmation data format' }
+                            else:
+                                # Get leave balance service
+                                try:
+                                    from .services.leave_balance_service import LeaveBalanceService
+                                except Exception:
+                                    from services.leave_balance_service import LeaveBalanceService
+                                
+                                leave_balance_service = LeaveBalanceService(odoo_service)
+                                
+                                # Handle file attachment if provided (for Sick Leave)
+                                file_attachment_data = None
+                                if file_attachment and isinstance(file_attachment, dict):
+                                    file_attachment_data = file_attachment
+                                
+                                # Build confirmation message
+                                try:
+                                    debug_log(f"Building confirmation message for leave_type_id={leave_type_id}, date_from={date_from}, date_to={date_to}, is_custom_hours={is_custom_hours}", "bot_logic")
+                                    ok, confirmation_data = timeoff_service.build_timeoff_confirmation_message(
+                                        leave_type_id, date_from, date_to, is_custom_hours,
+                                        hour_from, hour_to, employee_data, leave_balance_service
+                                    )
+                                    
+                                    debug_log(f"Confirmation message build result: ok={ok}, confirmation_data type={type(confirmation_data)}", "bot_logic")
+                                    
+                                    if ok:
+                                        # Add file attachment to confirmation data if present
+                                        if file_attachment_data:
+                                            confirmation_data['file_attachment'] = file_attachment_data
+                                        
+                                        response = {
+                                            'message': confirmation_data.get('message', ''),
+                                            'buttons': confirmation_data.get('buttons', []),
+                                            'widgets': {
+                                                'timeoff_confirmation_data': confirmation_data
+                                            }
+                                        }
+                                        debug_log(f"Response created successfully with message length={len(response.get('message', ''))}, buttons count={len(response.get('buttons', []))}", "bot_logic")
+                                    else:
+                                        debug_log(f"Failed to build confirmation: {confirmation_data}", "bot_logic")
+                                        response = { 'message': f"Could not build confirmation: {confirmation_data}" }
+                                except Exception as build_error:
+                                    import traceback
+                                    debug_log(f"Error building confirmation message: {str(build_error)}", "bot_logic")
+                                    debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                                    response = { 'message': f"Sorry, I encountered an error. Please try again." }
+                except Exception as e:
+                    import traceback
+                    debug_log(f"Error in confirm time off request: {str(e)}", "bot_logic")
+                    debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                    response = { 'message': f"Sorry, I encountered an error. Please try again." }
+            elif normalized_msg == 'timeoff_confirm':
+                # Handle time off confirmation - actually submit the request
+                # Get confirmation data from request body (sent by frontend)
+                try:
+                    # Try to get confirmation data from request body
+                    confirmation_data = None
+                    if request.is_json and isinstance(request.json, dict):
+                        confirmation_data = request.json.get('confirmation_data')
+                    
+                    # If not in request body, try to get from widgets in the last response
+                    # For now, we'll require it to be in the request body
+                    if not confirmation_data:
+                        response = { 'message': 'Confirmation data not found. Please try submitting your request again.' }
+                    else:
+                        leave_type_id = confirmation_data.get('leave_type_id')
+                        date_from = confirmation_data.get('date_from')
+                        date_to = confirmation_data.get('date_to')
+                        is_custom_hours = confirmation_data.get('is_custom_hours', False)
+                        hour_from = confirmation_data.get('hour_from', '')
+                        hour_to = confirmation_data.get('hour_to', '')
+                        
+                        if not leave_type_id or not date_from or not date_to:
+                            response = { 'message': 'Missing required confirmation data. Please try submitting your request again.' }
+                        else:
+                            # Convert dates from DD/MM/YYYY to YYYY-MM-DD
+                            try:
+                                from datetime import datetime
+                                dt_from = datetime.strptime(date_from, '%d/%m/%Y')
+                                date_from_ymd = dt_from.strftime('%Y-%m-%d')
+                                
+                                if is_custom_hours:
+                                    date_to_ymd = date_from_ymd
+                                else:
+                                    dt_to = datetime.strptime(date_to, '%d/%m/%Y')
+                                    date_to_ymd = dt_to.strftime('%Y-%m-%d')
+                            except Exception as e:
+                                response = { 'message': f"Invalid date format: {e}" }
+                            else:
+                                # Prepare extra fields for custom hours
+                                extra_fields = {}
+                                if is_custom_hours:
+                                    extra_fields['request_unit_hours'] = True
+                                    def hour_key_to_odoo(key):
+                                        if not key:
+                                            return ''
+                                        try:
+                                            hour_float = float(key)
+                                            hour_float = round(hour_float * 2) / 2.0
+                                            if abs(hour_float - round(hour_float)) < 1e-9:
+                                                return str(int(round(hour_float)))
+                                            return f"{hour_float:.1f}".rstrip('0').rstrip('.')
+                                        except Exception:
+                                            return ''
+                                    
+                                    if hour_from:
+                                        hour_from_odoo = hour_key_to_odoo(hour_from)
+                                        if hour_from_odoo:
+                                            extra_fields['request_hour_from'] = hour_from_odoo
+                                    if hour_to:
+                                        hour_to_odoo = hour_key_to_odoo(hour_to)
+                                        if hour_to_odoo:
+                                            extra_fields['request_hour_to'] = hour_to_odoo
+                                
+                                # Handle file attachment if present
+                                file_attachment_data = confirmation_data.get('file_attachment')
+                                supporting_attachments = None
+                                if file_attachment_data and isinstance(file_attachment_data, dict):
+                                    supporting_attachments = [file_attachment_data]
+                                
+                                # Submit the leave request
+                                employee_id = employee_data.get('id') if employee_data else None
+                                if not employee_id:
+                                    response = { 'message': 'Employee ID not found' }
+                                else:
+                                    ok, result = timeoff_service.submit_leave_request(
+                                        employee_id, leave_type_id, date_from_ymd, date_to_ymd,
+                                        description="Time off request submitted via Nasma chatbot",
+                                        extra_fields=extra_fields if extra_fields else None,
+                                        supporting_attachments=supporting_attachments
+                                    )
+                                    if ok:
+                                        leave_id = result.get('leave_id') if isinstance(result, dict) else result
+                                        response = { 'message': f'Your time off request has been submitted successfully! Request ID: #{leave_id}' }
+                                        # Log timeoff metric
+                                        _log_usage_metric('timeoff', thread_id, {
+                                            'leave_id': leave_id,
+                                            'leave_type_id': leave_type_id,
+                                            'date_from': date_from_ymd,
+                                            'date_to': date_to_ymd,
+                                            'is_custom_hours': is_custom_hours,
+                                            'hour_from': hour_from if is_custom_hours else None,
+                                            'hour_to': hour_to if is_custom_hours else None
+                                        }, employee_data)
+                                        # Clear time off session after successful submission
+                                        try:
+                                            session_manager.clear_session(thread_id)
+                                            debug_log(f"Cleared time off session for thread_id: {thread_id}", "bot_logic")
+                                        except Exception as e:
+                                            debug_log(f"Error clearing time off session: {str(e)}", "bot_logic")
+                                    else:
+                                        response = { 'message': f"Could not submit request: {result}" }
+                except Exception as e:
+                    import traceback
+                    debug_log(f"Error in timeoff confirm: {str(e)}", "bot_logic")
+                    debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                    response = { 'message': f"An error occurred: {e}" }
+            elif normalized_msg == 'timeoff_cancel':
+                # Handle time off cancellation
+                response = { 'message': 'Time off request cancelled.' }
+                # Clear time off session after cancellation
+                try:
+                    session_manager.clear_session(thread_id)
+                    debug_log(f"Cleared time off session after cancellation for thread_id: {thread_id}", "bot_logic")
+                except Exception as e:
+                    debug_log(f"Error clearing time off session after cancellation: {str(e)}", "bot_logic")
+            elif normalized_msg.startswith('submit_timeoff_request:'):
+                # Handle submit time off request - create new request (called after confirmation)
+                try:
+                    # Format: submit_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                    parts = normalized_msg.split(':', 1)
+                    if len(parts) < 2:
+                        response = { 'message': 'Invalid submit request format' }
+                    else:
+                        data_parts = parts[1].split('|')
+                        if len(data_parts) < 4:
+                            response = { 'message': 'Invalid submit data format' }
+                        else:
+                            leave_type_id = int(data_parts[0])
+                            date_from = data_parts[1]  # DD/MM/YYYY format
+                            date_to = data_parts[2]  # DD/MM/YYYY format
+                            is_custom_hours = data_parts[3].lower() == 'true'
+                            hour_from = data_parts[4] if len(data_parts) > 4 else ''
+                            hour_to = data_parts[5] if len(data_parts) > 5 else ''
+                            
+                            # Convert dates from DD/MM/YYYY to YYYY-MM-DD
+                            try:
+                                from datetime import datetime
+                                dt_from = datetime.strptime(date_from, '%d/%m/%Y')
+                                date_from_ymd = dt_from.strftime('%Y-%m-%d')
+                                
+                                if is_custom_hours:
+                                    # For custom hours, end date is same as start date
+                                    date_to_ymd = date_from_ymd
+                                else:
+                                    dt_to = datetime.strptime(date_to, '%d/%m/%Y')
+                                    date_to_ymd = dt_to.strftime('%Y-%m-%d')
+                            except Exception as e:
+                                response = { 'message': f"Invalid date format: {e}" }
+                            
+                            # Prepare extra fields for custom hours
+                            extra_fields = {}
+                            if is_custom_hours:
+                                extra_fields['request_unit_hours'] = True
+                                # Convert hour keys (e.g., "9" or "9.5") to Odoo format
+                                def hour_key_to_odoo(key):
+                                    if not key:
+                                        return ''
+                                    try:
+                                        hour_float = float(key)
+                                        # Round to nearest half-hour (Odoo only accepts whole or half hours)
+                                        hour_float = round(hour_float * 2) / 2.0
+                                        if abs(hour_float - round(hour_float)) < 1e-9:
+                                            return str(int(round(hour_float)))
+                                        return f"{hour_float:.1f}".rstrip('0').rstrip('.')
+                                    except Exception:
+                                        return ''
+                                
+                                if hour_from:
+                                    hour_from_odoo = hour_key_to_odoo(hour_from)
+                                    if hour_from_odoo:
+                                        extra_fields['request_hour_from'] = hour_from_odoo
+                                if hour_to:
+                                    hour_to_odoo = hour_key_to_odoo(hour_to)
+                                    if hour_to_odoo:
+                                        extra_fields['request_hour_to'] = hour_to_odoo
+                            
+                            # Handle document upload if provided (for Sick Leave)
+                            new_attachment_data = None
+                            if file_attachment and isinstance(file_attachment, dict):
+                                new_attachment_data = file_attachment
+                            
+                            # Submit the leave request
+                            employee_id = employee_data.get('id') if employee_data else None
+                            if not employee_id:
+                                response = { 'message': 'Employee ID not found' }
+                            else:
+                                ok, result = timeoff_service.submit_leave_request(
+                                    employee_id, leave_type_id, date_from_ymd, date_to_ymd,
+                                    description="Time off request submitted via Nasma chatbot",
+                                    extra_fields=extra_fields if extra_fields else None,
+                                    supporting_attachments=[new_attachment_data] if new_attachment_data else None
+                                )
+                                if ok:
+                                    leave_id = result.get('leave_id') if isinstance(result, dict) else result
+                                    response = { 'message': f'Your time off request has been submitted successfully! Request ID: #{leave_id}' }
+                                else:
+                                    response = { 'message': f"Could not submit request: {result}" }
+                except Exception as e:
+                    import traceback
+                    debug_log(f"Error in submit time off request: {str(e)}", "bot_logic")
+                    debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                    response = { 'message': f"An error occurred: {e}" }
+            elif (
+                normalized_msg in {
+                    'show my requests', 'my requests', 'show requests', 'view my requests',
+                    'pending requests', 'my pending requests', 'show my pending requests'
+                }
+                or (
+                    'request' in normalized_msg and (
+                        'my' in normalized_msg or 'show' in normalized_msg or 'view' in normalized_msg or 'pending' in normalized_msg
+                    )
+                    and not normalized_msg.startswith('edit_timeoff_request:')
+                    and not normalized_msg.startswith('update_timeoff_request:')
+                    and not normalized_msg.startswith('submit_timeoff_request:')
+                    and not normalized_msg.startswith('edit_overtime_request:')
+                    and not normalized_msg.startswith('update_overtime_request:')
+                )
+            ):
+                # User query: show my overtime and time off requests
+                try:
+                    ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
+                    if ok_requests:
+                        if isinstance(requests_data, dict):
+                            ot_requests = requests_data.get('overtime_requests', [])
+                            to_requests = requests_data.get('timeoff_requests', [])
+                            
+                            ot_count = len(ot_requests) if isinstance(ot_requests, list) else 0
+                            to_count = len(to_requests) if isinstance(to_requests, list) else 0
+                            
+                            # Get user timezone for timezone conversion
+                            user_tz = None
+                            try:
+                                user_tz = (employee_data or {}).get('tz') if isinstance(employee_data, dict) else None
+                            except Exception:
+                                user_tz = None
+                            
+                            msg = format_my_requests_message(ot_count, to_count)
+                            actioned_ot_requests = requests_data.get('actioned_overtime_requests', [])
+                            actioned_to_requests = requests_data.get('actioned_timeoff_requests', [])
+                            tables = build_my_requests_table_widget(ot_requests, to_requests, actioned_ot_requests, actioned_to_requests, user_tz)
+                            
+                            widgets_dict = {
+                                'my_overtime_requests': tables.get('overtime'),
+                                'my_timeoff_requests': tables.get('timeoff'),
+                            }
+                            # Add actioned requests if available
+                            if tables.get('actioned'):
+                                widgets_dict['my_actioned_requests'] = tables.get('actioned')
+                            # Store full actioned requests data for full view modal
+                            if tables.get('actioned_full'):
+                                widgets_dict['my_actioned_requests_full'] = tables.get('actioned_full')
+                            
+                            response = {
+                                'message': msg,
+                                'widgets': widgets_dict
+                            }
+                        else:
+                            response = { 'message': str(requests_data) }
+                    else:
+                        response = { 'message': f"I couldn't retrieve your requests right now: {requests_data}" }
+                except Exception as e:
+                    response = { 'message': f"An error occurred retrieving your requests: {e}" }
+            elif normalized_msg.startswith('edit_overtime_request:'):
+                # Handle edit overtime request - fetch request details and show form
+                try:
+                    # Format: edit_overtime_request:REQUEST_ID
+                    parts = normalized_msg.split(':', 1)
+                    if len(parts) < 2:
+                        response = { 'message': 'Invalid edit request format' }
+                    else:
+                        request_id = int(parts[1])
+                        # Get user timezone for timezone conversion
+                        user_tz = None
+                        try:
+                            user_tz = (employee_data or {}).get('tz') if isinstance(employee_data, dict) else None
+                        except Exception:
+                            user_tz = None
+                        ok, request_data = get_overtime_request_for_edit(odoo_service, request_id, user_tz)
+                        if ok:
+                            # Get projects list for dropdown - use same import pattern as rest of file
+                            try:
+                                from .services.overtime_service import OvertimeService
+                            except Exception:
+                                from services.overtime_service import OvertimeService
+                            
+                            edit_overtime_service = OvertimeService(odoo_service, employee_service, session_manager, metrics_service)
+                            ok_projects, projects = edit_overtime_service._list_projects()
+                            project_options = []
+                            if ok_projects and isinstance(projects, list):
+                                project_options = [{'value': str(p.get('id')), 'label': p.get('name') or p.get('display_name', '')} for p in projects if p.get('id')]
+                            
+                            # Generate hour options
+                            hour_options = edit_overtime_service._generate_hour_options()
+                            
+                            response = {
+                                'message': '**Edit Overtime Request**\n\nPlease update the details below:',
+                                'widgets': {
+                                    'edit_overtime_form': True,
+                                    'request_id': request_id,
+                                    'date_start': request_data.get('date_start', ''),
+                                    'hour_from': str(request_data.get('hour_from', '')),
+                                    'hour_to': str(request_data.get('hour_to', '')),
+                                    'project_id': str(request_data.get('project_id', '')),
+                                    'hour_options': hour_options,
+                                    'project_options': project_options,
+                                    'context_key': 'update_overtime_request'
+                                }
+                            }
+                        else:
+                            response = { 'message': f"Could not fetch request details: {request_data}" }
+                except Exception as e:
+                    import traceback
+                    debug_log(f"Error in edit overtime request: {str(e)}", "bot_logic")
+                    debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                    response = { 'message': f"An error occurred: {e}" }
+            elif normalized_msg.startswith('update_overtime_request:'):
+                # Handle update overtime request - apply changes
+                try:
+                    # Format: update_overtime_request:REQUEST_ID|DATE_START|HOUR_FROM|HOUR_TO|PROJECT_ID
+                    parts = normalized_msg.split(':', 1)
+                    if len(parts) < 2:
+                        response = { 'message': 'Invalid update request format' }
+                    else:
+                        data_parts = parts[1].split('|')
+                        if len(data_parts) < 5:
+                            response = { 'message': 'Invalid update data format' }
+                        else:
+                            request_id = int(data_parts[0])
+                            date_str = data_parts[1]  # DD/MM/YYYY format
+                            hour_from = data_parts[2]
+                            hour_to = data_parts[3]
+                            project_id = int(data_parts[4])
+                            
+                            # Get user timezone for timezone conversion
+                            user_tz = None
+                            try:
+                                user_tz = (employee_data or {}).get('tz') if isinstance(employee_data, dict) else None
+                            except Exception:
+                                user_tz = None
+                            
+                            # Note: date_start is already in DD/MM/YYYY format, update_overtime_request will handle conversion
+                            ok, result = update_overtime_request(odoo_service, request_id, date_str, date_str, hour_from, hour_to, project_id, user_tz)
+                            if ok:
+                                response = { 'message': 'Your overtime request has been updated successfully!' }
+                                # Log overtime_edit metric
+                                _log_usage_metric('overtime_edit', thread_id, {
+                                    'request_id': request_id,
+                                    'date': date_str,
+                                    'hour_from': hour_from,
+                                    'hour_to': hour_to,
+                                    'project_id': project_id
+                                }, employee_data)
+                            else:
+                                response = { 'message': f"Could not update request: {result}" }
+                except Exception as e:
+                    response = { 'message': f"An error occurred: {e}" }
+            elif normalized_msg.startswith('cancel_overtime_request:'):
+                # Handle cancel overtime request
+                try:
+                    # Format: cancel_overtime_request:REQUEST_ID
+                    parts = normalized_msg.split(':', 1)
+                    if len(parts) < 2:
+                        response = { 'message': 'Invalid cancel request format' }
+                    else:
+                        request_id = int(parts[1])
+                        ok, result = cancel_overtime_request(odoo_service, request_id)
+                        if ok:
+                            response = { 'message': 'Your overtime request has been cancelled successfully!' }
+                            # Log overtime_cancellation metric
+                            _log_usage_metric('overtime_cancellation', thread_id, {
+                                'request_id': request_id
+                            }, employee_data)
+                        else:
+                            response = { 'message': f"Could not cancel request: {result}" }
+                except Exception as e:
+                    response = { 'message': f"An error occurred: {e}" }
+            elif normalized_msg.startswith('cancel_timeoff_request:'):
+                # Handle cancel time off request
+                try:
+                    # Format: cancel_timeoff_request:LEAVE_ID
+                    parts = normalized_msg.split(':', 1)
+                    if len(parts) < 2:
+                        response = { 'message': 'Invalid cancel request format' }
+                    else:
+                        leave_id = int(parts[1])
+                        ok, result = cancel_timeoff_request(odoo_service, leave_id)
+                        if ok:
+                            response = { 'message': 'Your time off request has been cancelled successfully!' }
+                            # Log timeoff_cancellation metric
+                            _log_usage_metric('timeoff_cancellation', thread_id, {
+                                'leave_id': leave_id
+                            }, employee_data)
+                        else:
+                            response = { 'message': f"Could not cancel request: {result}" }
+                except Exception as e:
+                    response = { 'message': f"An error occurred: {e}" }
             elif normalized_msg in {
                 'set up new users','setup new users','create new users','new users',
                 'set up new user','setup new user','set up a new user','setup a new user',
@@ -2652,153 +3325,202 @@ def create_app():
                         'error': True
                     }
             else:
-                # Detect document intent
-                intent, confidence, meta = intent_service.detect(message)
-                if intent == 'timeoff_request' and confidence >= 0.5:
-                    # Handle time-off request through ChatGPT service
-                    debug_log(f"Time-off intent detected with confidence {confidence:.2f}", "bot_logic")
-                    # Store Odoo session data in Flask's request-scoped 'g' object (isolated per request)
-                    g.odoo_session_data = get_odoo_session_data()
-                    response = chatgpt_service.get_response(message, thread_id, employee_data)
-                    if response:
-                        if isinstance(response, dict):
-                            message_text = response.get('message', str(response))
-                            response_data = {
-                                'response': message_text,
-                                'status': 'success',
-                                'has_employee_context': employee_data is not None,
-                                'thread_id': response.get('thread_id', thread_id)
-                            }
-                            if 'buttons' in response:
-                                response_data['buttons'] = response['buttons']
-                            if 'widgets' in response:
-                                response_data['widgets'] = response['widgets']
-                            resp_thread_id = response.get('thread_id') or thread_id
-                            if resp_thread_id:
-                                _log_chat_message_event(
-                                    resp_thread_id,
-                                    'assistant',
-                                    message_text,
-                                    employee_data,
-                                    {'source': 'timeoff'}
-                                )
-                            return jsonify(response_data)
-                        else:
-                            if thread_id:
-                                _log_chat_message_event(
-                                    thread_id,
-                                    'assistant',
-                                    response,
-                                    employee_data,
-                                    {'source': 'timeoff'}
-                                )
-                            return jsonify({
-                                'response': response,
-                                'status': 'success',
-                                'has_employee_context': employee_data is not None,
-                                'thread_id': thread_id
-                            })
-                elif intent == 'reimbursement_request' and confidence >= 0.5:
-                    # Handle reimbursement request through the reimbursement service
-                    reimb_resp = reimbursement_service.handle_flow(message, thread_id, employee_data or {})
-                    if reimb_resp:
-                        resp_thread = reimb_resp.get('thread_id') or thread_id
-                        assistant_text = reimb_resp.get('message', '')
-                        if assistant_text:
-                            _log_chat_message_event(
-                                resp_thread,
-                                'assistant',
-                                assistant_text,
-                                employee_data,
-                                {'source': 'reimbursement'}
-                            )
-                        # Note: Metrics are logged by reimbursement_service._log_metric() when expense is created
-                        return jsonify({
-                            'response': reimb_resp.get('message', ''),
-                            'status': 'success',
-                            'has_employee_context': employee_data is not None,
-                            'thread_id': resp_thread,
-                            'widgets': reimb_resp.get('widgets'),
-                            'buttons': reimb_resp.get('buttons')
-                        })
-                elif intent == 'experience_letter' and confidence >= 0.5:
-                    success, att = document_service.generate_experience_letter()
-                    if success:
-                        extra_meta = {'attachment_name': att.get('filename') if isinstance(att, dict) else None}
-                        _log_document_metric(thread_id, 'experience_letter', extra=extra_meta, employee=employee_data)
+                # Check for active overtime session with cancellation intent before calling ChatGPT
+                active_overtime_session = session_manager.get_session(thread_id) if session_manager else None
+                is_active_overtime = active_overtime_session and active_overtime_session.get('type') == 'overtime'
+                if is_active_overtime and normalized_msg in {'no', 'n', 'cancel', 'overtime_cancel'}:
+                    debug_log(f"Active overtime session detected with cancellation message '{normalized_msg}', cancelling session", "bot_logic")
+                    try:
+                        session_manager.cancel_session(thread_id, 'User cancelled overtime flow')
+                        session_manager.clear_session(thread_id)
                         response = {
-                            'message': 'Your Experience Letter is ready.\n\nPlease double-check the document, I\'m fast, but not always perfect.',
-                            'attachments': [att]
+                            'message': 'Overtime request cancelled.',
+                            'thread_id': thread_id
                         }
-                    else:
+                    except Exception as e:
+                        debug_log(f"Error cancelling overtime session: {str(e)}", "bot_logic")
                         response = {
-                            'message': f"Error generating Experience Letter: {att}",
-                            'error': True
+                            'message': 'Overtime request cancelled.',
+                            'thread_id': thread_id
                         }
-                elif intent == 'employment_letter' and confidence >= 0.5:
-                    # If the user mentioned embassy anywhere, route to embassy flow instead of employment letter
-                    if 'embassy' in normalized_msg:
-                        countries = [
-                            {'label': n, 'value': n} for n in [
-                                'Afghanistan','Albania','Algeria','Andorra','Angola','Antigua and Barbuda','Argentina','Armenia','Australia','Austria','Azerbaijan',
-                                'Bahamas','Bahrain','Bangladesh','Barbados','Belarus','Belgium','Belize','Benin','Bhutan','Bolivia','Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi',
-                                'Cabo Verde','Cambodia','Cameroon','Canada','Central African Republic','Chad','Chile','China','Colombia','Comoros','Congo','Democratic Republic of the Congo','Costa Rica','Cote d\'Ivoire','Croatia','Cuba','Cyprus','Czechia',
-                                'Denmark','Djibouti','Dominica','Dominican Republic',
-                                'Ecuador','Egypt','El Salvador','Equatorial Guinea','Eritrea','Estonia','Eswatini','Ethiopia',
-                                'Fiji','Finland','France',
-                                'Gabon','Gambia','Georgia','Germany','Ghana','Greece','Grenada','Guatemala','Guinea','Guinea-Bissau','Guyana',
-                                'Haiti','Honduras','Hungary',
-                                'Iceland','India','Indonesia','Iran','Iraq','Ireland','Israel','Italy',
-                                'Jamaica','Japan','Jordan',
-                                'Kazakhstan','Kenya','Kiribati','North Korea','South Korea','Kuwait','Kyrgyzstan',
-                                'Laos','Latvia','Lebanon','Lesotho','Liberia','Libya','Liechtenstein','Lithuania','Luxembourg',
-                                'Madagascar','Malawi','Malaysia','Maldives','Mali','Malta','Marshall Islands','Mauritania','Mauritius','Mexico','Micronesia','Moldova','Monaco','Mongolia','Montenegro','Morocco','Mozambique','Myanmar',
-                                'Namibia','Nauru','Nepal','Netherlands','New Zealand','Nicaragua','Niger','Nigeria','North Macedonia','Norway',
-                                'Oman',
-                                'Pakistan','Palau','Panama','Papua New Guinea','Paraguay','Peru','Philippines','Poland','Portugal',
-                                'Qatar',
-                                'Romania','Russia','Rwanda',
-                                'Saint Kitts and Nevis','Saint Lucia','Saint Vincent and the Grenadines','Samoa','San Marino','Sao Tome and Principe','Saudi Arabia','Senegal','Serbia','Seychelles','Sierra Leone','Singapore','Slovakia','Slovenia','Solomon Islands','Somalia','South Africa','South Sudan','Spain','Sri Lanka','Sudan','Suriname','Sweden','Switzerland','Syria',
-                                'Taiwan','Tajikistan','Tanzania','Thailand','Timor-Leste','Togo','Tonga','Trinidad and Tobago','Tunisia','Turkey','Turkmenistan','Tuvalu',
-                                'Uganda','Ukraine','United Arab Emirates','United Kingdom','United States','Uruguay','Uzbekistan',
-                                'Vanuatu','Vatican City','Venezuela','Vietnam',
-                                'Yemen',
-                                'Zambia','Zimbabwe'
-                            ]
-                        ]
-                        response = {
-                            'message': 'Which country will you be visiting?',
-                            'widgets': {
-                                'select_dropdown': True,
-                                'options': countries,
-                                'context_key': 'embassy_country',
-                                'placeholder': 'Select a country'
-                            }
-                        }
-                    else:
-                        response = {
-                            'message': 'Which version of the Employment Letter would you like?',
-                            'buttons': [
-                                { 'text': 'Employment letter (English)', 'value': 'generate_employment_letter_en', 'type': 'action_document' },
-                                { 'text': 'Employment letter (Arabic)', 'value': 'generate_employment_letter_ar', 'type': 'action_document' }
-                            ]
-                        }
-                elif intent == 'document_request' and confidence >= 0.5:
-                    response = {
-                        'message': 'Which document would you like to generate?',
-                        'buttons': [
-                            { 'text': 'Employment letter', 'value': 'employment_letter_options', 'type': 'action_document' },
-                            { 'text': 'Embassy employment letter', 'value': 'embassy_letter', 'type': 'action_document' },
-                            { 'text': 'Experience letter', 'value': 'generate_experience_letter', 'type': 'action_document' }
-                        ]
-                    }
                 else:
-                    # Delegate to ChatGPT
-                    debug_log(f"Calling ChatGPT with employee_data: {employee_data is not None}", "bot_logic")
-                    # Store Odoo session data in Flask's request-scoped 'g' object (isolated per request)
-                    g.odoo_session_data = get_odoo_session_data()
-                    response = chatgpt_service.get_response(message, thread_id, employee_data)
-                    debug_log(f"ChatGPT response received", "bot_logic")
+                    # Detect document intent
+                    # Skip time-off intent detection if this is an internal command
+                    is_internal_timeoff_command = (
+                        normalized_msg.startswith('confirm_timeoff_request:') or
+                        normalized_msg.startswith('submit_timeoff_request:') or
+                        normalized_msg.startswith('edit_timeoff_request:') or
+                        normalized_msg.startswith('update_timeoff_request:') or
+                        normalized_msg.startswith('cancel_timeoff_request:') or
+                        normalized_msg == 'timeoff_confirm' or
+                        normalized_msg == 'timeoff_cancel'
+                    )
+                    
+                    if not is_internal_timeoff_command:
+                        intent, confidence, meta = intent_service.detect(message)
+                        if intent == 'timeoff_request' and confidence >= 0.5:
+                            # Handle time-off request through ChatGPT service
+                            # Store Odoo session data in Flask's request-scoped 'g' object (isolated per request)
+                            g.odoo_session_data = get_odoo_session_data()
+                            response = chatgpt_service.get_response(message, thread_id, employee_data)
+                            if response:
+                                if isinstance(response, dict):
+                                    message_text = response.get('message', str(response))
+                                    response_data = {
+                                        'response': message_text,
+                                        'status': 'success',
+                                        'has_employee_context': employee_data is not None,
+                                        'thread_id': response.get('thread_id', thread_id)
+                                    }
+                                    if 'buttons' in response:
+                                        response_data['buttons'] = response['buttons']
+                                    if 'widgets' in response:
+                                        response_data['widgets'] = response['widgets']
+                                    resp_thread_id = response.get('thread_id') or thread_id
+                                    if resp_thread_id:
+                                        _log_chat_message_event(
+                                            resp_thread_id,
+                                            'assistant',
+                                            message_text,
+                                            employee_data,
+                                            {'source': 'timeoff'}
+                                        )
+                                    return jsonify(response_data)
+                                else:
+                                    if thread_id:
+                                        _log_chat_message_event(
+                                            thread_id,
+                                            'assistant',
+                                            response,
+                                            employee_data,
+                                            {'source': 'timeoff'}
+                                        )
+                                    return jsonify({
+                                        'response': response,
+                                        'status': 'success',
+                                        'has_employee_context': employee_data is not None,
+                                        'thread_id': thread_id
+                                    })
+                    elif intent == 'reimbursement_request' and confidence >= 0.5:
+                        # Handle reimbursement request through the reimbursement service
+                        reimb_resp = reimbursement_service.handle_flow(message, thread_id, employee_data or {})
+                        if reimb_resp:
+                            resp_thread = reimb_resp.get('thread_id') or thread_id
+                            assistant_text = reimb_resp.get('message', '')
+                            if assistant_text:
+                                _log_chat_message_event(
+                                    resp_thread,
+                                    'assistant',
+                                    assistant_text,
+                                    employee_data,
+                                    {'source': 'reimbursement'}
+                                )
+                            # Note: Metrics are logged by reimbursement_service._log_metric() when expense is created
+                            return jsonify({
+                                'response': reimb_resp.get('message', ''),
+                                'status': 'success',
+                                'has_employee_context': employee_data is not None,
+                                'thread_id': resp_thread,
+                                'widgets': reimb_resp.get('widgets'),
+                                'buttons': reimb_resp.get('buttons')
+                            })
+                    elif intent == 'experience_letter' and confidence >= 0.5:
+                        success, att = document_service.generate_experience_letter()
+                        if success:
+                            extra_meta = {'attachment_name': att.get('filename') if isinstance(att, dict) else None}
+                            _log_document_metric(thread_id, 'experience_letter', extra=extra_meta, employee=employee_data)
+                            response = {
+                                'message': 'Your Experience Letter is ready.\n\nPlease double-check the document, I\'m fast, but not always perfect.',
+                                'attachments': [att]
+                            }
+                        else:
+                            response = {
+                                'message': f"Error generating Experience Letter: {att}",
+                                'error': True
+                            }
+                    elif intent == 'employment_letter' and confidence >= 0.5:
+                        # If the user mentioned embassy anywhere, route to embassy flow instead of employment letter
+                        if 'embassy' in normalized_msg:
+                            countries = [
+                                {'label': n, 'value': n} for n in [
+                                    'Afghanistan','Albania','Algeria','Andorra','Angola','Antigua and Barbuda','Argentina','Armenia','Australia','Austria','Azerbaijan',
+                                    'Bahamas','Bahrain','Bangladesh','Barbados','Belarus','Belgium','Belize','Benin','Bhutan','Bolivia','Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi',
+                                    'Cabo Verde','Cambodia','Cameroon','Canada','Central African Republic','Chad','Chile','China','Colombia','Comoros','Congo','Democratic Republic of the Congo','Costa Rica','Cote d\'Ivoire','Croatia','Cuba','Cyprus','Czechia',
+                                    'Denmark','Djibouti','Dominica','Dominican Republic',
+                                    'Ecuador','Egypt','El Salvador','Equatorial Guinea','Eritrea','Estonia','Eswatini','Ethiopia',
+                                    'Fiji','Finland','France',
+                                    'Gabon','Gambia','Georgia','Germany','Ghana','Greece','Grenada','Guatemala','Guinea','Guinea-Bissau','Guyana',
+                                    'Haiti','Honduras','Hungary',
+                                    'Iceland','India','Indonesia','Iran','Iraq','Ireland','Israel','Italy',
+                                    'Jamaica','Japan','Jordan',
+                                    'Kazakhstan','Kenya','Kiribati','North Korea','South Korea','Kuwait','Kyrgyzstan',
+                                    'Laos','Latvia','Lebanon','Lesotho','Liberia','Libya','Liechtenstein','Lithuania','Luxembourg',
+                                    'Madagascar','Malawi','Malaysia','Maldives','Mali','Malta','Marshall Islands','Mauritania','Mauritius','Mexico','Micronesia','Moldova','Monaco','Mongolia','Montenegro','Morocco','Mozambique','Myanmar',
+                                    'Namibia','Nauru','Nepal','Netherlands','New Zealand','Nicaragua','Niger','Nigeria','North Macedonia','Norway',
+                                    'Oman',
+                                    'Pakistan','Palau','Panama','Papua New Guinea','Paraguay','Peru','Philippines','Poland','Portugal',
+                                    'Qatar',
+                                    'Romania','Russia','Rwanda',
+                                    'Saint Kitts and Nevis','Saint Lucia','Saint Vincent and the Grenadines','Samoa','San Marino','Sao Tome and Principe','Saudi Arabia','Senegal','Serbia','Seychelles','Sierra Leone','Singapore','Slovakia','Slovenia','Solomon Islands','Somalia','South Africa','South Sudan','Spain','Sri Lanka','Sudan','Suriname','Sweden','Switzerland','Syria',
+                                    'Taiwan','Tajikistan','Tanzania','Thailand','Timor-Leste','Togo','Tonga','Trinidad and Tobago','Tunisia','Turkey','Turkmenistan','Tuvalu',
+                                    'Uganda','Ukraine','United Arab Emirates','United Kingdom','United States','Uruguay','Uzbekistan',
+                                    'Vanuatu','Vatican City','Venezuela','Vietnam',
+                                    'Yemen',
+                                    'Zambia','Zimbabwe'
+                                ]
+                            ]
+                            response = {
+                                'message': 'Which country will you be visiting?',
+                                'widgets': {
+                                    'select_dropdown': True,
+                                    'options': countries,
+                                    'context_key': 'embassy_country',
+                                    'placeholder': 'Select a country'
+                                }
+                            }
+                        else:
+                            response = {
+                                'message': 'Which version of the Employment Letter would you like?',
+                                'buttons': [
+                                    { 'text': 'Employment letter (English)', 'value': 'generate_employment_letter_en', 'type': 'action_document' },
+                                    { 'text': 'Employment letter (Arabic)', 'value': 'generate_employment_letter_ar', 'type': 'action_document' }
+                                ]
+                            }
+                    elif intent == 'document_request' and confidence >= 0.5:
+                        response = {
+                            'message': 'Which document would you like to generate?',
+                            'buttons': [
+                                { 'text': 'Employment letter', 'value': 'employment_letter_options', 'type': 'action_document' },
+                                { 'text': 'Embassy employment letter', 'value': 'embassy_letter', 'type': 'action_document' },
+                                { 'text': 'Experience letter', 'value': 'generate_experience_letter', 'type': 'action_document' }
+                            ]
+                        }
+                    else:
+                        # Check for active overtime session with cancellation intent before calling ChatGPT
+                        active_overtime_session = session_manager.get_session(thread_id) if session_manager else None
+                        is_active_overtime = active_overtime_session and active_overtime_session.get('type') == 'overtime'
+                        if is_active_overtime and normalized_msg in {'no', 'n', 'cancel', 'overtime_cancel'}:
+                            debug_log(f"Active overtime session detected with cancellation message '{normalized_msg}', cancelling session", "bot_logic")
+                            try:
+                                session_manager.cancel_session(thread_id, 'User cancelled overtime flow')
+                                session_manager.clear_session(thread_id)
+                                response = {
+                                    'message': 'Overtime request cancelled.',
+                                    'thread_id': thread_id
+                                }
+                            except Exception as e:
+                                debug_log(f"Error cancelling overtime session: {str(e)}", "bot_logic")
+                                response = {
+                                    'message': 'Overtime request cancelled.',
+                                    'thread_id': thread_id
+                                }
+                        else:
+                            # Delegate to ChatGPT
+                            debug_log(f"Calling ChatGPT with employee_data: {employee_data is not None}", "bot_logic")
+                            # Store Odoo session data in Flask's request-scoped 'g' object (isolated per request)
+                            g.odoo_session_data = get_odoo_session_data()
+                            response = chatgpt_service.get_response(message, thread_id, employee_data)
+                            debug_log(f"ChatGPT response received", "bot_logic")
 
             # Reimbursement flow: handle after ChatGPT service (time-off requests)
             if not isinstance(response, dict) or not response.get('message'):
@@ -2841,6 +3563,20 @@ def create_app():
                     traceback.print_exc()
 
             # Handle both string and dict responses from ChatGPT service
+            # If response was not set by any handler, use ChatGPT service as fallback
+            if response is None:
+                debug_log("Response is None, using ChatGPT service fallback", "bot_logic")
+                # No handler matched, use ChatGPT service
+                try:
+                    chatgpt_resp = chatgpt_service.process_message(message, thread_id, employee_data or {}, get_odoo_session_data())
+                    if chatgpt_resp:
+                        response = chatgpt_resp
+                except Exception as e:
+                    debug_log(f"Error in ChatGPT service fallback: {str(e)}", "bot_logic")
+                    response = { 'message': 'Sorry, I encountered an error. Please try again.' }
+            
+            debug_log(f"Processing response: type={type(response)}, is_dict={isinstance(response, dict)}", "bot_logic")
+            
             if isinstance(response, dict):
                 message_text = response.get('message', str(response))
                 response_data = {
@@ -2862,7 +3598,7 @@ def create_app():
                 try:
                     widgets = response_data.get('widgets') or {}
                     if isinstance(widgets, dict) and widgets.get('new_user_upload'):
-                        print("[DEBUG] new_user_flow response:", response_data)
+                        pass  # Widget handling done elsewhere
                 except Exception:
                     pass
 
@@ -2917,6 +3653,27 @@ def create_app():
             return jsonify({'success': True, 'threads': threads})
         except Exception as exc:
             return jsonify({'success': False, 'message': str(exc)}), 500
+
+    @app.route('/api/check-unlogged-tasks', methods=['GET'])
+    def check_unlogged_tasks():
+        """Check if there are unlogged tasks that need to be logged."""
+        if not session.get('authenticated'):
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        try:
+            employee_profile = _fetch_employee_profile()
+            if not employee_profile:
+                return jsonify({'success': False, 'has_unlogged_tasks': False})
+            
+            employee_data = {
+                'id': employee_profile.get('id'),
+                'name': employee_profile.get('name', '')
+            }
+            
+            has_tasks = has_unlogged_tasks(odoo_service, employee_data)
+            return jsonify({'success': True, 'has_unlogged_tasks': has_tasks})
+        except Exception as exc:
+            return jsonify({'success': False, 'has_unlogged_tasks': False, 'message': str(exc)}), 500
 
     @app.route('/api/conversations/<thread_id>/messages', methods=['GET'])
     def list_conversation_messages(thread_id):

@@ -422,10 +422,6 @@ def build_overtime_table_widget(odoo_service, team: List[Dict], days_ahead: int 
         # Use two-step fetch like your code: search => read
         search_params = { 'args': [domain], 'kwargs': {} }
         ok, request_ids = _make_odoo_request(odoo_service, 'approval.request', 'search', search_params)
-        try:
-            print(f"DEBUG OVERTIME: search ok={ok}, ids_count={len(request_ids) if isinstance(request_ids, list) else 'N/A'} domain={domain}")
-        except Exception:
-            pass
         if not ok:
             return False, request_ids
         if not isinstance(request_ids, list) or len(request_ids) == 0:
@@ -438,10 +434,6 @@ def build_overtime_table_widget(odoo_service, team: List[Dict], days_ahead: int 
                 }
             }
             ok, rows = _make_odoo_request(odoo_service, 'approval.request', 'read', read_params)
-            try:
-                print(f"DEBUG OVERTIME: read ok={ok}, rows_count={len(rows) if isinstance(rows, list) else 'N/A'}")
-            except Exception:
-                pass
             if not ok:
                 return False, rows
 
@@ -520,8 +512,8 @@ def build_overtime_table_widget(odoo_service, team: List[Dict], days_ahead: int 
                 rid = r.get('id')
                 approval_html = (
                     f"<div class=\"flex flex-col items-center\">"
-                    f"<button class=\"approval-button bg-green-600 text-white hover:bg-green-700 border-green-700\" data-action=\"approve\" data-model=\"approval.request\" data-id=\"{rid}\">Approve</button>"
-                    f"<button class=\"approval-button bg-red-600 text-white hover:bg-red-700 border-red-700 mt-1\" data-action=\"refuse\" data-model=\"approval.request\" data-id=\"{rid}\">Deny</button>"
+                    f"<button class=\"approval-button bg-green-600 text-white hover:bg-green-700\" data-action=\"approve\" data-model=\"approval.request\" data-id=\"{rid}\">Approve</button>"
+                    f"<button class=\"approval-button bg-red-600 text-white hover:bg-red-700 mt-1\" data-action=\"refuse\" data-model=\"approval.request\" data-id=\"{rid}\">Deny</button>"
                     f"</div>"
                 )
 
@@ -586,14 +578,14 @@ def build_team_overview_table_widget(overview: List[Dict]) -> Dict[str, Any]:
                         # Second approval: show single orange button that logs message
                         approval_html = (
                             "<div class=\"flex flex-col items-center\">"
-                            "<button class=\"approval-button bg-orange-500 text-white hover:bg-orange-600 border-orange-600\" data-action=\"note\" data-model=\"hr.leave\" data-id=\"{lid}\">Second approval</button>"
+                            "<button class=\"approval-button bg-orange-500 text-white hover:bg-orange-600\" data-action=\"note\" data-model=\"hr.leave\" data-id=\"{lid}\">Second approval</button>"
                             "</div>"
                         )
                     elif state == 'confirm':
                         approval_html = (
                             f"<div class=\"flex flex-col items-center\">"
-                            f"<button class=\"approval-button bg-green-600 text-white hover:bg-green-700 border-green-700\" data-action=\"approve\" data-model=\"hr.leave\" data-id=\"{lid}\">Approve</button>"
-                            f"<button class=\"approval-button bg-red-600 text-white hover:bg-red-700 border-red-700 mt-1\" data-action=\"refuse\" data-model=\"hr.leave\" data-id=\"{lid}\">Deny</button>"
+                            f"<button class=\"approval-button bg-green-600 text-white hover:bg-green-700\" data-action=\"approve\" data-model=\"hr.leave\" data-id=\"{lid}\">Approve</button>"
+                            f"<button class=\"approval-button bg-red-600 text-white hover:bg-red-700 mt-1\" data-action=\"refuse\" data-model=\"hr.leave\" data-id=\"{lid}\">Deny</button>"
                             f"</div>"
                         )
             except Exception:

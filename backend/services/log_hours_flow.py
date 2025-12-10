@@ -775,6 +775,133 @@ def _fetch_subtask_details(odoo_service, subtask_ids: List[int]) -> Dict[int, Di
         return {}
 
 
+def has_unlogged_tasks(odoo_service, employee_data: dict) -> bool:
+    """Check if there are any unlogged tasks that need to be logged.
+    
+    Args:
+        odoo_service: Active Odoo service instance
+        employee_data: Employee data dict with 'id' and 'name' fields
+    
+    Returns:
+        True if there are unlogged tasks with log hours action buttons, False otherwise
+    """
+    try:
+        employee_name = employee_data.get('name', '')
+        employee_id = employee_data.get('id')
+        
+        if not employee_name or not employee_id:
+            return False
+        
+        # Fetch tasks for current month
+        ok, tasks_data = _fetch_current_month_tasks(odoo_service, employee_name, employee_id=employee_id)
+        
+        if not ok or not tasks_data or len(tasks_data) == 0:
+            return False
+        
+        # Use the same logic as build_tasks_table_widget to check for unlogged tasks
+        # We need to check if any task has unlogged days
+        task_counts_by_subtask_date = {}
+        subtask_ids_to_fetch = set()
+        
+        for task in tasks_data:
+            sub_task = task.get('x_studio_sub_task_1')
+            subtask_id = None
+            if sub_task and sub_task is not False:
+                if isinstance(sub_task, (list, tuple)) and len(sub_task) > 1:
+                    subtask_id = sub_task[0] if isinstance(sub_task[0], int) else None
+                elif isinstance(sub_task, (list, tuple)) and len(sub_task) == 1:
+                    if isinstance(sub_task[0], int):
+                        subtask_id = sub_task[0]
+            
+            if subtask_id:
+                subtask_ids_to_fetch.add(subtask_id)
+            
+            start_dt = task.get('start_datetime', '')
+            end_dt = task.get('end_datetime', '')
+            
+            try:
+                if start_dt and end_dt:
+                    start_parsed = datetime.strptime(start_dt, '%Y-%m-%d %H:%M:%S')
+                    end_parsed = datetime.strptime(end_dt, '%Y-%m-%d %H:%M:%S')
+                    start_date_only = start_parsed.date()
+                    end_date_only = end_parsed.date()
+                else:
+                    continue
+            except Exception:
+                continue
+            
+            if subtask_id:
+                all_days = _get_date_range_days(start_date_only, end_date_only)
+                for day in all_days:
+                    key = (subtask_id, day)
+                    task_counts_by_subtask_date[key] = task_counts_by_subtask_date.get(key, 0) + 1
+        
+        if not subtask_ids_to_fetch:
+            return False
+        
+        # Fetch timesheet entry counts for all subtasks
+        # Get date range from all tasks
+        all_start_dates = []
+        all_end_dates = []
+        for task in tasks_data:
+            start_dt = task.get('start_datetime', '')
+            end_dt = task.get('end_datetime', '')
+            try:
+                if start_dt and end_dt:
+                    start_parsed = datetime.strptime(start_dt, '%Y-%m-%d %H:%M:%S')
+                    end_parsed = datetime.strptime(end_dt, '%Y-%m-%d %H:%M:%S')
+                    all_start_dates.append(start_parsed.date())
+                    all_end_dates.append(end_parsed.date())
+            except Exception:
+                continue
+        
+        if not all_start_dates or not all_end_dates:
+            return False
+        
+        min_start = min(all_start_dates)
+        max_end = max(all_end_dates)
+        
+        # Check each subtask individually to see if it has unlogged days
+        # We need to check timesheet counts per subtask since _fetch_timesheet_entry_counts filters by subtask_id
+        for subtask_id in subtask_ids_to_fetch:
+            # Get all days for this subtask
+            subtask_days = set()
+            for key, task_count in task_counts_by_subtask_date.items():
+                if key[0] == subtask_id:
+                    subtask_days.add(key[1])
+            
+            if not subtask_days:
+                continue
+            
+            min_day = min(subtask_days)
+            max_day = max(subtask_days)
+            
+            # Fetch timesheet counts for this subtask
+            ok_timesheet, timesheet_counts_result = _fetch_timesheet_entry_counts(
+                odoo_service, employee_id, min_day, max_day, subtask_id=subtask_id
+            )
+            
+            if not ok_timesheet:
+                # If we can't fetch timesheet entries, assume there are unlogged tasks
+                return True
+            
+            timesheet_counts = timesheet_counts_result if isinstance(timesheet_counts_result, dict) else {}
+            
+            # Check if any day for this subtask has fewer timesheet entries than tasks
+            for key, task_count in task_counts_by_subtask_date.items():
+                if key[0] == subtask_id:
+                    day = key[1]
+                    timesheet_count = timesheet_counts.get(day, 0)
+                    if timesheet_count < task_count:
+                        return True
+        
+        return False
+        
+    except Exception as e:
+        debug_log(f"Error checking for unlogged tasks: {str(e)}", "bot_logic")
+        return False
+
+
 def build_tasks_table_widget(odoo_service, employee_data: dict, tasks: List[Dict]) -> Dict[str, Any]:
     """Build a table widget payload to render tasks in the frontend.
 
@@ -1662,8 +1789,19 @@ def create_timesheet_entry(odoo_service, employee_data: dict, context: dict, odo
             # Build task table widget (this filters out already logged tasks)
             tasks_table = build_tasks_table_widget(odoo_service, employee_data, remaining_tasks)
             
-            # Check if there are any unlogged tasks in the table
-            if tasks_table.get('rows') and len(tasks_table.get('rows', [])) > 0:
+            # Check if there are any unlogged tasks in the table with "Log Hours" button
+            # Only show prompt if there are tasks with subtask_id (which have the Log Hours button)
+            rows = tasks_table.get('rows', [])
+            has_loggable_tasks = False
+            if rows:
+                for row in rows:
+                    log_hours_html = row.get('log_hours', '')
+                    # Check if the row has a Log Hours button (not just a dash)
+                    if log_hours_html and 'log-hours-btn' in log_hours_html:
+                        has_loggable_tasks = True
+                        break
+            
+            if has_loggable_tasks:
                 response_data['message'] += '\n\n**Would you like to log another task?**'
                 response_data['widgets'] = {
                     'tasks_table': tasks_table

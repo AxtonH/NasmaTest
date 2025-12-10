@@ -114,8 +114,6 @@ class OvertimeService:
         if not text:
             return False, 0.0
         s = (text or '').lower()
-        
-        debug_log(f"Overtime detection for message: '{text}'", "bot_logic")
 
         # If the user is asking about policy/rules/information, don't start the flow
         policy_keywords = [
@@ -123,7 +121,6 @@ class OvertimeService:
             'what is', 'how does', 'how do', 'tell me about', 'explain', 'information about', 'details about'
         ]
         if any(k in s for k in policy_keywords):
-            debug_log(f"Overtime detection blocked by policy keywords", "bot_logic")
             return False, 0.0
 
         # Require action-oriented phrasing if "overtime" is present
@@ -146,7 +143,6 @@ class OvertimeService:
                     score = max(score, 0.7 if p == 'overtime' else 0.5)
 
         result = (score >= 0.5), min(1.0, score)
-        debug_log(f"Overtime detection result: {result[0]}, confidence: {result[1]:.2f}", "bot_logic")
         return result
 
     # -------------------------- Odoo utilities ---------------------------
@@ -280,6 +276,27 @@ class OvertimeService:
         while v <= 23.75 + 1e-9:  # 23.75 = 23:45
             _push_hour(v)
             v += 0.25  # 15 minutes = 0.25 hours
+        
+        return options
+
+    def _generate_hour_options_30min(self) -> List[Dict[str, str]]:
+        """Generate hour options with 30-minute intervals covering 24 hours (0:00 to 23:30).
+        
+        Used for time off custom hours which require 30-minute intervals.
+        """
+        options = []
+        def _push_hour(val: float):
+            key = str(int(val)) if abs(val - int(val)) < 1e-9 else f"{val:.2f}".rstrip('0').rstrip('.')
+            h = int(val)
+            m = int(round((val - h) * 60))  # Calculate minutes from decimal part
+            label = f"{h:02d}:{m:02d}"
+            options.append({'value': key, 'label': label})
+        
+        # Generate all 30-minute intervals from 0:00 to 23:30
+        v = 0.0
+        while v <= 23.5 + 1e-9:  # 23.5 = 23:30
+            _push_hour(v)
+            v += 0.5  # 30 minutes = 0.5 hours
         
         return options
 
@@ -442,7 +459,7 @@ class OvertimeService:
                     finally:
                         self.session_manager.clear_session(thread_id)
                     return {
-                        'message': 'request cancelled, can i help you with anything else',
+                        'message': 'Overtime request cancelled.',
                         'thread_id': thread_id,
                         'session_handled': True
                     }
@@ -454,7 +471,6 @@ class OvertimeService:
 
             # Detect new intent first
             is_ot, conf = self.detect_intent(message)
-            debug_log(f"Overtime intent detection result: is_ot={is_ot}, confidence={conf:.2f}", "bot_logic")
             if not is_ot:
                 return None
 
@@ -604,7 +620,7 @@ class OvertimeService:
                 finally:
                     self.session_manager.clear_session(thread_id)
                 return {
-                    'message': 'request cancelled, can i help you with anything else',
+                    'message': 'Overtime request cancelled.',
                     'thread_id': thread_id,
                     'session_handled': True
                 }
@@ -802,7 +818,7 @@ class OvertimeService:
                 finally:
                     self.session_manager.clear_session(thread_id)
                 return {
-                    'message': 'request cancelled, can i help you with anything else',
+                    'message': 'Overtime request cancelled.',
                     'thread_id': thread_id,
                     'session_handled': True
                 }
@@ -916,7 +932,7 @@ class OvertimeService:
                         'thread_id': thread_id,
                         'session_handled': True
                     }
-                elif low in {'no', 'n', 'cancel', 'stop', 'exit', 'quit', 'abort', 'end', 'undo'}:
+                elif msg in {'no', 'n', 'cancel', 'stop', 'exit', 'quit', 'abort', 'end', 'undo', 'overtime_cancel'}:
                     try:
                         self.session_manager.cancel_session(thread_id, 'User cancelled overtime flow')
                     finally:
@@ -926,7 +942,7 @@ class OvertimeService:
                         except Exception:
                             pass
                     return {
-                        'message': 'request cancelled, can i help you with anything else',
+                        'message': 'Overtime request cancelled.',
                         'thread_id': thread_id,
                         'session_handled': True
                     }

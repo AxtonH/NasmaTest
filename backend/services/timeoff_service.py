@@ -77,7 +77,6 @@ class TimeOffService:
         Use fuzzy logic to detect time-off request intent
         Returns: (is_timeoff_request, confidence_score, extracted_data)
         """
-        debug_log(f"TimeOff detection for message: '{message}'", "bot_logic")
         message_lower = message.lower()
         confidence = 0.0
         extracted_data = {}
@@ -97,7 +96,6 @@ class TimeOffService:
                     confidence += 0.3  # Standard patterns
                 matched_patterns.append(f"Pattern {i+1}: {pattern}")
 
-        debug_log(f"Pattern matches: {pattern_matches}, Matched: {matched_patterns}", "bot_logic")
 
         # Extract leave type if mentioned (gives strong confidence boost)
         leave_type = self._extract_leave_type(message_lower)
@@ -144,7 +142,6 @@ class TimeOffService:
         # Threshold for detection - balanced for better accuracy
         is_timeoff_request = confidence >= 0.4
         
-        debug_log(f"TimeOff detection result - confidence: {confidence:.2f}, is_timeoff: {is_timeoff_request}, extracted: {extracted_data}", "bot_logic")
         return is_timeoff_request, confidence, extracted_data
     
     def _extract_leave_type(self, message: str) -> Optional[str]:
@@ -332,10 +329,7 @@ class TimeOffService:
             Tuple[bool, Any, Optional[Dict]]: (success, result_data, renewed_session_data)
         """
         try:
-            print(f"DEBUG: submit_leave_request_stateless - employee_id: {employee_id}, session_id: {session_id[:20] if session_id else 'None'}..., user_id: {user_id}")
-
             if not session_id or not user_id:
-                print(f"DEBUG: Missing session_id or user_id")
                 return False, "Session data missing", None
 
             # Prepare leave request data
@@ -352,15 +346,12 @@ class TimeOffService:
             if extra_fields and isinstance(extra_fields, dict):
                 leave_data.update(extra_fields)
 
-            print(f"DEBUG: Leave request data: {leave_data}")
-
             # Create the leave request using stateless method
             params = {
                 'args': [leave_data],
                 'kwargs': {}
             }
 
-            print(f"DEBUG: Making Odoo request to create leave")
             success, data, renewed_session = self._make_odoo_request_stateless(
                 'hr.leave', 'create', params,
                 session_id=session_id,
@@ -369,13 +360,8 @@ class TimeOffService:
                 password=password
             )
 
-            print(f"DEBUG: Odoo request result - Success: {success}, Data: {data}")
-            if renewed_session:
-                print(f"DEBUG: Session was renewed during submission")
-
             if success:
                 leave_id = data
-                print(f"DEBUG: Leave request created successfully with ID: {leave_id}")
 
                 # Handle attachments if provided
                 attachment_ids: List[int] = []
@@ -397,7 +383,6 @@ class TimeOffService:
                                 'type': 'binary',
                                 'mimetype': mimetype,
                             }
-                            print(f"DEBUG: Uploading supporting document '{name}' for leave {leave_id}")
                             att_success, att_id = self._make_odoo_request_stateless('ir.attachment', 'create', {
                                 'args': [attachment_payload],
                                 'kwargs': {}
@@ -405,34 +390,25 @@ class TimeOffService:
 
                             if att_success and isinstance(att_id, int):
                                 attachment_ids.append(att_id)
-                            else:
-                                print(f"DEBUG: Failed to create attachment for '{name}': {att_id}")
-                        except Exception as attachment_error:
-                            print(f"DEBUG: Exception uploading attachment {idx}: {attachment_error}")
+                        except Exception:
+                            pass
 
                     if attachment_ids:
-                        print(f"DEBUG: Linking {len(attachment_ids)} attachments to supported_attachment_ids")
                         link_args = {
                             'args': [[leave_id], {'supported_attachment_ids': [(6, 0, attachment_ids)]}],
                             'kwargs': {}
                         }
                         link_success, link_resp = self._make_odoo_request_stateless('hr.leave', 'write', link_args,
                             session_id=session_id, user_id=user_id, username=username, password=password)
-                        if not link_success:
-                            print(f"DEBUG: Failed to link supporting attachments: {link_resp}")
 
                 return True, {
                     'leave_id': leave_id,
                     'message': f"Leave request #{leave_id} submitted successfully and is pending approval."
                 }, renewed_session
             else:
-                print(f"DEBUG: Leave request creation failed: {data}")
                 return False, data, renewed_session
 
         except Exception as e:
-            print(f"DEBUG: Exception during leave request submission: {e}")
-            import traceback
-            traceback.print_exc()
             return False, f"Error submitting leave request: {str(e)}", None
 
     def _make_odoo_request(self, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
@@ -473,17 +449,9 @@ class TimeOffService:
                 )
             
             if response.status_code == 200:
-                # Log response for debugging
-                response_text = response.text
-                debug_log(f"Odoo response length: {len(response_text)} characters", "odoo_data")
-                debug_log(f"Odoo response preview: {response_text[:500]}...", "odoo_data")
-                
                 try:
                     result = response.json()
                     if 'result' in result:
-                        debug_log(f"Successfully parsed JSON, result type: {type(result['result'])}", "odoo_data")
-                        if isinstance(result['result'], list):
-                            debug_log(f"Leave types count: {len(result['result'])}", "odoo_data")
                         return True, result['result']
                     else:
                         error_msg = f"Odoo API error: {result.get('error', 'Unknown error')}"
@@ -511,7 +479,6 @@ class TimeOffService:
             renewed_session_data is None if session wasn't renewed, otherwise contains new session info
         """
         try:
-            print(f"DEBUG: _make_odoo_request_stateless - session_id: {session_id[:20] if session_id else 'None'}..., user_id: {user_id}")
 
             result = self.odoo_service.make_authenticated_request(
                 model=model,
@@ -533,13 +500,11 @@ class TimeOffService:
                 return False, error_msg, renewed_session
 
             if 'result' in result:
-                debug_log(f"Successfully parsed JSON, result type: {type(result['result'])}", "odoo_data")
                 return True, result['result'], renewed_session
             else:
                 return False, "Unknown error in Odoo response", renewed_session
 
         except Exception as e:
-            print(f"DEBUG: Exception in _make_odoo_request_stateless: {e}")
             import traceback
             traceback.print_exc()
             return False, f"Request error: {str(e)}", None
@@ -874,3 +839,175 @@ class TimeOffService:
             return None
         except Exception:
             return None
+    
+    def build_timeoff_confirmation_message(self, leave_type_id: int, date_from: str, date_to: str, 
+                                          is_custom_hours: bool, hour_from: str = '', hour_to: str = '',
+                                          employee_data: Optional[Dict] = None,
+                                          leave_balance_service=None) -> Tuple[bool, Any]:
+        """Build confirmation message for time off request with all details.
+        
+        Args:
+            leave_type_id: Leave type ID
+            date_from: Start date in DD/MM/YYYY format
+            date_to: End date in DD/MM/YYYY format
+            is_custom_hours: Whether this is custom hours mode
+            hour_from: Start hour key (e.g., "9" or "9.5")
+            hour_to: End hour key (e.g., "17" or "17.5")
+            employee_data: Employee data dict
+            leave_balance_service: Leave balance service instance
+        
+        Returns:
+            Tuple of (success: bool, confirmation_data: dict with message and buttons)
+        """
+        try:
+            # Fetch leave type name
+            ok_types, leave_types = self.get_leave_types()
+            leave_type_name = "Unknown"
+            if ok_types and isinstance(leave_types, list):
+                for lt in leave_types:
+                    if lt.get('id') == leave_type_id:
+                        leave_type_name = lt.get('name', 'Unknown')
+                        break
+            
+            # Format dates
+            def fmt_date(d: str) -> str:
+                try:
+                    # If already in DD/MM/YYYY format, return as is
+                    if '/' in d and len(d.split('/')) == 3:
+                        return d
+                    # Otherwise parse and format
+                    return datetime.strptime(d, '%Y-%m-%d').strftime('%d/%m/%Y')
+                except Exception:
+                    return d
+            
+            date_from_formatted = fmt_date(date_from)
+            date_to_formatted = fmt_date(date_to)
+            
+            # Format hours for display
+            def format_hour_key(key: str) -> str:
+                """Convert hour key (e.g., "9" or "9.5") to HH:MM format."""
+                if not key:
+                    return ''
+                try:
+                    hour_float = float(key)
+                    hour = int(hour_float)
+                    minute = int(round((hour_float - hour) * 60))
+                    return f"{hour:02d}:{minute:02d}"
+                except Exception:
+                    return key
+            
+            hour_from_formatted = format_hour_key(hour_from) if is_custom_hours else ''
+            hour_to_formatted = format_hour_key(hour_to) if is_custom_hours else ''
+            
+            # Get leave balance
+            remaining_leave_text = ""
+            if leave_balance_service and employee_data and employee_data.get('id'):
+                try:
+                    employee_id = employee_data.get('id')
+                    remaining, error = leave_balance_service.calculate_remaining_leave(
+                        employee_id, leave_type_name, None
+                    )
+                    if not error and remaining:
+                        formatted_msg = leave_balance_service.format_remaining_leave_message(remaining)
+                        if formatted_msg:
+                            # Format: Only "Available [leave type]:" should be bold, not "[X] days"
+                            # Handle multiple leave types separated by " | "
+                            parts = formatted_msg.split(" | ")
+                            formatted_parts = []
+                            for part in parts:
+                                if ":" in part:
+                                    label, value = part.split(":", 1)
+                                    formatted_parts.append(f"**{label.strip()}:**{value.strip()}")
+                                else:
+                                    formatted_parts.append(part)
+                            formatted_balance = " | ".join(formatted_parts)
+                            remaining_leave_text = f"\n⏰ {formatted_balance}"
+                except Exception as e:
+                    debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
+            
+            # Build confirmation message
+            employee_name = employee_data.get('name', 'Unknown') if employee_data else 'Unknown'
+            
+            if is_custom_hours:
+                msg = (
+                    "Here are the details for your time off request:\n\n"
+                    f"📋 **Leave Type:** {leave_type_name}\n"
+                    f"📅 **Date:** {date_from_formatted}\n"
+                    f"⏰ **Hours:** {hour_from_formatted} → {hour_to_formatted}\n"
+                    f"👤 **Employee:** {employee_name}{remaining_leave_text}\n\n"
+                    "Do you want to submit this request? Reply or click 'Yes' to confirm or 'No' to cancel"
+                )
+            else:
+                msg = (
+                    "Here are the details for your time off request:\n\n"
+                    f"📋 **Leave Type:** {leave_type_name}\n"
+                    f"📅 **Start Date:** {date_from_formatted}\n"
+                    f"📅 **End Date:** {date_to_formatted}\n"
+                    f"👤 **Employee:** {employee_name}{remaining_leave_text}\n\n"
+                    "Do you want to submit this request? Reply or click 'Yes' to confirm or 'No' to cancel"
+                )
+            
+            buttons = [
+                {'text': 'Yes', 'value': 'timeoff_confirm', 'type': 'action'},
+                {'text': 'No', 'value': 'timeoff_cancel', 'type': 'action'}
+            ]
+            
+            return True, {
+                'message': msg,
+                'buttons': buttons,
+                'leave_type_id': leave_type_id,
+                'date_from': date_from,
+                'date_to': date_to,
+                'is_custom_hours': is_custom_hours,
+                'hour_from': hour_from,
+                'hour_to': hour_to
+            }
+        except Exception as e:
+            import traceback
+            debug_log(f"Error building confirmation message: {str(e)}", "bot_logic")
+            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+            return False, f"Error building confirmation message: {str(e)}"
+    
+    def build_timeoff_request_form_data(self, employee_id: int) -> Tuple[bool, Any]:
+        """Build form widget data for initial time off request.
+        
+        Returns widget data similar to edit form but for new requests.
+        """
+        try:
+            # Fetch leave types
+            ok_leave_types, leave_types = self.get_leave_types()
+            if not ok_leave_types:
+                return False, "Failed to fetch leave types"
+            
+            # Filter to only show main types: Annual Leave, Sick Leave, Unpaid Leave
+            main_types = ['Annual Leave', 'Sick Leave', 'Unpaid Leave']
+            leave_type_options = []
+            for lt in leave_types:
+                lt_name = lt.get('name', '')
+                if lt_name in main_types:
+                    leave_type_options.append({
+                        'value': str(lt.get('id')),
+                        'label': lt_name
+                    })
+            
+            # Generate hour options (30-minute intervals)
+            # Simple function to generate hour options without needing OvertimeService
+            hour_options = []
+            for hour in range(24):
+                # Whole hour
+                hour_options.append({
+                    'value': str(hour),
+                    'label': f"{hour:02d}:00"
+                })
+                # Half hour
+                hour_options.append({
+                    'value': f"{hour}.5",
+                    'label': f"{hour:02d}:30"
+                })
+            
+            return True, {
+                'leave_type_options': leave_type_options,
+                'hour_options': hour_options
+            }
+        except Exception as e:
+            return False, f"Error building time off request form: {str(e)}"

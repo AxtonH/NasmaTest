@@ -1,0 +1,82 @@
+<svg width="37" height="38" viewBox="0 0 37 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Filing Cabinet – Doodle Style</title>
+
+  <!-- Cabinet body (doodled) -->
+  <path d="M7 6 
+           Q6.5 4.5 9 4.5 
+           H30 
+           Q32 4.8 31.5 7 
+           V33 
+           Q31.8 35 29 34.8 
+           H9 
+           Q6.8 34.5 7 32.5 
+           Z"
+        stroke="#FF6666"
+        stroke-width="1.8"
+        fill="none"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Top drawer -->
+  <path d="M9 8 
+           H28 
+           Q29.5 8.3 29 10 
+           V15 
+           Q29.2 17 27.5 16.8 
+           H9.5 
+           Q8.5 16.5 9 15 
+           Z"
+        stroke="#FF6666"
+        stroke-width="1.6"
+        fill="none"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Top handle -->
+  <path d="M15 11 
+           Q18 10.5 22 11 
+           Q22.5 12.8 21.5 13 
+           H15.5 
+           Q14.5 12.5 15 11"
+        fill="#FF6666"/>
+
+  <!-- Middle divider -->
+  <path d="M9 18.8 
+           Q18.5 19.5 28 18.9"
+        stroke="#FF6666"
+        stroke-width="1.5"
+        stroke-linecap="round"/>
+
+  <!-- Bottom drawer -->
+  <path d="M9 21 
+           H28 
+           Q29.2 21.5 29 23 
+           V28 
+           Q29.1 29.5 27.5 29.5 
+           H9.5 
+           Q8.6 29.2 9 28 
+           Z"
+        stroke="#FF6666"
+        stroke-width="1.6"
+        fill="none"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Bottom handle -->
+  <path d="M15 24.5 
+           Q18 24 22 24.6 
+           Q22.4 26.3 21.5 26.5 
+           H15.8 
+           Q14.7 26 15 24.5"
+        fill="#FF6666"/>
+
+  <!-- Feet -->
+  <path d="M11 35 Q12.5 36 14 35"
+        stroke="#FF6666"
+        stroke-width="1.6"
+        stroke-linecap="round"/>
+  <path d="M23 35 Q24.5 36 26 35"
+        stroke="#FF6666"
+        stroke-width="1.6"
+        stroke-linecap="round"/>
+</svg>

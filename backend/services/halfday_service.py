@@ -53,7 +53,6 @@ class HalfDayLeaveService:
             return leave_types
 
         annual_id = self._find_annual_leave_id(leave_types)
-        debug_log(f"HalfDay: Resolved Annual Leave ID: {annual_id}", "bot_logic")
 
         new_list: List[Dict] = []
         halfday_added = False

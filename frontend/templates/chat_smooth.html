@@ -205,6 +205,87 @@
              justify-content: center;
          }
 
+         /* Two-color gradient border for log my hours button when there are unlogged tasks */
+        .rainbow-border-log-hours {
+            position: relative;
+            isolation: isolate;
+            background-color: rgba(240, 235, 248, 0.85) !important;
+            overflow: visible !important; /* Allow glow to show outside */
+            /* Soft orange shadow glow behind the card - reduced by 50% */
+            box-shadow: 0 4px 20px rgba(255, 102, 102, 0.15),
+                        0 8px 40px rgba(255, 102, 102, 0.075);
+            transition: box-shadow 0.8s ease-out;
+        }
+        /* Create the border using border-image approach */
+        .rainbow-border-log-hours::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: calc(20px * var(--ui-scale));
+            padding: 2px; /* Border thickness */
+            background: linear-gradient(90deg, #FF6666, #8B7AB8, #FF6666, #8B7AB8, #FF6666);
+            background-size: 400%;
+            -webkit-mask: 
+                linear-gradient(#fff 0 0) content-box, 
+                linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask: 
+                linear-gradient(#fff 0 0) content-box, 
+                linear-gradient(#fff 0 0);
+            mask-composite: exclude;
+            z-index: 2;
+            pointer-events: none;
+            animation: gradient-shift 8s linear infinite;
+            opacity: var(--border-opacity, 1);
+            transition: opacity 0.8s ease-out;
+        }
+        /* Create faint glow around the border only */
+        .rainbow-border-log-hours::after {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border-radius: calc(22px * var(--ui-scale));
+            padding: 4px;
+            background: linear-gradient(90deg, #FF6666, #8B7AB8, #FF6666, #8B7AB8, #FF6666);
+            background-size: 400%;
+            filter: blur(6px);
+            opacity: calc(0.25 * var(--glow-opacity, 1));
+            -webkit-mask: 
+                linear-gradient(#fff 0 0) content-box, 
+                linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask: 
+                linear-gradient(#fff 0 0) content-box, 
+                linear-gradient(#fff 0 0);
+            mask-composite: exclude;
+            z-index: 1;
+            pointer-events: none;
+            animation: gradient-shift 8s linear infinite;
+            transition: opacity 0.8s ease-out;
+        }
+         @keyframes gradient-shift {
+             0% { background-position: 0 0; }
+             100% { background-position: 400% 0; }
+         }
+         /* Ensure button content is above the effects */
+         .rainbow-border-log-hours .card-content {
+             position: relative;
+             z-index: 3;
+         }
+         /* Keep glow faint on hover */
+         .rainbow-border-log-hours:hover {
+             background-color: rgba(240, 235, 248, 1) !important;
+             /* Slightly brighter orange shadow on hover - reduced by 50% */
+             box-shadow: 0 4px 24px rgba(255, 102, 102, 0.175),
+                         0 8px 48px rgba(255, 102, 102, 0.1);
+         }
+         .rainbow-border-log-hours:hover::before {
+             opacity: 1;
+         }
+         .rainbow-border-log-hours:hover::after {
+             opacity: 0.35;
+         }
+
         .label p {
             font-family: 'Poppins', sans-serif;
             font-weight: 500; /* Medium */
@@ -706,7 +787,7 @@
                                     <h3 class="text-lg font-semibold text-gray-800">Show my team</h3>
                                     <p class="text-sm text-gray-500 mt-2">Preview your direct reports</p>
                                     <div class="mt-4 flex justify-center">
-                                        <img src="/static/Show-my-team.svg" alt="Show my team" class="w-12 h-12" />
+                                        <img src="/static/Show-my-team.png" alt="Show my team" class="w-18 h-18" />
                                     </div>
                                 </div>
                             </div>
@@ -756,21 +837,29 @@
                         {% if is_manager %}
                         <button class="suggestion-card card" data-suggestion="show me my team members">
                             <div class="card-content">
-                                <div class="icon"><img src="/static/Show-my-team.svg" alt="Show my team" class="w-10 h-10"/></div>
+                                <div class="icon"><img src="/static/Show-my-team.png" alt="Show my team" class="w-18 h-18"/></div>
                                 <div class="label"><p>Show my team</p></div>
                             </div>
                         </button>
                         {% endif %}
+                        {% if not is_manager %}
+                        <button class="suggestion-card card" id="logMyHoursBtn" data-suggestion="log my hours" style="text-align: left;">
+                            <div class="card-content">
+                                <div class="icon" style="justify-content: flex-start;"><img src="/static/Log-my-hours.svg" alt="Log my hours" class="w-10 h-10"/></div>
+                                <div class="label"><p>Log my hours</p></div>
+                            </div>
+                        </button>
+                        {% endif %}
+                        <button class="suggestion-card card" data-suggestion="show my requests">
+                            <div class="card-content">
+                                <div class="icon"><img src="/static/show-my-requests.png" alt="Show my requests" class="w-18 h-18"/></div>
+                                <div class="label"><p>Show my requests</p></div>
+                            </div>
+                        </button>
                         <button class="suggestion-card card" data-suggestion="i want time off">
                             <div class="card-content">
                                 <div class="icon"><img src="/static/Timeoff.svg" alt="Time off" class="w-10 h-10"/></div>
                                 <div class="label"><p>Ask for time off</p></div>
-                            </div>
-                        </button>
-                        <button class="suggestion-card card" data-suggestion="Generate letters">
-                            <div class="card-content">
-                                <div class="icon"><img src="/static/Template.svg" alt="Ask for a document" class="w-10 h-10"/></div>
-                                <div class="label"><p>Ask for a document</p></div>
                             </div>
                         </button>
                         <button class="suggestion-card card" data-suggestion="Ask for overtime">
@@ -779,16 +868,22 @@
                                 <div class="label"><p>Ask for overtime</p></div>
                             </div>
                         </button>
+                        <button class="suggestion-card card" data-suggestion="Generate letters">
+                            <div class="card-content">
+                                <div class="icon"><img src="/static/Template.svg" alt="Ask for a document" class="w-10 h-10"/></div>
+                                <div class="label"><p>Ask for a document</p></div>
+                            </div>
+                        </button>
                         <button class="suggestion-card card" data-suggestion="i want to request a reimbursement">
                             <div class="card-content">
                                 <div class="icon"><img src="/static/Reimbursement.svg" alt="Ask for reimbursement" class="w-10 h-10"/></div>
                                 <div class="label"><p>Ask for reimbursement</p></div>
                             </div>
                         </button>
-                        {% if not is_manager %}
-                        <button class="suggestion-card card" data-suggestion="log my hours">
+                        {% if is_manager %}
+                        <button class="suggestion-card card" id="logMyHoursBtnManager" data-suggestion="log my hours" style="text-align: left;">
                             <div class="card-content">
-                                <div class="icon"><img src="/static/Template.svg" alt="Log my hours" class="w-10 h-10"/></div>
+                                <div class="icon" style="justify-content: flex-start;"><img src="/static/Log-my-hours.svg" alt="Log my hours" class="w-10 h-10"/></div>
                                 <div class="label"><p>Log my hours</p></div>
                             </div>
                         </button>
@@ -906,12 +1001,16 @@
                         {% if is_manager %}
                         <button class="suggestion-btn suggestion-chip" data-suggestion="show me my team members">Show my team</button>
                         {% endif %}
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want time off">Ask for time off</button>
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="Generate letters">Generate letters</button>
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="Request Overtime">Ask for overtime</button>
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want to request a reimbursement">Ask for reimbursement</button>
                         {% if not is_manager %}
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="log my hours">Log my hours</button>
+                        <button class="suggestion-btn suggestion-chip" id="logMyHoursChip" data-suggestion="log my hours">Log my hours</button>
+                        {% endif %}
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="show my requests">Show my requests</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want time off">Ask for time off</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="Request Overtime">Ask for overtime</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="Generate letters">Generate letters</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want to request a reimbursement">Ask for reimbursement</button>
+                        {% if is_manager %}
+                        <button class="suggestion-btn suggestion-chip" id="logMyHoursChipManager" data-suggestion="log my hours">Log my hours</button>
                         {% endif %}
                     </div>
                     <div class="flex justify-center">
@@ -1551,7 +1650,9 @@
                     throw new Error('Failed to fetch conversations');
                 }
                 const data = await response.json();
-                const threads = Array.isArray(data?.threads) ? data.threads : [];
+                const allThreads = Array.isArray(data?.threads) ? data.threads : [];
+                // Limit to 5 most recent chats for sidebar display
+                const threads = allThreads.slice(0, 5);
                 historyState.threads = threads;
                 if (currentThreadId && threads.some(t => t.thread_id === currentThreadId)) {
                     historyState.selectedThreadId = currentThreadId;
@@ -1983,7 +2084,7 @@
         }
 
         // Add message to chat
-        function addMessageToChat(message, isUser = true, buttons = null, attachments = null) {
+        function addMessageToChat(message, isUser = true, buttons = null, attachments = null, widgets = null) {
             const chatContainer = document.getElementById('chatContainer');
             const messageDiv = document.createElement('div');
 
@@ -2002,6 +2103,11 @@
                 let buttonsHtml = '';
                 let widgetsHtml = '';
                 let attachmentsHtml = '';
+
+                // Store widgets data in message div for later access
+                if (widgets) {
+                    messageDiv.setAttribute('data-widgets', JSON.stringify(widgets));
+                }
 
                 if (buttons && Array.isArray(buttons) && buttons.length > 0) {
                     buttonsHtml = `
@@ -2292,7 +2398,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-blue-700 transition-colors">Apply</button>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[#7A5EB4] transition-colors">Apply</button>
                         </div>
                     `;
                     setTimeout(() => {
@@ -2474,6 +2580,692 @@
                             });
                         }
                     }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.edit_overtime_form) {
+                    // Edit overtime form widget (prefilled with existing data)
+                    const wid = `eotf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const dateId = `${wid}_date`;
+                    const hourFromId = `${wid}_hour_from`;
+                    const hourToId = `${wid}_hour_to`;
+                    const projectId = `${wid}_project`;
+                    const applyId = `${wid}_apply`;
+                    const requestId = buttons.widgets.request_id || '';
+                    
+                    const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
+                    const projectOptions = Array.isArray(buttons.widgets.project_options) ? buttons.widgets.project_options : [];
+                    
+                    const defaultDate = buttons.widgets.date_start || '';
+                    const defaultHourFrom = buttons.widgets.hour_from || '';
+                    const defaultHourTo = buttons.widgets.hour_to || '';
+                    const defaultProjectId = buttons.widgets.project_id || '';
+                    
+                    const projectOptsHtml = `<option value="" disabled ${!defaultProjectId ? 'selected' : ''}>Select project</option>` +
+                        projectOptions.map(o => {
+                            const isSelected = defaultProjectId && String(o.value) === String(defaultProjectId) ? 'selected' : '';
+                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                        }).join('');
+                    
+                    widgetsHtml = `
+                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">Date:</label>
+                                <input type="text" id="${dateId}" value="${escapeHtml(defaultDate)}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select a date" style="box-sizing: border-box; max-width: calc(100% - 90px);" />
+                            </div>
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">From:</label>
+                                <select id="${hourFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                                    <option value="" disabled ${!defaultHourFrom ? 'selected' : ''}>Select time</option>
+                                    ${hourOptions.map(o => {
+                                        const isSelected = defaultHourFrom && String(o.value) === String(defaultHourFrom) ? 'selected' : '';
+                                        return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                                    }).join('')}
+                                </select>
+                            </div>
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">To:</label>
+                                <select id="${hourToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                                    <option value="" disabled ${!defaultHourTo ? 'selected' : ''}>Select time</option>
+                                    ${hourOptions.map(o => {
+                                        const isSelected = defaultHourTo && String(o.value) === String(defaultHourTo) ? 'selected' : '';
+                                        return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                                    }).join('')}
+                                </select>
+                            </div>
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">Project:</label>
+                                <select id="${projectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                                    ${projectOptsHtml}
+                                </select>
+                            </div>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const applyBtn = document.getElementById(applyId);
+                        const dateEl = document.getElementById(dateId);
+                        const hourFromEl = document.getElementById(hourFromId);
+                        const hourToEl = document.getElementById(hourToId);
+                        const projectEl = document.getElementById(projectId);
+                        
+                        // Initialize flatpickr for date input
+                        if (dateEl && window.flatpickr) {
+                            const fp = window.flatpickr(`#${dateId}`, {
+                                dateFormat: 'd/m/Y',
+                                static: false,
+                                appendTo: document.body,
+                                defaultDate: defaultDate || undefined,
+                                onChange: (selectedDates) => {
+                                    const input = document.getElementById(dateId);
+                                    if (!input) return;
+                                    if (Array.isArray(selectedDates) && selectedDates.length > 0) {
+                                        const d = selectedDates[0];
+                                        const dd = String(d.getDate()).padStart(2,'0');
+                                        const mm = String(d.getMonth()+1).padStart(2,'0');
+                                        const yyyy = d.getFullYear();
+                                        input.value = `${dd}/${mm}/${yyyy}`;
+                                    }
+                                },
+                                onOpen: function() {
+                                    setTimeout(() => {
+                                        const cal = document.querySelector('.flatpickr-calendar');
+                                        if (cal) {
+                                            cal.style.zIndex = '2147483647';
+                                            cal.style.position = 'fixed';
+                                        }
+                                        const chatContainer = document.querySelector('#conversationState main');
+                                        if (chatContainer) {
+                                            chatContainer.scrollTo({
+                                                top: chatContainer.scrollHeight,
+                                                behavior: 'smooth'
+                                            });
+                                        }
+                                    }, 10);
+                                }
+                            });
+                        }
+                        
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const dateVal = dateEl ? dateEl.value.trim() : '';
+                                const hourFromVal = hourFromEl ? hourFromEl.value.trim() : '';
+                                const hourToVal = hourToEl ? hourToEl.value.trim() : '';
+                                const projectVal = projectEl ? projectEl.value : '';
+                                
+                                if (!dateVal) {
+                                    alert('Please select a date.');
+                                    return;
+                                }
+                                
+                                if (!hourFromVal || !hourToVal) {
+                                    alert('Please enter or select start and end times.');
+                                    return;
+                                }
+                                
+                                if (!projectVal) {
+                                    alert('Please select a project.');
+                                    return;
+                                }
+                                
+                                // Format: update_overtime_request:REQUEST_ID|DATE_START|HOUR_FROM|HOUR_TO|PROJECT_ID
+                                const outgoing = `update_overtime_request:${requestId}|${dateVal}|${hourFromVal}|${hourToVal}|${projectVal}`;
+                                
+                                // Show user-friendly message in chat
+                                const projectLabel = projectEl && projectEl.options && projectEl.selectedIndex >= 0 ? projectEl.options[projectEl.selectedIndex].text : projectVal;
+                                const userMsg = `Updated: Date: ${dateVal}, Time: ${hourFromVal} to ${hourToVal}, Project: ${projectLabel}`;
+                                addMessageToChat(userMsg, true);
+                                conversationHistory.push({role: 'user', content: userMsg});
+                                // Send internal format silently
+                                sendToBackend(outgoing);
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.edit_timeoff_form) {
+                    // Edit time off form widget (prefilled with existing data, dynamic fields)
+                    const wid = `etf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const leaveTypeId = `${wid}_leave_type`;
+                    const modeId = `${wid}_mode`;
+                    const dateFromId = `${wid}_date_from`;
+                    const dateToId = `${wid}_date_to`;
+                    const dateSingleId = `${wid}_date_single`;
+                    const hourFromId = `${wid}_hour_from`;
+                    const hourToId = `${wid}_hour_to`;
+                    const documentId = `${wid}_document`;
+                    const applyId = `${wid}_apply`;
+                    const leaveId = buttons.widgets.leave_id || '';
+                    
+                    const leaveTypeOptions = Array.isArray(buttons.widgets.leave_type_options) ? buttons.widgets.leave_type_options : [];
+                    const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
+                    
+                    const defaultLeaveTypeId = buttons.widgets.leave_type_id || '';
+                    const defaultDateFrom = buttons.widgets.date_from || '';
+                    const defaultDateTo = buttons.widgets.date_to || '';
+                    const defaultIsCustomHours = buttons.widgets.is_custom_hours || false;
+                    const defaultHourFrom = buttons.widgets.hour_from || '';
+                    const defaultHourTo = buttons.widgets.hour_to || '';
+                    
+                    const leaveTypeOptsHtml = `<option value="" disabled ${!defaultLeaveTypeId ? 'selected' : ''}>Select leave type</option>` +
+                        leaveTypeOptions.map(o => {
+                            const isSelected = defaultLeaveTypeId && String(o.value) === String(defaultLeaveTypeId) ? 'selected' : '';
+                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                        }).join('');
+                    
+                    // Determine if Sick Leave (needs document upload)
+                    const isSickLeave = leaveTypeOptions.find(opt => String(opt.value) === String(defaultLeaveTypeId) && opt.label === 'Sick Leave');
+                    
+                    widgetsHtml = `
+                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Leave Type:</label>
+                                <select id="${leaveTypeId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                    ${leaveTypeOptsHtml}
+                                </select>
+                            </div>
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Mode:</label>
+                                <div class="flex gap-2 flex-1 min-w-0">
+                                    <button id="${modeId}_full" class="h-10 px-4 rounded-full text-sm font-medium ${!defaultIsCustomHours ? 'btn-gradient text-white' : 'bg-white/70 text-gray-700 border border-gray-300'} transition-colors">Full Days</button>
+                                    <button id="${modeId}_custom" class="h-10 px-4 rounded-full text-sm font-medium ${defaultIsCustomHours ? 'btn-gradient text-white' : 'bg-white/70 text-gray-700 border border-gray-300'} transition-colors">Custom Hours</button>
+                                </div>
+                            </div>
+                            <div id="${wid}_full_days_fields" class="flex flex-col gap-3 w-full" style="display: ${defaultIsCustomHours ? 'none' : 'flex'};">
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Start Date:</label>
+                                    <input type="text" id="${dateFromId}" value="${escapeHtml(defaultDateFrom)}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select start date" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">End Date:</label>
+                                    <input type="text" id="${dateToId}" value="${escapeHtml(defaultDateTo)}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select end date" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                            </div>
+                            <div id="${wid}_custom_hours_fields" class="flex flex-col gap-3 w-full" style="display: ${defaultIsCustomHours ? 'flex' : 'none'};">
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Date:</label>
+                                    <input type="text" id="${dateSingleId}" value="${escapeHtml(defaultDateFrom)}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select date" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">From:</label>
+                                    <select id="${hourFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                        <option value="" disabled ${!defaultHourFrom ? 'selected' : ''}>Select time</option>
+                                        ${hourOptions.map(o => {
+                                            const isSelected = defaultHourFrom && String(o.value) === String(defaultHourFrom) ? 'selected' : '';
+                                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                                        }).join('')}
+                                    </select>
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">To:</label>
+                                    <select id="${hourToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                        <option value="" disabled ${!defaultHourTo ? 'selected' : ''}>Select time</option>
+                                        ${hourOptions.map(o => {
+                                            const isSelected = defaultHourTo && String(o.value) === String(defaultHourTo) ? 'selected' : '';
+                                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                                        }).join('')}
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="${wid}_document_fields" class="flex items-center justify-start gap-3 w-full min-w-0" style="display: ${isSickLeave ? 'flex' : 'none'}; box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Document:</label>
+                                <input type="file" id="${documentId}" accept=".pdf,.jpg,.jpeg,.png" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                            </div>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const applyBtn = document.getElementById(applyId);
+                        const leaveTypeEl = document.getElementById(leaveTypeId);
+                        const modeFullBtn = document.getElementById(`${modeId}_full`);
+                        const modeCustomBtn = document.getElementById(`${modeId}_custom`);
+                        const dateFromEl = document.getElementById(dateFromId);
+                        const dateToEl = document.getElementById(dateToId);
+                        const dateSingleEl = document.getElementById(dateSingleId);
+                        const hourFromEl = document.getElementById(hourFromId);
+                        const hourToEl = document.getElementById(hourToId);
+                        const documentEl = document.getElementById(documentId);
+                        const fullDaysFields = document.getElementById(`${wid}_full_days_fields`);
+                        const customHoursFields = document.getElementById(`${wid}_custom_hours_fields`);
+                        const documentFields = document.getElementById(`${wid}_document_fields`);
+                        
+                        // Handle leave type change (show/hide document field for Sick Leave)
+                        if (leaveTypeEl) {
+                            leaveTypeEl.addEventListener('change', () => {
+                                const selectedValue = leaveTypeEl.value;
+                                const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(selectedValue));
+                                const isSickLeave = selectedOption && selectedOption.label === 'Sick Leave';
+                                if (documentFields) {
+                                    documentFields.style.display = isSickLeave ? 'flex' : 'none';
+                                }
+                            });
+                        }
+                        
+                        // Handle mode toggle (Full Days vs Custom Hours)
+                        let isCustomHours = defaultIsCustomHours;
+                        if (modeFullBtn && modeCustomBtn) {
+                            modeFullBtn.addEventListener('click', () => {
+                                isCustomHours = false;
+                                modeFullBtn.className = 'h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors';
+                                modeCustomBtn.className = 'h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-gray-700 border border-gray-300 transition-colors';
+                                if (fullDaysFields) fullDaysFields.style.display = 'flex';
+                                if (customHoursFields) customHoursFields.style.display = 'none';
+                            });
+                            modeCustomBtn.addEventListener('click', () => {
+                                isCustomHours = true;
+                                modeCustomBtn.className = 'h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors';
+                                modeFullBtn.className = 'h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-gray-700 border border-gray-300 transition-colors';
+                                if (fullDaysFields) fullDaysFields.style.display = 'none';
+                                if (customHoursFields) customHoursFields.style.display = 'flex';
+                            });
+                        }
+                        
+                        // Initialize flatpickr for date inputs
+                        const initDatePicker = (el, defaultVal) => {
+                            if (el && window.flatpickr) {
+                                window.flatpickr(`#${el.id}`, {
+                                    dateFormat: 'd/m/Y',
+                                    static: false,
+                                    appendTo: document.body,
+                                    defaultDate: defaultVal || undefined,
+                                    onChange: (selectedDates) => {
+                                        if (Array.isArray(selectedDates) && selectedDates.length > 0) {
+                                            const d = selectedDates[0];
+                                            const dd = String(d.getDate()).padStart(2,'0');
+                                            const mm = String(d.getMonth()+1).padStart(2,'0');
+                                            const yyyy = d.getFullYear();
+                                            el.value = `${dd}/${mm}/${yyyy}`;
+                                        }
+                                    },
+                                    onOpen: function() {
+                                        setTimeout(() => {
+                                            const cal = document.querySelector('.flatpickr-calendar');
+                                            if (cal) {
+                                                cal.style.zIndex = '2147483647';
+                                                cal.style.position = 'fixed';
+                                            }
+                                            const chatContainer = document.querySelector('#conversationState main');
+                                            if (chatContainer) {
+                                                chatContainer.scrollTo({
+                                                    top: chatContainer.scrollHeight,
+                                                    behavior: 'smooth'
+                                                });
+                                            }
+                                        }, 10);
+                                    }
+                                });
+                            }
+                        };
+                        
+                        initDatePicker(dateFromEl, defaultDateFrom);
+                        initDatePicker(dateToEl, defaultDateTo);
+                        initDatePicker(dateSingleEl, defaultDateFrom);
+                        
+                        if (applyBtn) {
+                            applyBtn.addEventListener('click', () => {
+                                const leaveTypeVal = leaveTypeEl ? leaveTypeEl.value : '';
+                                const dateFromVal = isCustomHours ? (dateSingleEl ? dateSingleEl.value.trim() : '') : (dateFromEl ? dateFromEl.value.trim() : '');
+                                const dateToVal = isCustomHours ? dateFromVal : (dateToEl ? dateToEl.value.trim() : '');
+                                const hourFromVal = isCustomHours ? (hourFromEl ? hourFromEl.value.trim() : '') : '';
+                                const hourToVal = isCustomHours ? (hourToEl ? hourToEl.value.trim() : '') : '';
+                                
+                                if (!leaveTypeVal) {
+                                    alert('Please select a leave type.');
+                                    return;
+                                }
+                                
+                                if (!dateFromVal) {
+                                    alert('Please select a date.');
+                                    return;
+                                }
+                                
+                                if (!isCustomHours && !dateToVal) {
+                                    alert('Please select an end date.');
+                                    return;
+                                }
+                                
+                                if (isCustomHours && (!hourFromVal || !hourToVal)) {
+                                    alert('Please select start and end times.');
+                                    return;
+                                }
+                                
+                                // Convert hour keys (e.g., "9" or "9.5") to HH:MM format
+                                const hourKeyToTime = (key) => {
+                                    if (!key) return '';
+                                    try {
+                                        const hourFloat = parseFloat(key);
+                                        const hour = Math.floor(hourFloat);
+                                        const minute = Math.round((hourFloat - hour) * 60);
+                                        return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                                    } catch (e) {
+                                        return key; // Return as-is if conversion fails
+                                    }
+                                };
+                                
+                                const hourFromTime = isCustomHours ? hourKeyToTime(hourFromVal) : '';
+                                const hourToTime = isCustomHours ? hourKeyToTime(hourToVal) : '';
+                                
+                                // Handle document upload if provided (for Sick Leave)
+                                const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(leaveTypeVal));
+                                const isSickLeave = selectedOption && selectedOption.label === 'Sick Leave';
+                                const fileInput = documentEl;
+                                
+                                if (isSickLeave && fileInput && fileInput.files && fileInput.files.length > 0) {
+                                    // Upload document first, then update request
+                                    const file = fileInput.files[0];
+                                    const reader = new FileReader();
+                                    reader.onload = async function(e) {
+                                        const base64Data = e.target.result.split(',')[1]; // Remove data:type;base64, prefix
+                                        
+                                        // Send file data in request body instead of URL-encoded in command string
+                                        // Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                                        const outgoing = `update_timeoff_request:${leaveId}|${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromTime}|${hourToTime}`;
+                                        
+                                        // Prepare file data to send in request body
+                                        const fileData = {
+                                            filename: file.name,
+                                            mimetype: file.type || 'application/octet-stream',
+                                            data: base64Data
+                                        };
+                                        
+                                        // Show user-friendly message in chat
+                                        const leaveTypeLabel = leaveTypeEl && leaveTypeEl.options && leaveTypeEl.selectedIndex >= 0 ? leaveTypeEl.options[leaveTypeEl.selectedIndex].text : leaveTypeVal;
+                                        const modeLabel = isCustomHours ? 'Custom Hours' : 'Full Days';
+                                        const userMsg = `Updated: ${leaveTypeLabel} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
+                                        addMessageToChat(userMsg, true);
+                                        conversationHistory.push({role: 'user', content: userMsg});
+                                        // Send internal format with file data in request body
+                                        sendToBackendWithFile(outgoing, fileData);
+                                    };
+                                    reader.readAsDataURL(file);
+                                } else {
+                                    // No document upload, proceed with regular update
+                                    // Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                                    const outgoing = `update_timeoff_request:${leaveId}|${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromTime}|${hourToTime}`;
+                                    
+                                    // Show user-friendly message in chat
+                                    const leaveTypeLabel = leaveTypeEl && leaveTypeEl.options && leaveTypeEl.selectedIndex >= 0 ? leaveTypeEl.options[leaveTypeEl.selectedIndex].text : leaveTypeVal;
+                                    const modeLabel = isCustomHours ? 'Custom Hours' : 'Full Days';
+                                    const userMsg = `Updated: ${leaveTypeLabel} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
+                                    addMessageToChat(userMsg, true);
+                                    conversationHistory.push({role: 'user', content: userMsg});
+                                    // Send internal format silently
+                                    sendToBackend(outgoing);
+                                }
+                            });
+                        }
+                    }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.timeoff_request_form) {
+                    // Time off request form widget (new request, all fields in one bubble)
+                    const wid = `trf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const leaveTypeId = `${wid}_leave_type`;
+                    const modeId = `${wid}_mode`;
+                    const dateFromId = `${wid}_date_from`;
+                    const dateToId = `${wid}_date_to`;
+                    const dateSingleId = `${wid}_date_single`;
+                    const hourFromId = `${wid}_hour_from`;
+                    const hourToId = `${wid}_hour_to`;
+                    const documentId = `${wid}_document`;
+                    const submitId = `${wid}_submit`;
+                    
+                    const leaveTypeOptions = Array.isArray(buttons.widgets.leave_type_options) ? buttons.widgets.leave_type_options : [];
+                    const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
+                    
+                    const leaveTypeOptsHtml = `<option value="" disabled selected>Select leave type</option>` +
+                        leaveTypeOptions.map(o => {
+                            return `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`;
+                        }).join('');
+                    
+                    widgetsHtml = `
+                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Leave Type:</label>
+                                <select id="${leaveTypeId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                    ${leaveTypeOptsHtml}
+                                </select>
+                            </div>
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Mode:</label>
+                                <div class="flex gap-2 flex-1 min-w-0">
+                                    <button id="${modeId}_full" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors">Full Days</button>
+                                    <button id="${modeId}_custom" class="h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-gray-700 border border-gray-300 transition-colors">Custom Hours</button>
+                                </div>
+                            </div>
+                            <div id="${wid}_full_days_fields" class="flex flex-col gap-3 w-full" style="display: flex;">
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Start Date:</label>
+                                    <input type="text" id="${dateFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select start date" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">End Date:</label>
+                                    <input type="text" id="${dateToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select end date" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                            </div>
+                            <div id="${wid}_custom_hours_fields" class="flex flex-col gap-3 w-full" style="display: none;">
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Date:</label>
+                                    <input type="text" id="${dateSingleId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select date" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">From:</label>
+                                    <select id="${hourFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                        <option value="" disabled selected>Select time</option>
+                                        ${hourOptions.map(o => {
+                                            return `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`;
+                                        }).join('')}
+                                    </select>
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">To:</label>
+                                    <select id="${hourToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                        <option value="" disabled selected>Select time</option>
+                                        ${hourOptions.map(o => {
+                                            return `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`;
+                                        }).join('')}
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="${wid}_document_fields" class="flex items-center justify-start gap-3 w-full min-w-0" style="display: none; box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Document:</label>
+                                <input type="file" id="${documentId}" accept=".pdf,.jpg,.jpeg,.png" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                            </div>
+                            <button id="${submitId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const submitBtn = document.getElementById(submitId);
+                        const leaveTypeEl = document.getElementById(leaveTypeId);
+                        const modeFullBtn = document.getElementById(`${modeId}_full`);
+                        const modeCustomBtn = document.getElementById(`${modeId}_custom`);
+                        const dateFromEl = document.getElementById(dateFromId);
+                        const dateToEl = document.getElementById(dateToId);
+                        const dateSingleEl = document.getElementById(dateSingleId);
+                        const hourFromEl = document.getElementById(hourFromId);
+                        const hourToEl = document.getElementById(hourToId);
+                        const documentEl = document.getElementById(documentId);
+                        const fullDaysFields = document.getElementById(`${wid}_full_days_fields`);
+                        const customHoursFields = document.getElementById(`${wid}_custom_hours_fields`);
+                        const documentFields = document.getElementById(`${wid}_document_fields`);
+                        
+                        // Handle leave type change (show/hide document field for Sick Leave)
+                        if (leaveTypeEl) {
+                            leaveTypeEl.addEventListener('change', () => {
+                                const selectedValue = leaveTypeEl.value;
+                                const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(selectedValue));
+                                const isSickLeave = selectedOption && selectedOption.label === 'Sick Leave';
+                                if (documentFields) {
+                                    documentFields.style.display = isSickLeave ? 'flex' : 'none';
+                                }
+                            });
+                        }
+                        
+                        // Handle mode toggle (Full Days vs Custom Hours)
+                        let isCustomHours = false;
+                        if (modeFullBtn && modeCustomBtn) {
+                            modeFullBtn.addEventListener('click', () => {
+                                isCustomHours = false;
+                                modeFullBtn.className = 'h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors';
+                                modeCustomBtn.className = 'h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-gray-700 border border-gray-300 transition-colors';
+                                if (fullDaysFields) fullDaysFields.style.display = 'flex';
+                                if (customHoursFields) customHoursFields.style.display = 'none';
+                            });
+                            modeCustomBtn.addEventListener('click', () => {
+                                isCustomHours = true;
+                                modeCustomBtn.className = 'h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors';
+                                modeFullBtn.className = 'h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-gray-700 border border-gray-300 transition-colors';
+                                if (fullDaysFields) fullDaysFields.style.display = 'none';
+                                if (customHoursFields) customHoursFields.style.display = 'flex';
+                            });
+                        }
+                        
+                        // Initialize flatpickr for date inputs
+                        const initDatePicker = (el) => {
+                            if (el && window.flatpickr) {
+                                window.flatpickr(`#${el.id}`, {
+                                    dateFormat: 'd/m/Y',
+                                    static: false,
+                                    appendTo: document.body,
+                                    onChange: (selectedDates) => {
+                                        if (Array.isArray(selectedDates) && selectedDates.length > 0) {
+                                            const d = selectedDates[0];
+                                            const dd = String(d.getDate()).padStart(2,'0');
+                                            const mm = String(d.getMonth()+1).padStart(2,'0');
+                                            const yyyy = d.getFullYear();
+                                            el.value = `${dd}/${mm}/${yyyy}`;
+                                        }
+                                    },
+                                    onOpen: function() {
+                                        setTimeout(() => {
+                                            const cal = document.querySelector('.flatpickr-calendar');
+                                            if (cal) {
+                                                cal.style.zIndex = '2147483647';
+                                                cal.style.position = 'fixed';
+                                            }
+                                            const chatContainer = document.querySelector('#conversationState main');
+                                            if (chatContainer) {
+                                                chatContainer.scrollTo({
+                                                    top: chatContainer.scrollHeight,
+                                                    behavior: 'smooth'
+                                                });
+                                            }
+                                        }, 10);
+                                    }
+                                });
+                            }
+                        };
+                        
+                        initDatePicker(dateFromEl);
+                        initDatePicker(dateToEl);
+                        initDatePicker(dateSingleEl);
+                        
+                        if (submitBtn) {
+                            submitBtn.addEventListener('click', () => {
+                                const leaveTypeVal = leaveTypeEl ? leaveTypeEl.value : '';
+                                const dateFromVal = isCustomHours ? (dateSingleEl ? dateSingleEl.value.trim() : '') : (dateFromEl ? dateFromEl.value.trim() : '');
+                                const dateToVal = isCustomHours ? dateFromVal : (dateToEl ? dateToEl.value.trim() : '');
+                                const hourFromVal = isCustomHours ? (hourFromEl ? hourFromEl.value.trim() : '') : '';
+                                const hourToVal = isCustomHours ? (hourToEl ? hourToEl.value.trim() : '') : '';
+                                
+                                if (!leaveTypeVal) {
+                                    alert('Please select a leave type.');
+                                    return;
+                                }
+                                
+                                if (!dateFromVal) {
+                                    alert('Please select a date.');
+                                    return;
+                                }
+                                
+                                if (!isCustomHours && !dateToVal) {
+                                    alert('Please select an end date.');
+                                    return;
+                                }
+                                
+                                if (isCustomHours && (!hourFromVal || !hourToVal)) {
+                                    alert('Please select start and end times.');
+                                    return;
+                                }
+                                
+                                // Convert hour keys (e.g., "9" or "9.5") to HH:MM format for display
+                                const hourKeyToTime = (key) => {
+                                    if (!key) return '';
+                                    try {
+                                        const hourFloat = parseFloat(key);
+                                        const hour = Math.floor(hourFloat);
+                                        const minute = Math.round((hourFloat - hour) * 60);
+                                        return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                                    } catch (e) {
+                                        return key;
+                                    }
+                                };
+                                
+                                const hourFromTime = isCustomHours ? hourKeyToTime(hourFromVal) : '';
+                                const hourToTime = isCustomHours ? hourKeyToTime(hourToVal) : '';
+                                
+                                // Handle document upload if provided (for Sick Leave)
+                                const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(leaveTypeVal));
+                                const isSickLeave = selectedOption && selectedOption.label === 'Sick Leave';
+                                const fileInput = documentEl;
+                                
+                                // Store confirmation data for later use
+                                const confirmationData = {
+                                    leave_type_id: parseInt(leaveTypeVal),
+                                    date_from: dateFromVal,
+                                    date_to: dateToVal,
+                                    is_custom_hours: isCustomHours,
+                                    hour_from: hourFromVal,
+                                    hour_to: hourToVal,
+                                    file_attachment: null
+                                };
+                                
+                                // Handle document upload if provided (for Sick Leave)
+                                if (isSickLeave && fileInput && fileInput.files && fileInput.files.length > 0) {
+                                    // Upload document first, then show confirmation
+                                    const file = fileInput.files[0];
+                                    const reader = new FileReader();
+                                    reader.onload = async function(e) {
+                                        const base64Data = e.target.result.split(',')[1];
+                                        
+                                        // Store file data in confirmation data
+                                        confirmationData.file_attachment = {
+                                            filename: file.name,
+                                            mimetype: file.type || 'application/octet-stream',
+                                            data: base64Data
+                                        };
+                                        
+                                        // Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                                        const outgoing = `confirm_timeoff_request:${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromVal}|${hourToVal}`;
+                                        
+                                        // Show user-friendly message in chat
+                                        const leaveTypeLabel = leaveTypeEl && leaveTypeEl.options && leaveTypeEl.selectedIndex >= 0 ? leaveTypeEl.options[leaveTypeEl.selectedIndex].text : leaveTypeVal;
+                                        const modeLabel = isCustomHours ? 'Custom Hours' : 'Full Days';
+                                        const userMsg = `Requesting: ${leaveTypeLabel} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
+                                        addMessageToChat(userMsg, true);
+                                        conversationHistory.push({role: 'user', content: userMsg});
+                                        
+                                        // Store confirmation data in a global variable for the confirm button
+                                        window.lastTimeoffConfirmationData = confirmationData;
+                                        
+                                        // Send confirmation request with file data in request body
+                                        sendToBackendWithFile(outgoing, confirmationData.file_attachment);
+                                    };
+                                    reader.readAsDataURL(file);
+                                } else {
+                                    // No document upload, proceed with confirmation
+                                    // Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                                    const outgoing = `confirm_timeoff_request:${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromVal}|${hourToVal}`;
+                                    
+                                    // Show user-friendly message in chat
+                                    const leaveTypeLabel = leaveTypeEl && leaveTypeEl.options && leaveTypeEl.selectedIndex >= 0 ? leaveTypeEl.options[leaveTypeEl.selectedIndex].text : leaveTypeVal;
+                                    const modeLabel = isCustomHours ? 'Custom Hours' : 'Full Days';
+                                    const userMsg = `Requesting: ${leaveTypeLabel} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
+                                    addMessageToChat(userMsg, true);
+                                    conversationHistory.push({role: 'user', content: userMsg});
+                                    
+                                    // Store confirmation data in a global variable for the confirm button
+                                    window.lastTimeoffConfirmationData = confirmationData;
+                                    
+                                    // Send internal format silently
+                                    sendToBackend(outgoing);
+                                }
+                            });
+                        }
+                    }, 0);
                 } else if (buttons && buttons.widgets && buttons.widgets.reimbursement_amount_form) {
                     // Reimbursement amount form widget (amount input, currency dropdown, apply button)
                     const wid = `raf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
@@ -2508,7 +3300,7 @@
                             <select id="${currencyId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" style="min-width: 90px;">
                                 ${currencyOptsHtml}
                             </select>
-                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-blue-700 transition-colors">Apply</button>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[#7A5EB4] transition-colors">Apply</button>
                         </div>
                     `;
                     setTimeout(() => {
@@ -2549,7 +3341,7 @@
                     widgetsHtml = `
                         <div class="mt-3 flex items-center justify-start gap-3">
                             <input type="url" id="${linkId}" placeholder="https://example.com/receipt" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" />
-                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-blue-700 transition-colors">Apply</button>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[#7A5EB4] transition-colors">Apply</button>
                         </div>
                     `;
                     setTimeout(() => {
@@ -2588,7 +3380,7 @@
                             <select id="${selectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] min-w-[220px]">
                                 ${optsHtml}
                             </select>
-                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-blue-700 transition-colors">Apply</button>
+                            <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium bg-[var(--primary-color)] text-white hover:bg-[#7A5EB4] transition-colors">Apply</button>
                         </div>
                     `;
                     setTimeout(() => {
@@ -2706,7 +3498,7 @@
 
                 // Optional main_overview + team_overview + overtime table widgets
                 let tableHtml = '';
-                if (buttons && buttons.widgets && (buttons.widgets.main_overview || buttons.widgets.team_overview || buttons.widgets.overtime_overview || buttons.widgets.new_user_confirm_rows || buttons.widgets.tasks_table)) {
+                if (buttons && buttons.widgets && (buttons.widgets.main_overview || buttons.widgets.team_overview || buttons.widgets.overtime_overview || buttons.widgets.new_user_confirm_rows || buttons.widgets.tasks_table || buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests)) {
                     if (buttons.widgets.new_user_confirm_rows) {
                         try {
                             const rows = Array.isArray(buttons.widgets.new_user_confirm_rows) ? buttons.widgets.new_user_confirm_rows : [];
@@ -2771,28 +3563,36 @@
                     const renderTable = (data) => {
                         const cols = Array.isArray(data?.columns) ? data.columns : [];
                         const rows = Array.isArray(data?.rows) ? data.rows : [];
-                        const head = cols.map(c => {
-                            const isDates = c.key === 'dates';
-                            const alignClass = isDates ? 'text-center' : 'text-left';
-                            // Allow HTML in labels (trusted backend data) for multi-line headers
-                            const labelHtml = String(c.label || '').replace(/<br\/>/g, '<br>');
-                            return `<th class="px-3 py-2 ${alignClass} text-sm font-semibold text-gray-700">${labelHtml}</th>`;
-                        }).join('');
+                    const head = cols.map(c => {
+                        const isDates = c.key === 'dates';
+                        const isProject = c.key === 'project';
+                        const align = c.align || (isDates ? 'center' : 'left');
+                        const alignClass = align === 'center' ? 'text-center' : (align === 'right' ? 'text-right' : 'text-left');
+                        // Add wrapping styles for project column header
+                        const wrapClass = isProject ? 'max-w-[200px]' : '';
+                        // Allow HTML in labels (trusted backend data) for multi-line headers
+                        const labelHtml = String(c.label || '').replace(/<br\/>/g, '<br>');
+                        return `<th class="px-3 py-2 ${alignClass} text-sm font-semibold text-gray-700 ${wrapClass}" ${isProject ? 'style="word-wrap: break-word; word-break: break-word; white-space: normal;"' : ''}>${labelHtml}</th>`;
+                    }).join('');
                         const body = rows.map(r => `
                             <tr class="border-t border-gray-200/70">
-                                ${cols.map(c => {
-                                    const isDates = c.key === 'dates';
-                                    const alignClass = isDates ? 'text-center' : 'text-left';
-                                    let content = '';
-                                    if (isDates) {
-                                        content = String(r[c.key] ?? '').replace(/<br\/>/g, '<br>');
-                                    } else if (c.key === 'approval') {
-                                        content = String(r[c.key] ?? '');
-                                    } else {
-                                        content = renderMarkdown(String(r[c.key] ?? ''));
-                                    }
-                                    return `<td class="px-3 py-2 ${alignClass} text-sm text-gray-800">${content}</td>`;
-                                }).join('')}
+                                    ${cols.map(c => {
+                                        const isDates = c.key === 'dates';
+                                        const isProject = c.key === 'project';
+                                        const align = c.align || (isDates ? 'center' : 'left');
+                                        const alignClass = align === 'center' ? 'text-center' : (align === 'right' ? 'text-right' : 'text-left');
+                                        // Add wrapping styles for project column
+                                        const wrapClass = isProject ? 'max-w-[200px] break-words' : '';
+                                        let content = '';
+                                        if (isDates) {
+                                            content = String(r[c.key] ?? '').replace(/<br\/>/g, '<br>');
+                                        } else if (c.key === 'approval' || c.key === 'edit' || c.key === 'log_hours' || c.key === 'status') {
+                                            content = String(r[c.key] ?? '');
+                                        } else {
+                                            content = renderMarkdown(String(r[c.key] ?? ''));
+                                        }
+                                        return `<td class="px-3 py-2 ${alignClass} text-sm text-gray-800 ${wrapClass}" ${isProject ? 'style="word-wrap: break-word; word-break: break-word; white-space: normal;"' : ''}>${content}</td>`;
+                                    }).join('')}
                             </tr>
                         `).join('');
                         return { cols, rows, head, body };
@@ -2854,7 +3654,7 @@
                             return { cols, rows, head, body };
                         };
                         const tasksData = renderTasksTable(buttons.widgets.tasks_table);
-                        try { window.__lastTasksTable = { columns: tasksData.cols, rows: tasksData.rows }; } catch (e) {}
+                            try { window.__lastTasksTable = { columns: tasksData.cols, rows: tasksData.rows }; } catch (e) {}
                         tableHtml = `
                             <div class="mt-6">
                                 <div class="flex items-center justify-between mb-3">
@@ -2869,6 +3669,226 @@
                                 </div>
                             </div>
                         `;
+                    } else if (buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests) {
+                        // My requests table widgets (for show my requests flow) - separate tables for overtime and time off
+                        let overtimeHtml = '';
+                        let timeoffHtml = '';
+                        
+                        if (buttons.widgets.my_overtime_requests && Array.isArray(buttons.widgets.my_overtime_requests.rows) && buttons.widgets.my_overtime_requests.rows.length) {
+                            const otData = renderTable(buttons.widgets.my_overtime_requests);
+                            overtimeHtml = `
+                                <div class="mt-6">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="text-sm font-semibold text-gray-700">Overtime Requests</div>
+                                        <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullMyOvertimeRequestsTable()">Full view</button>
+                                    </div>
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                            <thead class="bg-gray-50/80"><tr>${otData.head}</tr></thead>
+                                            <tbody>${otData.body}</tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `;
+                            try { window.__lastMyOvertimeRequestsTable = { columns: otData.cols, rows: otData.rows }; } catch (e) {}
+                            
+                            // Add event handlers for edit and cancel buttons
+                            setTimeout(() => {
+                                // Handle edit button clicks
+                                const editOvertimeButtons = document.querySelectorAll('.edit-overtime-btn');
+                                editOvertimeButtons.forEach(btn => {
+                                    btn.addEventListener('click', function(e) {
+                                        e.stopPropagation();
+                                        e.preventDefault(); // Prevent approval-button handler from catching this
+                                        const requestId = this.getAttribute('data-request-id');
+                                        if (requestId) {
+                                            // Send edit request to backend
+                                            sendToBackend(`edit_overtime_request:${requestId}`);
+                                        }
+                                    }, true); // Use capture phase to handle before approval-button handler
+                                });
+                                
+                                // Handle cancel button clicks (similar to deny button - no confirmation, show "Cancelled" text)
+                                const cancelOvertimeButtons = document.querySelectorAll('.cancel-overtime-btn');
+                                cancelOvertimeButtons.forEach(btn => {
+                                    btn.addEventListener('click', async function(e) {
+                                        e.stopPropagation();
+                                        e.preventDefault(); // Prevent approval-button handler from catching this
+                                        const requestId = this.getAttribute('data-request-id');
+                                        if (!requestId) return;
+                                        
+                                        // Disable button immediately
+                                        this.disabled = true;
+                                        
+                                        try {
+                                            // Send cancel request to backend via /api/chat endpoint
+                                            const response = await authFetch('/api/chat', {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                },
+                                                body: JSON.stringify({
+                                                    message: `cancel_overtime_request:${requestId}`,
+                                                    conversation_history: conversationHistory,
+                                                    thread_id: currentThreadId
+                                                })
+                                            });
+                                            
+                                            const data = await response.json();
+                                            
+                                            if (data.response && (data.response.includes('successfully') || data.response.includes('cancelled'))) {
+                                                // Show "Cancelled" text below buttons (similar to "Denied" in approval flow)
+                                                const td = this.closest('td');
+                                                if (td) {
+                                                    // Remove any existing status text
+                                                    const existingStatus = td.querySelector('.cancelled-status');
+                                                    if (existingStatus) existingStatus.remove();
+                                                    
+                                                    // Add "Cancelled" text
+                                                    td.insertAdjacentHTML('beforeend', '<div class="text-red-600 text-xs mt-1 text-center w-full cancelled-status">Cancelled</div>');
+                                                    
+                                                    // Hide both buttons
+                                                    const buttonContainer = td.querySelector('.flex.flex-col');
+                                                    if (buttonContainer) {
+                                                        buttonContainer.style.display = 'none';
+                                                    }
+                                                }
+                                            } else {
+                                                // Re-enable button on error
+                                                this.disabled = false;
+                                                alert('Failed to cancel request: ' + (data.response || data.message || 'Unknown error'));
+                                            }
+                                        } catch (error) {
+                                            // Re-enable button on error
+                                            this.disabled = false;
+                                            alert('Error cancelling request: ' + error);
+                                        }
+                                    }, true); // Use capture phase to handle before approval-button handler
+                                });
+                            }, 100);
+                        }
+                        
+                        if (buttons.widgets.my_timeoff_requests && Array.isArray(buttons.widgets.my_timeoff_requests.rows) && buttons.widgets.my_timeoff_requests.rows.length) {
+                            const toData = renderTable(buttons.widgets.my_timeoff_requests);
+                            timeoffHtml = `
+                                <div class="mt-6">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="text-sm font-semibold text-gray-700">Time Off Requests</div>
+                                        <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullMyTimeoffRequestsTable()">Full view</button>
+                                    </div>
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                            <thead class="bg-gray-50/80"><tr>${toData.head}</tr></thead>
+                                            <tbody>${toData.body}</tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `;
+                            try { window.__lastMyTimeoffRequestsTable = { columns: toData.cols, rows: toData.rows }; } catch (e) {}
+                            
+                            // Add event handlers for time off edit buttons (must be outside overtime conditional)
+                            setTimeout(() => {
+                                const editTimeoffButtons = document.querySelectorAll('.edit-timeoff-btn');
+                                editTimeoffButtons.forEach(btn => {
+                                    // Check if listener already attached to avoid duplicates
+                                    if (!btn.hasAttribute('data-listener-attached')) {
+                                        btn.setAttribute('data-listener-attached', 'true');
+                                        btn.addEventListener('click', function(e) {
+                                            e.stopPropagation();
+                                            e.preventDefault(); // Prevent approval-button handler from catching this
+                                            const requestId = this.getAttribute('data-request-id');
+                                            if (requestId) {
+                                                // Send edit request to backend
+                                                sendToBackend(`edit_timeoff_request:${requestId}`);
+                                            }
+                                        }, true); // Use capture phase to handle before approval-button handler
+                                    }
+                                });
+                                
+                                // Handle cancel button clicks (similar to overtime cancel - no confirmation, show "Cancelled" text)
+                                const cancelTimeoffButtons = document.querySelectorAll('.cancel-timeoff-btn');
+                                cancelTimeoffButtons.forEach(btn => {
+                                    btn.addEventListener('click', async function(e) {
+                                        e.stopPropagation();
+                                        e.preventDefault(); // Prevent approval-button handler from catching this
+                                        const requestId = this.getAttribute('data-request-id');
+                                        if (!requestId) return;
+                                        
+                                        // Disable button immediately
+                                        this.disabled = true;
+                                        
+                                        try {
+                                            // Send cancel request to backend via /api/chat endpoint
+                                            const response = await authFetch('/api/chat', {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                },
+                                                body: JSON.stringify({
+                                                    message: `cancel_timeoff_request:${requestId}`,
+                                                    conversation_history: conversationHistory,
+                                                    thread_id: currentThreadId
+                                                })
+                                            });
+                                            
+                                            const data = await response.json();
+                                            
+                                            if (data.response && (data.response.includes('successfully') || data.response.includes('cancelled'))) {
+                                                // Show "Cancelled" text below buttons (similar to "Denied" in approval flow)
+                                                const td = this.closest('td');
+                                                if (td) {
+                                                    // Remove any existing status text
+                                                    const existingStatus = td.querySelector('.cancelled-status');
+                                                    if (existingStatus) existingStatus.remove();
+                                                    
+                                                    // Add "Cancelled" text
+                                                    td.insertAdjacentHTML('beforeend', '<div class="text-red-600 text-xs mt-1 text-center w-full cancelled-status">Cancelled</div>');
+                                                    
+                                                    // Hide both buttons
+                                                    const buttonContainer = td.querySelector('.flex.flex-col');
+                                                    if (buttonContainer) {
+                                                        buttonContainer.style.display = 'none';
+                                                    }
+                                                }
+                                            } else {
+                                                // Re-enable button on error
+                                                this.disabled = false;
+                                                alert('Failed to cancel request: ' + (data.response || data.message || 'Unknown error'));
+                                            }
+                                        } catch (error) {
+                                            // Re-enable button on error
+                                            this.disabled = false;
+                                            alert('Error cancelling request: ' + error);
+                                        }
+                                    }, true); // Use capture phase to handle before approval-button handler
+                                });
+                            }, 100);
+                        }
+                        
+                        // Add Actioned Requests table
+                        let actionedHtml = '';
+                        if (buttons.widgets.my_actioned_requests && Array.isArray(buttons.widgets.my_actioned_requests.rows) && buttons.widgets.my_actioned_requests.rows.length) {
+                            const actionedData = renderTable(buttons.widgets.my_actioned_requests);
+                            // Store full data for full view modal (use full data if available, otherwise use current data)
+                            const fullData = buttons.widgets.my_actioned_requests_full || buttons.widgets.my_actioned_requests;
+                            try { window.__lastMyActionedRequestsTable = { columns: fullData.columns || actionedData.cols, rows: fullData.rows || actionedData.rows }; } catch (e) {}
+                            actionedHtml = `
+                                <div class="mt-6">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="text-sm font-semibold text-gray-700">Actioned Requests</div>
+                                        <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullMyActionedRequestsTable()">Full view</button>
+                                    </div>
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                            <thead class="bg-gray-50/80"><tr>${actionedData.head}</tr></thead>
+                                            <tbody>${actionedData.body}</tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        tableHtml = overtimeHtml + timeoffHtml + actionedHtml;
                     } else {
                         // Team overview and overtime tables (for show my team flow)
                         const teamData = renderTable(buttons.widgets.team_overview || { columns: [], rows: [] });
@@ -2921,8 +3941,10 @@
                 }
 
                 // Use wider max-width if table is present to prevent column cutoff
+                // Use even wider for "show my requests" tables
+                const hasMyRequestsTables = (buttons && buttons.widgets && (buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests));
                 const hasTable = tableHtml && tableHtml.trim() !== '';
-                const bubbleMaxWidth = hasTable ? 'max-w-4xl' : 'max-w-xl';
+                const bubbleMaxWidth = hasMyRequestsTables ? 'max-w-6xl' : (hasTable ? 'max-w-4xl' : 'max-w-xl');
 
                 messageDiv.innerHTML = `
                     <div class="flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center">
@@ -2955,15 +3977,52 @@
                         buttonEl.addEventListener('click', function() {
                             const value = this.getAttribute('data-value');
                             const label = this.getAttribute('data-label') || this.textContent.trim();
-                            // Show natural user message using label
-                            addMessageToChat(label, true);
-                            conversationHistory.push({role: 'user', content: label});
-                            // Intercept local flows that don't need a backend round-trip
-                            if (value && value.toLowerCase() === 'new_user_upload') {
-                                renderNewUserUploadBubble();
-                            } else {
-                                // Send internal value to backend (without echoing it as text)
+                            
+                            // Handle timeoff confirmation buttons
+                            if (value === 'timeoff_confirm') {
+                                // Get confirmation data from message div's data attribute or stored data
+                                let confirmationData = null;
+                                try {
+                                    const widgetsData = messageDiv.getAttribute('data-widgets');
+                                    if (widgetsData) {
+                                        const parsedWidgets = JSON.parse(widgetsData);
+                                        confirmationData = parsedWidgets.timeoff_confirmation_data;
+                                    }
+                                } catch (e) {
+                                    console.error('Error parsing widgets data:', e);
+                                }
+                                
+                                // Fallback to global stored data
+                                if (!confirmationData) {
+                                    confirmationData = window.lastTimeoffConfirmationData;
+                                }
+                                
+                                if (confirmationData) {
+                                    // Show user message
+                                    addMessageToChat(label, true);
+                                    conversationHistory.push({role: 'user', content: label});
+                                    // Send confirmation with data in request body
+                                    sendToBackendWithConfirmationData(value, confirmationData);
+                                } else {
+                                    addMessageToChat('Confirmation data not found. Please try submitting your request again.', false);
+                                }
+                            } else if (value === 'timeoff_cancel') {
+                                // Show user message
+                                addMessageToChat(label, true);
+                                conversationHistory.push({role: 'user', content: label});
+                                // Send cancel command
                                 sendToBackend(value);
+                            } else {
+                                // Show natural user message using label
+                                addMessageToChat(label, true);
+                                conversationHistory.push({role: 'user', content: label});
+                                // Intercept local flows that don't need a backend round-trip
+                                if (value && value.toLowerCase() === 'new_user_upload') {
+                                    renderNewUserUploadBubble();
+                                } else {
+                                    // Send internal value to backend (without echoing it as text)
+                                    sendToBackend(value);
+                                }
                             }
                         });
                     });
@@ -3072,6 +4131,9 @@
             try {
                 const el = ev.target;
                 if (!el || !el.classList || !el.classList.contains('approval-button')) return;
+                // Skip buttons that have their own handlers (edit/cancel overtime buttons)
+                if (el.classList.contains('edit-overtime-btn') || el.classList.contains('cancel-overtime-btn') || 
+                    el.classList.contains('edit-timeoff-btn') || el.classList.contains('cancel-timeoff-btn')) return;
                 const action = el.getAttribute('data-action');
                 const model = el.getAttribute('data-model');
                 const idStr = el.getAttribute('data-id');
@@ -3113,6 +4175,199 @@
                 }
             } catch(e) {
                 console.error('Second approval note error', e);
+            }
+        }
+
+        // Send message to backend with file attachment
+        async function sendToBackendWithConfirmationData(message, confirmationData) {
+            try {
+                // Generate a thread_id if we don't have one yet
+                if (!currentThreadId) {
+                    currentThreadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                }
+
+                // Add typing indicator
+                const typingDiv = document.createElement('div');
+                typingDiv.className = 'flex items-start gap-4';
+                typingDiv.id = 'typing-indicator';
+                typingDiv.innerHTML = `
+                    <div class="flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center">
+                        <img src="/Nasma-Avatar.svg" alt="Nasma" class="w-[28px] h-[28px] object-contain" />
+                    </div>
+                    <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm">
+                        <div class="text-gray-800">Typing...</div>
+                    </div>
+                `;
+                document.getElementById('chatContainer').appendChild(typingDiv);
+                setTimeout(scrollToBottom, 50);
+
+                const response = await authFetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        conversation_history: conversationHistory,
+                        thread_id: currentThreadId,
+                        confirmation_data: confirmationData
+                    })
+                });
+
+                // Remove typing indicator
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+                    addMessageToChat('Error: ' + (errorData.message || 'Failed to process request'), false);
+                    return;
+                }
+
+                const data = await response.json();
+
+                // Capture/propagate thread id for session continuity
+                if (data && data.thread_id) {
+                    currentThreadId = data.thread_id;
+                }
+
+                const widgetPayload = (data && (data.widgets ||
+                    (data.buttons && data.buttons.widgets) ||
+                    (data.response && data.response.widgets))) || null;
+
+                const buttonList = Array.isArray(data?.buttons) ? [...data.buttons] : [];
+                if (widgetPayload) {
+                    buttonList.widgets = widgetPayload;
+                }
+                const extrasArg = (buttonList.length > 0 || widgetPayload) ? buttonList : null;
+                const attachmentsPayload = data?.attachments || (data?.response && data.response.attachments) || null;
+                const assistantMessage = typeof data?.response === 'string'
+                    ? data.response
+                    : (typeof data?.message === 'string' ? data.message : '');
+
+                if (assistantMessage && assistantMessage.trim()) {
+                    addMessageToChat(assistantMessage, false, extrasArg, attachmentsPayload, widgetPayload);
+                    conversationHistory.push({role: 'assistant', content: assistantMessage});
+                } else if (extrasArg || widgetPayload) {
+                    addMessageToChat('', false, extrasArg, attachmentsPayload, widgetPayload);
+                }
+            } catch (error) {
+                console.error('Error sending message with confirmation data:', error);
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+                addMessageToChat('Error sending request: ' + error.message, false);
+            }
+        }
+
+        async function sendToBackendWithFile(message, fileData) {
+            try {
+                // Generate a thread_id if we don't have one yet
+                if (!currentThreadId) {
+                    currentThreadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                }
+
+                // Add typing indicator
+                const typingDiv = document.createElement('div');
+                typingDiv.className = 'flex items-start gap-4';
+                typingDiv.id = 'typing-indicator';
+                typingDiv.innerHTML = `
+                    <div class="flex-shrink-0 w-[28px] h-[28px] flex items-center justify-center">
+                        <img src="/Nasma-Avatar.svg" alt="Nasma" class="w-[28px] h-[28px] object-contain" />
+                    </div>
+                    <div class="glass-effect rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm">
+                        <div class="text-gray-800">Typing...</div>
+                    </div>
+                `;
+                document.getElementById('chatContainer').appendChild(typingDiv);
+                setTimeout(scrollToBottom, 50);
+
+                const response = await authFetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        conversation_history: conversationHistory,
+                        thread_id: currentThreadId,
+                        file_attachment: fileData  // Send file data in request body
+                    })
+                });
+
+                // Remove typing indicator
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+
+                const data = await response.json();
+
+                // Capture/propagate thread id for session continuity
+                if (data && data.thread_id) {
+                    currentThreadId = data.thread_id;
+                }
+
+                const widgetPayload = (data && (data.widgets ||
+                    (data.buttons && data.buttons.widgets) ||
+                    (data.response && data.response.widgets))) || null;
+                let renderedUploadWidget = false;
+                if (widgetPayload && widgetPayload.new_user_upload) {
+                    try {
+                        renderNewUserUploadBubble();
+                        renderedUploadWidget = true;
+                    } catch (e) {
+                        console.error('Failed to render new user upload widget', e);
+                    }
+                }
+
+                const buttonList = Array.isArray(data?.buttons) ? [...data.buttons] : [];
+                if (widgetPayload) {
+                    buttonList.widgets = widgetPayload;
+                }
+                const extrasArg = (buttonList.length > 0 || widgetPayload) ? buttonList : null;
+                const attachmentsPayload = data?.attachments || (data?.response && data.response.attachments) || null;
+                const hardwareOptions = data?.hardware_options || null;
+                const assistantMessage = typeof data?.response === 'string'
+                    ? data.response
+                    : (typeof data?.message === 'string' ? data.message : '');
+
+                const isSuccess = (data && (data.status === 'success' || data.session_handled)) ||
+                    (widgetPayload && Object.keys(widgetPayload).length > 0);
+
+                if (isSuccess) {
+                    if (widgetPayload && widgetPayload.new_user_confirm_rows) {
+                        renderNewUserConfirmBubble(widgetPayload.new_user_confirm_rows);
+                    } else if (!renderedUploadWidget || (assistantMessage && assistantMessage.trim())) {
+                        addMessageToChat(assistantMessage, false, extrasArg, attachmentsPayload, widgetPayload);
+                    }
+                    if (assistantMessage && assistantMessage.trim()) {
+                        conversationHistory.push({ role: 'assistant', content: assistantMessage });
+                    }
+                    
+                    // Check if this was a log hours completion
+                    if (assistantMessage && (assistantMessage.toLowerCase().includes('logged') || assistantMessage.toLowerCase().includes('timesheet'))) {
+                        // Refresh the border status after logging hours
+                        setTimeout(() => {
+                            if (typeof checkAndApplyRainbowBorder === 'function') {
+                                checkAndApplyRainbowBorder();
+                            }
+                        }, 500);
+                    }
+                } else {
+                    addMessageToChat('Sorry, I encountered an error. Please try again.', false);
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+                console.error('Error details:', error.stack);
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    typingIndicator.remove();
+                }
+                addMessageToChat('Sorry, I encountered an error. Please try again.', false);
             }
         }
 
@@ -3195,7 +4450,7 @@
                     if (widgetPayload && widgetPayload.new_user_confirm_rows) {
                         renderNewUserConfirmBubble(widgetPayload.new_user_confirm_rows);
                     } else if (!renderedUploadWidget || (assistantMessage && assistantMessage.trim())) {
-                        addMessageToChat(assistantMessage, false, extrasArg, attachmentsPayload);
+                        addMessageToChat(assistantMessage, false, extrasArg, attachmentsPayload, widgetPayload);
                     }
                     if (assistantMessage && assistantMessage.trim()) {
                         conversationHistory.push({ role: 'assistant', content: assistantMessage });
@@ -3213,6 +4468,15 @@
                 setTimeout(() => {
                     refreshConversationHistory(true);
                 }, 500);
+                
+                // Check if this was a log hours completion and refresh border status
+                if (assistantMessage && (assistantMessage.toLowerCase().includes('logged') || assistantMessage.toLowerCase().includes('timesheet'))) {
+                    setTimeout(() => {
+                        if (typeof checkAndApplyRainbowBorder === 'function') {
+                            checkAndApplyRainbowBorder();
+                        }
+                    }, 1000);
+                }
             } catch (error) {
                 // Remove typing indicator
                 const typingIndicator = document.getElementById('typing-indicator');
@@ -3357,20 +4621,14 @@
                 overlay.appendChild(panel);
                 document.body.appendChild(overlay);
                 
-                // Add event listeners to log hours buttons in the modal
+                // Add event listeners to edit buttons in the modal
                 setTimeout(() => {
-                    const modalLogButtons = overlay.querySelectorAll('.log-hours-btn');
-                    modalLogButtons.forEach(buttonEl => {
+                    const modalEditButtons = overlay.querySelectorAll('.edit-overtime-btn');
+                    modalEditButtons.forEach(buttonEl => {
                         buttonEl.addEventListener('click', function() {
-                            const subtaskId = this.getAttribute('data-subtask-id');
-                            const taskDate = this.getAttribute('data-date');
-                            const taskName = this.getAttribute('data-task-name') || 'Task';
-                            
-                            if (subtaskId && taskDate) {
-                                // Send log hours command to backend
-                                const logHoursCommand = `log_hours:${subtaskId}:${taskDate}:${taskName}`;
-                                sendToBackend(logHoursCommand);
-                                // Close modal
+                            const requestId = this.getAttribute('data-request-id');
+                            if (requestId) {
+                                sendToBackend(`edit_overtime_request:${requestId}`);
                                 document.body.removeChild(overlay);
                             }
                         });
@@ -3444,6 +4702,386 @@
                 document.body.appendChild(overlay);
             } catch (e) {
                 console.error('Failed to open full overtime table:', e);
+            }
+        }
+
+        function openFullMyOvertimeRequestsTable() {
+            try {
+                const data = window.__lastMyOvertimeRequestsTable || { columns: [], rows: [] };
+                const cols = Array.isArray(data.columns) ? data.columns : [];
+                const rows = Array.isArray(data.rows) ? data.rows : [];
+
+                const header = cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const isProject = c.key === 'project';
+                    const align = c.align || (isDates ? 'center' : 'left');
+                    const alignClass = align === 'center' ? 'text-center' : (align === 'right' ? 'text-right' : 'text-left');
+                    // Add wrapping styles for project column header
+                    const wrapClass = isProject ? 'max-w-[200px]' : '';
+                    // Allow HTML in labels (trusted backend data) for multi-line headers
+                    const labelHtml = String(c.label || '').replace(/<br\/>/g, '<br>');
+                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800 ${wrapClass}\" ${isProject ? 'style=\"word-wrap: break-word; word-break: break-word; white-space: normal;\"' : ''}>${labelHtml}</th>`;
+                }).join('');
+                const body = rows.map(r => `<tr class=\"border-t\">${cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const isProject = c.key === 'project';
+                    const align = c.align || (isDates ? 'center' : 'left');
+                    const alignClass = align === 'center' ? 'text-center' : (align === 'right' ? 'text-right' : 'text-left');
+                    // Add wrapping styles for project column
+                    const wrapClass = isProject ? 'max-w-[200px] break-words' : '';
+                    let content = r[c.key] ?? '';
+                    if (isDates) content = String(content).replace(/<br\/>/g, '<br>');
+                    else if (c.key === 'approval' || c.key === 'edit') content = String(content);
+                    return `<td class=\"px-4 py-3 ${alignClass} text-sm text-gray-900 ${wrapClass}\" ${isProject ? 'style=\"word-wrap: break-word; word-break: break-word; white-space: normal;\"' : ''}>${content}</td>`;
+                }).join('')}</tr>`).join('');
+
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+                overlay.style.background = 'rgba(0,0,0,0.35)';
+                overlay.style.zIndex = '2147483646';
+                overlay.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const panel = document.createElement('div');
+                panel.style.position = 'absolute';
+                panel.style.top = '50%';
+                panel.style.left = '50%';
+                panel.style.transform = 'translate(-50%, -50%)';
+                panel.style.width = '90%';
+                panel.style.maxWidth = '1000px';
+                panel.style.maxHeight = '80%';
+                panel.style.overflow = 'auto';
+                panel.style.background = 'white';
+                panel.style.borderRadius = '12px';
+                panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)';
+                panel.style.padding = '16px';
+
+                const close = document.createElement('button');
+                close.textContent = 'Close';
+                close.style.position = 'sticky';
+                close.style.top = '0';
+                close.style.float = 'right';
+                close.style.marginBottom = '8px';
+                close.style.background = 'transparent';
+                close.style.color = '#111318';
+                close.style.fontWeight = '600';
+                close.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const title = document.createElement('h2');
+                title.textContent = 'Overtime Requests';
+                title.style.fontSize = '18px';
+                title.style.fontWeight = '600';
+                title.style.marginBottom = '12px';
+                title.style.color = '#111318';
+
+                const table = document.createElement('table');
+                table.className = 'min-w-full';
+                table.innerHTML = `<thead class=\"bg-gray-50\"><tr>${header}</tr></thead><tbody>${body}</tbody>`;
+
+                panel.appendChild(close);
+                panel.appendChild(title);
+                panel.appendChild(table);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+                
+                // Add event handlers for edit and cancel buttons in modal
+                setTimeout(() => {
+                    const editButtons = overlay.querySelectorAll('.edit-overtime-btn');
+                    editButtons.forEach(btn => {
+                        btn.addEventListener('click', function(e) {
+                            e.stopPropagation(); // Prevent overlay close
+                            e.preventDefault(); // Prevent approval-button handler from catching this
+                            const requestId = this.getAttribute('data-request-id');
+                            if (requestId) {
+                                // Close modal first
+                                document.body.removeChild(overlay);
+                                // Send edit request to backend
+                                sendToBackend(`edit_overtime_request:${requestId}`);
+                            }
+                        }, true); // Use capture phase to handle before approval-button handler
+                    });
+                    
+                    const cancelButtons = overlay.querySelectorAll('.cancel-overtime-btn');
+                    cancelButtons.forEach(btn => {
+                        btn.addEventListener('click', async function(e) {
+                            e.stopPropagation(); // Prevent overlay close
+                            e.preventDefault(); // Prevent approval-button handler from catching this
+                            const requestId = this.getAttribute('data-request-id');
+                            if (!requestId) return;
+                            
+                            // Disable button immediately
+                            this.disabled = true;
+                            
+                            try {
+                                // Send cancel request to backend via /api/chat endpoint
+                                const response = await authFetch('/api/chat', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        message: `cancel_overtime_request:${requestId}`,
+                                        conversation_history: conversationHistory,
+                                        thread_id: currentThreadId
+                                    })
+                                });
+                                
+                                const data = await response.json();
+                                
+                                if (data.response && (data.response.includes('successfully') || data.response.includes('cancelled'))) {
+                                    // Show "Cancelled" text below buttons
+                                    const td = this.closest('td');
+                                    if (td) {
+                                        // Remove any existing status text
+                                        const existingStatus = td.querySelector('.cancelled-status');
+                                        if (existingStatus) existingStatus.remove();
+                                        
+                                        // Add "Cancelled" text
+                                        td.insertAdjacentHTML('beforeend', '<div class="text-red-600 text-xs mt-1 text-center w-full cancelled-status">Cancelled</div>');
+                                        
+                                        // Hide both buttons
+                                        const buttonContainer = td.querySelector('.flex.flex-col');
+                                        if (buttonContainer) {
+                                            buttonContainer.style.display = 'none';
+                                        }
+                                    }
+                                    
+                                    // Close modal after successful cancel
+                                    setTimeout(() => {
+                                        if (document.body.contains(overlay)) {
+                                            document.body.removeChild(overlay);
+                                        }
+                                    }, 500);
+                                } else {
+                                    // Re-enable button on error
+                                    this.disabled = false;
+                                    alert('Failed to cancel request: ' + (data.response || data.message || 'Unknown error'));
+                                }
+                            } catch (error) {
+                                // Re-enable button on error
+                                this.disabled = false;
+                                alert('Error cancelling request: ' + error);
+                            }
+                        }, true); // Use capture phase to handle before approval-button handler
+                    });
+                }, 100);
+            } catch (e) {
+                console.error('Failed to open full my overtime requests table:', e);
+            }
+        }
+
+        function openFullMyTimeoffRequestsTable() {
+            try {
+                const data = window.__lastMyTimeoffRequestsTable || { columns: [], rows: [] };
+                const cols = Array.isArray(data.columns) ? data.columns : [];
+                const rows = Array.isArray(data.rows) ? data.rows : [];
+
+                const header = cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    // Allow HTML in labels (trusted backend data) for multi-line headers
+                    const labelHtml = String(c.label || '').replace(/<br\/>/g, '<br>');
+                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${labelHtml}</th>`;
+                }).join('');
+                const body = rows.map(r => `<tr class=\"border-t\">${cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    let content = r[c.key] ?? '';
+                    if (isDates) content = String(content).replace(/<br\/>/g, '<br>');
+                    else if (c.key === 'approval') content = String(content);
+                    return `<td class=\"px-4 py-3 ${alignClass} text-sm text-gray-900\">${content}</td>`;
+                }).join('')}</tr>`).join('');
+
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+                overlay.style.background = 'rgba(0,0,0,0.35)';
+                overlay.style.zIndex = '2147483646';
+                overlay.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const panel = document.createElement('div');
+                panel.style.position = 'absolute';
+                panel.style.top = '50%';
+                panel.style.left = '50%';
+                panel.style.transform = 'translate(-50%, -50%)';
+                panel.style.width = '90%';
+                panel.style.maxWidth = '1000px';
+                panel.style.maxHeight = '80%';
+                panel.style.overflow = 'auto';
+                panel.style.background = 'white';
+                panel.style.borderRadius = '12px';
+                panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)';
+                panel.style.padding = '16px';
+
+                const close = document.createElement('button');
+                close.textContent = 'Close';
+                close.style.position = 'sticky';
+                close.style.top = '0';
+                close.style.float = 'right';
+                close.style.marginBottom = '8px';
+                close.style.background = 'transparent';
+                close.style.color = '#111318';
+                close.style.fontWeight = '600';
+                close.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const title = document.createElement('h2');
+                title.textContent = 'Time Off Requests';
+                title.style.fontSize = '18px';
+                title.style.fontWeight = '600';
+                title.style.marginBottom = '12px';
+                title.style.color = '#111318';
+
+                const table = document.createElement('table');
+                table.className = 'min-w-full';
+                table.innerHTML = `<thead class=\"bg-gray-50\"><tr>${header}</tr></thead><tbody>${body}</tbody>`;
+
+                panel.appendChild(close);
+                panel.appendChild(title);
+                panel.appendChild(table);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+                
+                // Add event handlers for time off edit and cancel buttons in modal
+                setTimeout(() => {
+                    const editTimeoffButtons = overlay.querySelectorAll('.edit-timeoff-btn');
+                    editTimeoffButtons.forEach(btn => {
+                        btn.addEventListener('click', function(e) {
+                            e.stopPropagation(); // Prevent overlay close
+                            e.preventDefault(); // Prevent approval-button handler from catching this
+                            const requestId = this.getAttribute('data-request-id');
+                            if (requestId) {
+                                // Close modal first
+                                document.body.removeChild(overlay);
+                                // Send edit request to backend
+                                sendToBackend(`edit_timeoff_request:${requestId}`);
+                            }
+                        }, true); // Use capture phase to handle before approval-button handler
+                    });
+                    
+                    const cancelTimeoffButtons = overlay.querySelectorAll('.cancel-timeoff-btn');
+                    cancelTimeoffButtons.forEach(btn => {
+                        btn.addEventListener('click', async function(e) {
+                            e.stopPropagation(); // Prevent overlay close
+                            e.preventDefault(); // Prevent approval-button handler from catching this
+                            const requestId = this.getAttribute('data-request-id');
+                            if (!requestId) return;
+                            
+                            // Disable button immediately
+                            this.disabled = true;
+                            
+                            try {
+                                // Send cancel request to backend via /api/chat endpoint
+                                const response = await authFetch('/api/chat', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        message: `cancel_timeoff_request:${requestId}`,
+                                        conversation_history: conversationHistory,
+                                        thread_id: currentThreadId
+                                    })
+                                });
+                                
+                                const data = await response.json();
+                                
+                                if (data.response && (data.response.includes('successfully') || data.response.includes('cancelled'))) {
+                                    // Close modal after successful cancel
+                                    setTimeout(() => {
+                                        if (document.body.contains(overlay)) {
+                                            document.body.removeChild(overlay);
+                                        }
+                                    }, 500);
+                                } else {
+                                    // Re-enable button on error
+                                    this.disabled = false;
+                                    alert('Failed to cancel request: ' + (data.response || data.message || 'Unknown error'));
+                                }
+                            } catch (error) {
+                                // Re-enable button on error
+                                this.disabled = false;
+                                alert('Error cancelling request: ' + error);
+                            }
+                        }, true); // Use capture phase to handle before approval-button handler
+                    });
+                }, 100);
+            } catch (e) {
+                console.error('Failed to open full my time off requests table:', e);
+            }
+        }
+
+        function openFullMyActionedRequestsTable() {
+            try {
+                const data = window.__lastMyActionedRequestsTable || { columns: [], rows: [] };
+                const cols = Array.isArray(data.columns) ? data.columns : [];
+                const rows = Array.isArray(data.rows) ? data.rows : [];
+
+                const header = cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    // Allow HTML in labels (trusted backend data) for multi-line headers
+                    const labelHtml = String(c.label || '').replace(/<br\/>/g, '<br>');
+                    return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${labelHtml}</th>`;
+                }).join('');
+                const body = rows.map(r => `<tr class=\"border-t\">${cols.map(c => {
+                    const isDates = c.key === 'dates';
+                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    let content = r[c.key] ?? '';
+                    if (isDates) content = String(content).replace(/<br\/>/g, '<br>');
+                    else if (c.key === 'status') content = String(content); // Status is HTML
+                    return `<td class=\"px-4 py-3 ${alignClass} text-sm text-gray-900\">${content}</td>`;
+                }).join('')}</tr>`).join('');
+
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+                overlay.style.background = 'rgba(0,0,0,0.35)';
+                overlay.style.zIndex = '2147483646';
+                overlay.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const panel = document.createElement('div');
+                panel.style.position = 'absolute';
+                panel.style.top = '50%';
+                panel.style.left = '50%';
+                panel.style.transform = 'translate(-50%, -50%)';
+                panel.style.width = '90%';
+                panel.style.maxWidth = '1000px';
+                panel.style.maxHeight = '80%';
+                panel.style.overflow = 'auto';
+                panel.style.background = 'white';
+                panel.style.borderRadius = '12px';
+                panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)';
+                panel.style.padding = '16px';
+
+                const close = document.createElement('button');
+                close.textContent = 'Close';
+                close.style.position = 'sticky';
+                close.style.top = '0';
+                close.style.float = 'right';
+                close.style.marginBottom = '8px';
+                close.style.background = 'transparent';
+                close.style.color = '#111318';
+                close.style.fontWeight = '600';
+                close.addEventListener('click', () => document.body.removeChild(overlay));
+
+                const title = document.createElement('h2');
+                title.textContent = 'Actioned Requests';
+                title.style.fontSize = '18px';
+                title.style.fontWeight = '600';
+                title.style.marginBottom = '12px';
+                title.style.color = '#111318';
+
+                const table = document.createElement('table');
+                table.className = 'min-w-full';
+                table.innerHTML = `<thead class=\"bg-gray-50\"><tr>${header}</tr></thead><tbody>${body}</tbody>`;
+
+                panel.appendChild(close);
+                panel.appendChild(title);
+                panel.appendChild(table);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+            } catch (e) {
+                console.error('Failed to open full actioned requests table:', e);
             }
         }
 
@@ -4273,6 +5911,67 @@
             </div>
         </div>
     </div>
+
+    <!-- Check for unlogged tasks and apply rainbow border to Log my hours button -->
+    <script>
+        async function checkAndApplyRainbowBorder() {
+            try {
+                const response = await fetch('/api/check-unlogged-tasks', {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const logHoursBtns = [
+                        document.getElementById('logMyHoursBtn'),
+                        document.getElementById('logMyHoursBtnManager'),
+                        document.getElementById('logMyHoursChip'),
+                        document.getElementById('logMyHoursChipManager')
+                    ];
+                    
+                    if (data.success && data.has_unlogged_tasks) {
+                        // Apply rainbow border class to all Log my hours buttons
+                        logHoursBtns.forEach(btn => {
+                            if (btn) {
+                                btn.classList.add('rainbow-border-log-hours');
+                            }
+                        });
+                    } else {
+                        // Fade out rainbow border class if no unlogged tasks
+                        logHoursBtns.forEach(btn => {
+                            if (btn && btn.classList.contains('rainbow-border-log-hours')) {
+                                // Add a temporary style to fade out the effects
+                                btn.style.setProperty('--border-opacity', '0');
+                                btn.style.setProperty('--glow-opacity', '0');
+                                btn.style.boxShadow = 'none';
+                                
+                                // Remove class after transition completes (800ms)
+                                setTimeout(() => {
+                                    btn.classList.remove('rainbow-border-log-hours');
+                                    btn.style.removeProperty('--border-opacity');
+                                    btn.style.removeProperty('--glow-opacity');
+                                    btn.style.removeProperty('box-shadow');
+                                }, 800);
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to check unlogged tasks:', error);
+            }
+        }
+        
+        // Check when page loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', checkAndApplyRainbowBorder);
+        } else {
+            checkAndApplyRainbowBorder();
+        }
+        
+        // Also check periodically (every 30 seconds) to update if tasks change
+        setInterval(checkAndApplyRainbowBorder, 30000);
+    </script>
 
     <!-- New Sidebar Overlay -->
     <div id="newSidebarOverlay" class="new-sidebar-overlay" style="position: absolute; top: 0; left: 0; height: 0; width: 0; overflow: visible;">

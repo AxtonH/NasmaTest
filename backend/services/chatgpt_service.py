@@ -305,7 +305,6 @@ class ChatGPTService:
             # CRITICAL CHANGE: Only clear OTHER sessions belonging to the SAME employee
             # This prevents clearing sessions from other concurrent users
             if current_employee_id:
-                debug_log(f"Clearing other timeoff sessions for employee {current_employee_id}", "bot_logic")
                 try:
                     for tid, sess in list(getattr(self.session_manager, 'sessions', {}).items()):
                         if tid == thread_id:
@@ -350,7 +349,6 @@ class ChatGPTService:
 
                         # Only clear if it's the same employee
                         if sess_employee_id == current_employee_id:
-                            debug_log(f"Clearing active session {tid} for same employee {current_employee_id}", "bot_logic")
                             try:
                                 self.session_manager.clear_session(tid)
                             except Exception:
@@ -548,9 +546,7 @@ class ChatGPTService:
 
                     timeoff_response = self._handle_timeoff_flow(message, thread_id, employee_data)
                     if timeoff_response:
-                        debug_log(f"Time-off flow handled, returning response", "bot_logic")
                         return timeoff_response
-                    debug_log(f"Time-off flow did not handle message, continuing to normal flow", "bot_logic")
                 except Exception as timeoff_error:
                     debug_log(f"Error in time-off flow: {timeoff_error}", "general")
                     import traceback
@@ -921,13 +917,10 @@ Be thorough and informative while maintaining clarity and accuracy."""
     def _handle_timeoff_flow(self, message: str, thread_id: str, employee_data: dict) -> dict:
         """Handle time-off request flow with session management"""
         try:
-            debug_log(f"Starting time-off flow check...", "bot_logic")
-
             # Check for active session using thread_id if provided
             active_session = None
             if thread_id:
                 active_session = self.session_manager.get_session(thread_id)
-                debug_log(f"Active session check for thread_id {thread_id}: {active_session is not None}", "bot_logic")
 
             # Pre-calc common intent flags so we can reuse them safely
             try:
@@ -942,7 +935,6 @@ Be thorough and informative while maintaining clarity and accuracy."""
 
             # Detect new time-off intent first
             is_timeoff, confidence, extracted_data = self.timeoff_service.detect_timeoff_intent(message)
-            debug_log(f"Time-off detection complete: is_timeoff={is_timeoff}, confidence={confidence}", "bot_logic")
 
             wants_timeoff = (
                 start_phrase or
@@ -982,7 +974,6 @@ Be thorough and informative while maintaining clarity and accuracy."""
             ]
             if is_timeoff and confidence >= 0.7 and not is_button_payload:
                 # Always start a fresh time-off flow on explicit start phrases to avoid bleeding states
-                debug_log(f"High confidence time-off intent detected ({confidence:.2f}); forcing a clean start.", "bot_logic")
                 try:
                     self._reset_timeoff_sessions(thread_id, 'New time-off request detected - force fresh session', employee_data)
                 except Exception:
@@ -993,7 +984,6 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         pass
                 # Validate that we have employee data before starting session
                 if not employee_data or not isinstance(employee_data, dict) or not employee_data.get('id'):
-                    debug_log(f"Invalid employee data for time-off request: {employee_data}", "bot_logic")
                     return {
                         'message': "I'd like to help with your time-off request, but I need to verify your employee information first. Please try logging out and logging back in, or contact HR for assistance.",
                         'thread_id': thread_id,
@@ -1002,13 +992,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         'model_used': self.model
                     }
 
-                debug_log(f"Time-off intent detected with confidence {confidence:.2f}, starting session...", "bot_logic")
                 timeoff_result = self._start_timeoff_session(message, thread_id, extracted_data, employee_data)
-                debug_log(f"Time-off session start result: {timeoff_result is not None}", "bot_logic")
-                if timeoff_result:
-                    debug_log(f"Time-off session returned result with message: {timeoff_result.get('message', 'NO MESSAGE')[:50]}...", "bot_logic")
-                else:
-                    debug_log(f"Time-off session returned None - this is the problem!", "bot_logic")
                 return timeoff_result
 
             # If we have an active session, continue it
@@ -1067,7 +1051,6 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 thread_id = f"timeoff_{int(time.time())}"
                 debug_log(f"Generated fallback thread_id: {thread_id}", "bot_logic")
             
-            debug_log(f"Starting time-off session with thread_id: {thread_id}", "bot_logic")
             
             # Clear any existing session + summary first to prevent conflicts
             try:
@@ -1117,7 +1100,6 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 }
             
             # Clean corrupted leave types data
-            debug_log(f"Cleaning {len(leave_types)} leave types for corruption...", "bot_logic")
             clean_leave_types = []
             seen_names = set()
             
@@ -1153,8 +1135,6 @@ Be thorough and informative while maintaining clarity and accuracy."""
                     debug_log(f"Error cleaning leave type {i}: {clean_error}", "bot_logic")
                     continue
             
-            debug_log(f"Cleaned leave types: {len(clean_leave_types)} valid entries", "bot_logic")
-            
             if not clean_leave_types:
                 debug_log(f"No valid leave types after cleaning", "bot_logic")
                 self.session_manager.clear_session(thread_id)
@@ -1173,16 +1153,12 @@ Be thorough and informative while maintaining clarity and accuracy."""
             try:
                 if self.halfday_service:
                     leave_types = self.halfday_service.replace_unpaid_with_halfdays(leave_types)
-                    debug_log(f"HalfDay: Post-replacement leave types count: {len(leave_types)}", "bot_logic")
             except Exception as hd_e:
                 debug_log(f"HalfDay replacement failed: {hd_e}", "general")
             
             # Update session with leave types - with error handling
             try:
-                debug_log(f"Updating session with {len(leave_types)} leave types", "bot_logic")
-                debug_log(f"About to call session_manager.update_session...", "bot_logic")
                 self.session_manager.update_session(thread_id, {'leave_types': leave_types})
-                debug_log(f"Session updated successfully", "bot_logic")
             except Exception as session_error:
                 debug_log(f"Error updating session: {session_error}", "general")
                 import traceback
@@ -1198,7 +1174,6 @@ Be thorough and informative while maintaining clarity and accuracy."""
             
             # Check if leave type was already extracted
             try:
-                debug_log(f"Checking for pre-extracted leave type...", "bot_logic")
                 if 'leave_type' in extracted_data:
                     debug_log(f"Found pre-extracted leave type: {extracted_data['leave_type']}", "bot_logic")
                     # Try to map to actual leave type
@@ -1262,40 +1237,44 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             "Defaults: I assume DD/MM, current month and year unless you specify otherwise."
                         )
                         return self._create_response_with_datepicker(response_text, thread_id)
-                else:
-                    debug_log(f"No pre-extracted leave type found", "bot_logic")
             except Exception as extract_error:
                 debug_log(f"Error processing extracted data: {extract_error}", "general")
                 # Continue to present options
             
-            # Present the main leave type options with buttons
+            # Present the time off request form widget (all fields in one bubble)
             try:
-                debug_log(f"Presenting main leave type options to user...", "bot_logic")
-
-                # Filter to only show the core leave types we surface in the UI
-                main_leave_types = []
-                type_names = ['Annual Leave', 'Sick Leave', 'Unpaid Leave', 'Custom Hours']
-
-                for type_name in type_names:
-                    for lt in leave_types:
-                        if lt.get('name') == type_name:
-                            main_leave_types.append(lt)
-                            break
-
-                debug_log(f"Found {len(main_leave_types)} main leave types", "bot_logic")
-
-                # Store the main leave types in session
-                self.session_manager.update_session(thread_id, {'main_leave_types': main_leave_types})
-
-                response_text = "I'll help you request time off! Please select the type of leave you need:"
-
-                # Create response with buttons
-                result = self._create_response_with_buttons(
-                    response_text,
-                    thread_id,
-                    main_leave_types
+                
+                # Build form widget data
+                ok_form, form_data = self.timeoff_service.build_timeoff_request_form_data(
+                    employee_data.get('id') if employee_data else None
                 )
-                debug_log(f"Response with buttons created successfully: {result is not None}", "bot_logic")
+                
+                if not ok_form:
+                    debug_log(f"Failed to build form data: {form_data}", "bot_logic")
+                    return {
+                        'message': "I'm having trouble setting up the time-off request form. Please try again or contact HR.",
+                        'thread_id': thread_id,
+                        'source': self.model,
+                        'confidence_score': 1.0,
+                        'model_used': self.model
+                    }
+                
+                response_text = "**Request Time Off**\n\nPlease fill in the details below:"
+                
+                # Return response with form widget
+                result = {
+                    'message': response_text,
+                    'thread_id': thread_id,
+                    'source': self.model,
+                    'confidence_score': 1.0,
+                    'model_used': self.model,
+                    'widgets': {
+                        'timeoff_request_form': True,
+                        'leave_type_options': form_data.get('leave_type_options', []),
+                        'hour_options': form_data.get('hour_options', []),
+                        'context_key': 'submit_timeoff_request'
+                    }
+                }
                 return result
                 
             except Exception as response_error:
