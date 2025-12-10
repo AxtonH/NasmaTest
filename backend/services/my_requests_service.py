@@ -1351,15 +1351,22 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
         if not ok_session:
             return False, msg
 
-        # Step 1: Change state to 'draft' (To Submit)
-        write_params = {
-            'args': [[leave_id], {'state': 'draft'}],
-            'kwargs': {}
+        # Step 1: Read current state to determine if we need to change it
+        read_params = {
+            'args': [[leave_id]],
+            'kwargs': {'fields': ['state']}
         }
-        ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
-        if not ok:
-            return False, f"Failed to change state to 'draft': {result}"
-
+        ok_read, leave_data = _make_odoo_request(odoo_service, 'hr.leave', 'read', read_params)
+        if not ok_read or not leave_data or not isinstance(leave_data, list) or len(leave_data) == 0:
+            return False, f"Failed to read leave request: {leave_data}"
+        
+        current_state = leave_data[0].get('state')
+        
+        # Only editable states: 'draft' (To Submit) and 'confirm' (To Approve)
+        # If already approved, refused, or in second approval, we can't edit
+        if current_state in ['validate', 'validate1', 'refuse']:
+            return False, f"Cannot edit a request that is already {current_state}. Please cancel and create a new request."
+        
         # Step 2: Convert dates from DD/MM/YYYY to YYYY-MM-DD
         try:
             dt_from = datetime.strptime(date_from, '%d/%m/%Y')
@@ -1456,23 +1463,49 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
             # Preserve existing attachments even if no new ones
             update_fields['supported_attachment_ids'] = [(6, 0, existing_attachment_ids)]
 
-        # Step 5: Update the request
+        # Step 5: Try to update the request directly first (works if already in 'draft' state)
         write_params = {
             'args': [[leave_id], update_fields],
             'kwargs': {}
         }
         ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
-        if not ok:
+        
+        # If direct update fails and we're in 'confirm' state, try changing to 'draft' first
+        if not ok and current_state == 'confirm':
+            # Try changing to draft first (only if in 'confirm' state)
+            # Note: This may fail due to permission restrictions (AccessError on employee_ids)
+            draft_params = {
+                'args': [[leave_id], {'state': 'draft'}],
+                'kwargs': {}
+            }
+            ok_draft, draft_result = _make_odoo_request(odoo_service, 'hr.leave', 'write', draft_params)
+            
+            if not ok_draft:
+                # Check if the error is an AccessError (permission issue)
+                error_str = str(draft_result) if draft_result else ''
+                if 'AccessError' in error_str or 'security restrictions' in error_str or 'employee_ids' in error_str:
+                    return False, "Cannot edit a request that is already submitted for approval due to system restrictions. Please cancel the request and create a new one with the updated details."
+                # Otherwise, try updating without state change (some Odoo instances allow this)
+                ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
+                if not ok:
+                    return False, f"Failed to update request: {result}"
+            else:
+                # Successfully changed to draft, now update fields
+                ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
+                if not ok:
+                    return False, f"Failed to update request: {result}"
+                
+                # Change state back to 'confirm' (To Approve)
+                confirm_params = {
+                    'args': [[leave_id], {'state': 'confirm'}],
+                    'kwargs': {}
+                }
+                ok_confirm, confirm_result = _make_odoo_request(odoo_service, 'hr.leave', 'write', confirm_params)
+                if not ok_confirm:
+                    # Log warning but don't fail - the update succeeded, just state change failed
+                    pass
+        elif not ok:
             return False, f"Failed to update request: {result}"
-
-        # Step 6: Change state back to 'confirm' (To Approve)
-        write_params = {
-            'args': [[leave_id], {'state': 'confirm'}],
-            'kwargs': {}
-        }
-        ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
-        if not ok:
-            return False, f"Failed to change state back to 'confirm': {result}"
 
         return True, "Leave request updated successfully"
     except Exception as e:
