@@ -2548,11 +2548,11 @@ def create_app():
                                         else:
                                             debug_log(f"Failed to build confirmation: {confirmation_data}", "bot_logic")
                                             response = { 'message': f"Could not build confirmation: {confirmation_data}" }
-                                except Exception as build_error:
-                                    import traceback
-                                    debug_log(f"Error building confirmation message: {str(build_error)}", "bot_logic")
-                                    debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
-                                    response = { 'message': f"Sorry, I encountered an error. Please try again." }
+                                    except Exception as build_error:
+                                        import traceback
+                                        debug_log(f"Error building confirmation message: {str(build_error)}", "bot_logic")
+                                        debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
+                                        response = { 'message': f"Sorry, I encountered an error. Please try again." }
                 except Exception as e:
                     import traceback
                     debug_log(f"Error in confirm time off request: {str(e)}", "bot_logic")
