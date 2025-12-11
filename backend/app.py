@@ -3593,16 +3593,7 @@ def create_app():
                                 employee_data,
                                 {'source': 'reimbursement'}
                             )
-                        # Log reimbursement metric
-                        _log_usage_metric(
-                            'reimbursement',
-                            resp_thread,
-                            {
-                                'user_message': message[:200] if message else '',
-                                'status': reimb_resp.get('status', 'active')
-                            },
-                            employee_data
-                        )
+                        # Note: Metrics are logged by reimbursement_service._log_metric() when expense is created/submitted
                         return jsonify({
                             'response': reimb_resp.get('message', ''),
                             'status': 'success',
