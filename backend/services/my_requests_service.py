@@ -1326,21 +1326,30 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                            existing_attachment_ids: Optional[List[int]] = None,
                            new_attachment_data: Optional[Dict[str, Any]] = None,
                            user_tz: Optional[str] = None) -> Tuple[bool, Any]:
-    """Update a time off request.
+    """Update a time off request by deleting the old one and creating a new one.
+    
+    This approach works for all users since all creatives have permissions to delete
+    and create time off requests, but not all have permissions to edit existing requests.
     
     Workflow:
-    1. Change state to 'draft' (To Submit)
-    2. Update the request fields
-    3. Change state back to 'confirm' (To Approve)
+    1. Read the existing request to get employee_id
+    2. Read existing attachment data (before deletion, as attachments may be deleted with the request)
+    3. Delete the existing request (frees up allocation and prevents double-booking)
+    4. Create a new request with updated data
+    5. Recreate attachments for the new request
+    6. Link attachments to the new request
     
     Args:
-        leave_id: Leave request ID
+        leave_id: Leave request ID to replace
         leave_type_id: Leave type ID (holiday_status_id)
         date_from: Start date in DD/MM/YYYY format
         date_to: End date in DD/MM/YYYY format (same as date_from for custom hours)
         is_custom_hours: Whether this is custom hours mode
         hour_from: Start hour in HH:MM format (for custom hours)
         hour_to: End hour in HH:MM format (for custom hours)
+        existing_attachment_ids: List of attachment IDs to preserve
+        new_attachment_data: New attachment data dict to add
+        user_tz: User timezone (optional)
     """
     try:
         if not leave_id:
@@ -1351,21 +1360,34 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
         if not ok_session:
             return False, msg
 
-        # Step 1: Read current state to determine if we need to change it
+        # Step 1: Read existing request to get employee_id and check state
         read_params = {
             'args': [[leave_id]],
-            'kwargs': {'fields': ['state']}
+            'kwargs': {'fields': ['employee_id', 'state']}
         }
         ok_read, leave_data = _make_odoo_request(odoo_service, 'hr.leave', 'read', read_params)
         if not ok_read or not leave_data or not isinstance(leave_data, list) or len(leave_data) == 0:
             return False, f"Failed to read leave request: {leave_data}"
         
-        current_state = leave_data[0].get('state')
+        existing_leave = leave_data[0]
+        current_state = existing_leave.get('state')
         
-        # Only editable states: 'draft' (To Submit) and 'confirm' (To Approve)
-        # If already approved, refused, or in second approval, we can't edit
+        # Cannot edit requests that are already approved, refused, or in second approval
         if current_state in ['validate', 'validate1', 'refuse']:
             return False, f"Cannot edit a request that is already {current_state}. Please cancel and create a new request."
+        
+        # Extract employee_id
+        employee_id_data = existing_leave.get('employee_id')
+        if not employee_id_data:
+            return False, "Could not determine employee ID from existing request"
+        
+        # Handle Odoo's tuple format: (id, name) or just id
+        if isinstance(employee_id_data, (list, tuple)) and len(employee_id_data) > 0:
+            employee_id = employee_id_data[0]
+        elif isinstance(employee_id_data, int):
+            employee_id = employee_id_data
+        else:
+            return False, f"Invalid employee_id format: {employee_id_data}"
         
         # Step 2: Convert dates from DD/MM/YYYY to YYYY-MM-DD
         try:
@@ -1381,16 +1403,19 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
         except Exception as e:
             return False, f"Invalid date format: {e}"
 
-        # Step 3: Prepare update fields
-        update_fields = {
+        # Step 3: Prepare new leave request data
+        leave_data = {
+            'employee_id': employee_id,
             'holiday_status_id': leave_type_id,
             'request_date_from': date_from_ymd,
             'request_date_to': date_to_ymd,
+            'name': "Time off request via Nasma chatbot",
+            'state': 'confirm'  # Submit for approval
         }
         
         # Add custom hours fields if needed
         if is_custom_hours:
-            update_fields['request_unit_hours'] = True
+            leave_data['request_unit_hours'] = True
             # Convert HH:MM to Odoo format (string like '9' or '9.5', rounded to nearest half-hour)
             def _to_odoo_hour_format(hhmm_str: str) -> str:
                 """Convert HH:MM to Odoo hour format string (e.g., '9' or '9.5').
@@ -1417,23 +1442,83 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
             if hour_from:
                 hour_from_str = _to_odoo_hour_format(hour_from)
                 if hour_from_str:
-                    update_fields['request_hour_from'] = hour_from_str
+                    leave_data['request_hour_from'] = hour_from_str
             if hour_to:
                 hour_to_str = _to_odoo_hour_format(hour_to)
                 if hour_to_str:
-                    update_fields['request_hour_to'] = hour_to_str
+                    leave_data['request_hour_to'] = hour_to_str
         else:
-            # Clear custom hours fields for full days
-            update_fields['request_unit_hours'] = False
-            update_fields['request_hour_from'] = False
-            update_fields['request_hour_to'] = False
+            leave_data['request_unit_hours'] = False
 
-        # Step 4: Handle attachments
-        final_attachment_ids = []
-        
-        # Preserve existing attachments
+        # Step 4: Read existing attachment data BEFORE deletion (attachments may be deleted with the request)
+        existing_attachment_data = []
         if existing_attachment_ids:
-            final_attachment_ids.extend(existing_attachment_ids)
+            for att_id in existing_attachment_ids:
+                try:
+                    # Read attachment data
+                    att_read_params = {
+                        'args': [[att_id]],
+                        'kwargs': {'fields': ['name', 'datas', 'mimetype', 'type']}
+                    }
+                    att_ok, att_data = _make_odoo_request(odoo_service, 'ir.attachment', 'read', att_read_params)
+                    if att_ok and isinstance(att_data, list) and len(att_data) > 0:
+                        att_info = att_data[0]
+                        # Store attachment data for recreation
+                        existing_attachment_data.append({
+                            'name': att_info.get('name', 'supporting-document'),
+                            'datas': att_info.get('datas'),  # Base64 encoded file data
+                            'mimetype': att_info.get('mimetype', 'application/octet-stream'),
+                            'type': att_info.get('type', 'binary')
+                        })
+                except Exception:
+                    # If we can't read an attachment, skip it but continue
+                    pass
+
+        # Step 5: Delete the old request first to free up allocation and avoid double-booking
+        # This prevents errors when dates overlap or when allocation is insufficient
+        unlink_params = {
+            'args': [[leave_id]],
+            'kwargs': {}
+        }
+        ok_delete, delete_result = _make_odoo_request(odoo_service, 'hr.leave', 'unlink', unlink_params)
+        if not ok_delete:
+            return False, f"Failed to delete existing request: {delete_result}. Cannot proceed with update."
+
+        # Step 6: Create new request with updated data
+        create_params = {
+            'args': [leave_data],
+            'kwargs': {}
+        }
+        ok_create, new_leave_id = _make_odoo_request(odoo_service, 'hr.leave', 'create', create_params)
+        if not ok_create:
+            return False, f"Failed to create new request: {new_leave_id}. The old request has been deleted."
+        
+        if not isinstance(new_leave_id, int):
+            return False, f"Invalid leave ID returned: {new_leave_id}"
+
+        # Step 7: Recreate attachments for the new request
+        attachment_ids = []
+        
+        # Recreate existing attachments with their data
+        for att_data in existing_attachment_data:
+            try:
+                attachment_payload = {
+                    'name': att_data.get('name', 'supporting-document'),
+                    'datas': att_data.get('datas'),
+                    'res_model': 'hr.leave',
+                    'res_id': new_leave_id,
+                    'type': att_data.get('type', 'binary'),
+                    'mimetype': att_data.get('mimetype', 'application/octet-stream'),
+                }
+                att_ok, att_id = _make_odoo_request(odoo_service, 'ir.attachment', 'create', {
+                    'args': [attachment_payload],
+                    'kwargs': {}
+                })
+                if att_ok and isinstance(att_id, int):
+                    attachment_ids.append(att_id)
+            except Exception:
+                # Log but don't fail if attachment recreation fails
+                pass
         
         # Add new attachment if provided
         if new_attachment_data and new_attachment_data.get('data'):
@@ -1442,7 +1527,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                     'name': new_attachment_data.get('filename') or new_attachment_data.get('name') or 'supporting-document',
                     'datas': new_attachment_data.get('data'),
                     'res_model': 'hr.leave',
-                    'res_id': leave_id,
+                    'res_id': new_leave_id,
                     'type': 'binary',
                     'mimetype': new_attachment_data.get('mimetype') or new_attachment_data.get('content_type') or 'application/octet-stream',
                 }
@@ -1451,63 +1536,21 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                     'kwargs': {}
                 })
                 if att_ok and isinstance(att_id, int):
-                    final_attachment_ids.append(att_id)
-            except Exception as att_error:
-                # Log but don't fail the update if attachment fails
+                    attachment_ids.append(att_id)
+            except Exception:
+                # Log but don't fail if attachment fails
                 pass
         
-        # Update attachment IDs if we have any
-        if final_attachment_ids:
-            update_fields['supported_attachment_ids'] = [(6, 0, final_attachment_ids)]
-        elif existing_attachment_ids:
-            # Preserve existing attachments even if no new ones
-            update_fields['supported_attachment_ids'] = [(6, 0, existing_attachment_ids)]
-
-        # Step 5: Try to update the request directly first (works if already in 'draft' state)
-        write_params = {
-            'args': [[leave_id], update_fields],
-            'kwargs': {}
-        }
-        ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
-        
-        # If direct update fails and we're in 'confirm' state, try changing to 'draft' first
-        if not ok and current_state == 'confirm':
-            # Try changing to draft first (only if in 'confirm' state)
-            # Note: This may fail due to permission restrictions (AccessError on employee_ids)
-            draft_params = {
-                'args': [[leave_id], {'state': 'draft'}],
+        # Link attachments to the new request if we have any
+        if attachment_ids:
+            link_params = {
+                'args': [[new_leave_id], {'supported_attachment_ids': [(6, 0, attachment_ids)]}],
                 'kwargs': {}
             }
-            ok_draft, draft_result = _make_odoo_request(odoo_service, 'hr.leave', 'write', draft_params)
-            
-            if not ok_draft:
-                # Check if the error is an AccessError (permission issue)
-                error_str = str(draft_result) if draft_result else ''
-                if 'AccessError' in error_str or 'security restrictions' in error_str or 'employee_ids' in error_str:
-                    return False, "Cannot edit a request that is already submitted for approval due to system restrictions. Please cancel the request and create a new one with the updated details."
-                # Otherwise, try updating without state change (some Odoo instances allow this)
-                ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
-                if not ok:
-                    return False, f"Failed to update request: {result}"
-            else:
-                # Successfully changed to draft, now update fields
-                ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
-                if not ok:
-                    return False, f"Failed to update request: {result}"
-                
-                # Change state back to 'confirm' (To Approve)
-                confirm_params = {
-                    'args': [[leave_id], {'state': 'confirm'}],
-                    'kwargs': {}
-                }
-                ok_confirm, confirm_result = _make_odoo_request(odoo_service, 'hr.leave', 'write', confirm_params)
-                if not ok_confirm:
-                    # Log warning but don't fail - the update succeeded, just state change failed
-                    pass
-        elif not ok:
-            return False, f"Failed to update request: {result}"
+            _make_odoo_request(odoo_service, 'hr.leave', 'write', link_params)
+            # Don't fail if linking fails - the request was created successfully
 
-        return True, "Leave request updated successfully"
+        return True, f"Leave request updated successfully (new ID: {new_leave_id})"
     except Exception as e:
         return False, f"Error updating leave request: {e}"
 
