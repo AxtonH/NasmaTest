@@ -215,8 +215,8 @@
             border-color: transparent !important;
             /* Soft orange shadow glow behind the card */
             --shadow-opacity: var(--shadow-fade, 0);
-            box-shadow: 0 4px 20px rgba(255, 102, 102, calc(0.25 * var(--shadow-opacity))),
-                        0 8px 40px rgba(255, 102, 102, calc(0.15 * var(--shadow-opacity)));
+            box-shadow: 0 2px 12px rgba(255, 102, 102, calc(0.1 * var(--shadow-opacity))),
+                        0 4px 24px rgba(255, 102, 102, calc(0.06 * var(--shadow-opacity)));
             transition: box-shadow 0.8s ease-out, transform 0.2s ease;
         }
         /* Create the border using border-image approach */
@@ -246,12 +246,12 @@
         .rainbow-border-log-hours::after {
             content: '';
             position: absolute;
-            inset: -4px; /* Glow extends slightly beyond border */
+            inset: -3px; /* Glow extends slightly beyond border */
             border-radius: calc(18px * var(--ui-scale)); /* Slightly smaller to maintain rectangular look */
-            padding: 4px;
+            padding: 3px;
             background: linear-gradient(90deg, #FF6666, #8B7AB8, #FF6666, #8B7AB8, #FF6666);
             background-size: 400%;
-            filter: blur(8px);
+            filter: blur(6px);
             opacity: calc(0.5 * var(--glow-opacity, 0));
             -webkit-mask: 
                 linear-gradient(#fff 0 0) content-box, 
@@ -280,8 +280,8 @@
              background-color: rgba(240, 235, 248, 1) !important;
              border-color: transparent !important; /* Keep border transparent on hover */
              /* Slightly brighter orange shadow on hover */
-             box-shadow: 0 8px 28px rgba(255, 102, 102, calc(0.3 * var(--shadow-opacity))),
-                         0 12px 56px rgba(255, 102, 102, calc(0.2 * var(--shadow-opacity)));
+             box-shadow: 0 4px 16px rgba(255, 102, 102, calc(0.125 * var(--shadow-opacity))),
+                         0 6px 32px rgba(255, 102, 102, calc(0.075 * var(--shadow-opacity)));
          }
          .rainbow-border-log-hours:hover::before {
              opacity: calc(1 * var(--border-opacity, 0));
@@ -289,8 +289,8 @@
          }
          .rainbow-border-log-hours:hover::after {
              opacity: calc(0.65 * var(--glow-opacity, 0));
-             padding: 5px; /* Slightly more prominent glow on hover */
-             filter: blur(10px); /* Slightly more blur on hover */
+             padding: 4px; /* Slightly more prominent glow on hover */
+             filter: blur(8px); /* Slightly more blur on hover */
          }
 
         .label p {
