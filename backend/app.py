@@ -3622,7 +3622,9 @@ def create_app():
                 debug_log("Response is None, using ChatGPT service fallback", "bot_logic")
                 # No handler matched, use ChatGPT service
                 try:
-                    chatgpt_resp = chatgpt_service.process_message(message, thread_id, employee_data or {}, get_odoo_session_data())
+                    # Store Odoo session data in Flask's request-scoped 'g' object (isolated per request)
+                    g.odoo_session_data = get_odoo_session_data()
+                    chatgpt_resp = chatgpt_service.get_response(message, thread_id, employee_data or {})
                     if chatgpt_resp:
                         response = chatgpt_resp
                 except Exception as e:

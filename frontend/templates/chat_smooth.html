@@ -211,18 +211,21 @@
             isolation: isolate;
             background-color: rgba(240, 235, 248, 0.85) !important;
             overflow: visible !important; /* Allow glow to show outside */
-            /* Soft orange shadow glow behind the card - reduced by 50% */
-            box-shadow: 0 4px 20px rgba(255, 102, 102, 0.15),
-                        0 8px 40px rgba(255, 102, 102, 0.075);
-            transition: box-shadow 0.8s ease-out;
+            /* Disable the regular card border to avoid double border effect */
+            border-color: transparent !important;
+            /* Soft orange shadow glow behind the card */
+            --shadow-opacity: var(--shadow-fade, 0);
+            box-shadow: 0 4px 20px rgba(255, 102, 102, calc(0.25 * var(--shadow-opacity))),
+                        0 8px 40px rgba(255, 102, 102, calc(0.15 * var(--shadow-opacity)));
+            transition: box-shadow 0.8s ease-out, transform 0.2s ease;
         }
         /* Create the border using border-image approach */
         .rainbow-border-log-hours::before {
             content: '';
             position: absolute;
-            inset: 0;
-            border-radius: calc(20px * var(--ui-scale));
-            padding: 2px; /* Border thickness */
+            inset: -1px; /* Position just outside to create 1px border */
+            border-radius: calc(19px * var(--ui-scale)); /* Slightly smaller to maintain rectangular proportions */
+            padding: 1px; /* Border thickness - match regular border */
             background: linear-gradient(90deg, #FF6666, #8B7AB8, #FF6666, #8B7AB8, #FF6666);
             background-size: 400%;
             -webkit-mask: 
@@ -236,20 +239,20 @@
             z-index: 2;
             pointer-events: none;
             animation: gradient-shift 8s linear infinite;
-            opacity: var(--border-opacity, 1);
-            transition: opacity 0.8s ease-out;
+            opacity: var(--border-opacity, 0);
+            transition: opacity 0.8s ease-out, padding 0.2s ease;
         }
         /* Create faint glow around the border only */
         .rainbow-border-log-hours::after {
             content: '';
             position: absolute;
-            inset: -2px;
-            border-radius: calc(22px * var(--ui-scale));
+            inset: -4px; /* Glow extends slightly beyond border */
+            border-radius: calc(18px * var(--ui-scale)); /* Slightly smaller to maintain rectangular look */
             padding: 4px;
             background: linear-gradient(90deg, #FF6666, #8B7AB8, #FF6666, #8B7AB8, #FF6666);
             background-size: 400%;
-            filter: blur(6px);
-            opacity: calc(0.25 * var(--glow-opacity, 1));
+            filter: blur(8px);
+            opacity: calc(0.5 * var(--glow-opacity, 0));
             -webkit-mask: 
                 linear-gradient(#fff 0 0) content-box, 
                 linear-gradient(#fff 0 0);
@@ -261,7 +264,7 @@
             z-index: 1;
             pointer-events: none;
             animation: gradient-shift 8s linear infinite;
-            transition: opacity 0.8s ease-out;
+            transition: opacity 0.8s ease-out, padding 0.2s ease, filter 0.2s ease;
         }
          @keyframes gradient-shift {
              0% { background-position: 0 0; }
@@ -272,18 +275,22 @@
              position: relative;
              z-index: 3;
          }
-         /* Keep glow faint on hover */
+         /* Keep glow faint on hover - make border slightly thicker and glow more prominent */
          .rainbow-border-log-hours:hover {
              background-color: rgba(240, 235, 248, 1) !important;
-             /* Slightly brighter orange shadow on hover - reduced by 50% */
-             box-shadow: 0 4px 24px rgba(255, 102, 102, 0.175),
-                         0 8px 48px rgba(255, 102, 102, 0.1);
+             border-color: transparent !important; /* Keep border transparent on hover */
+             /* Slightly brighter orange shadow on hover */
+             box-shadow: 0 8px 28px rgba(255, 102, 102, calc(0.3 * var(--shadow-opacity))),
+                         0 12px 56px rgba(255, 102, 102, calc(0.2 * var(--shadow-opacity)));
          }
          .rainbow-border-log-hours:hover::before {
-             opacity: 1;
+             opacity: calc(1 * var(--border-opacity, 0));
+             padding: 1.5px; /* Slightly thicker border on hover */
          }
          .rainbow-border-log-hours:hover::after {
-             opacity: 0.35;
+             opacity: calc(0.65 * var(--glow-opacity, 0));
+             padding: 5px; /* Slightly more prominent glow on hover */
+             filter: blur(10px); /* Slightly more blur on hover */
          }
 
         .label p {
@@ -5931,10 +5938,25 @@
                     ];
                     
                     if (data.success && data.has_unlogged_tasks) {
-                        // Apply rainbow border class to all Log my hours buttons
+                        // Apply rainbow border class to all Log my hours buttons with fade-in
                         logHoursBtns.forEach(btn => {
-                            if (btn) {
+                            if (btn && !btn.classList.contains('rainbow-border-log-hours')) {
+                                // Set initial opacity to 0 for smooth fade-in
+                                btn.style.setProperty('--border-opacity', '0');
+                                btn.style.setProperty('--glow-opacity', '0');
+                                btn.style.setProperty('--shadow-fade', '0');
+                                
+                                // Add the class
                                 btn.classList.add('rainbow-border-log-hours');
+                                
+                                // Trigger fade-in animation after a frame
+                                requestAnimationFrame(() => {
+                                    requestAnimationFrame(() => {
+                                        btn.style.setProperty('--border-opacity', '1');
+                                        btn.style.setProperty('--glow-opacity', '1');
+                                        btn.style.setProperty('--shadow-fade', '1');
+                                    });
+                                });
                             }
                         });
                     } else {
@@ -5944,14 +5966,14 @@
                                 // Add a temporary style to fade out the effects
                                 btn.style.setProperty('--border-opacity', '0');
                                 btn.style.setProperty('--glow-opacity', '0');
-                                btn.style.boxShadow = 'none';
+                                btn.style.setProperty('--shadow-fade', '0');
                                 
                                 // Remove class after transition completes (800ms)
                                 setTimeout(() => {
                                     btn.classList.remove('rainbow-border-log-hours');
                                     btn.style.removeProperty('--border-opacity');
                                     btn.style.removeProperty('--glow-opacity');
-                                    btn.style.removeProperty('box-shadow');
+                                    btn.style.removeProperty('--shadow-fade');
                                 }, 800);
                             }
                         });
