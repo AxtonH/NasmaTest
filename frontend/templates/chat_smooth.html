@@ -714,6 +714,46 @@
         .glass-effect {
             overflow: visible !important;
         }
+        
+        /* Fix for select dropdowns in iframes (Teams) - ensure dropdowns can overflow */
+        select {
+            position: relative;
+            z-index: 1000;
+        }
+        
+        /* Ensure select dropdowns work in iframe contexts */
+        @supports (-webkit-appearance: none) {
+            select {
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                appearance: none;
+            }
+        }
+        
+        /* Fix for time off form select dropdowns in iframes */
+        .glass-effect select,
+        select[id*="leaveType"],
+        select[id*="leave_type"],
+        .timeoff-select {
+            position: relative;
+            z-index: 1001 !important;
+        }
+        
+        /* Ensure parent containers don't clip select dropdowns */
+        .timeoff-form-container {
+            overflow: visible !important;
+        }
+        
+        .timeoff-form-container > div {
+            overflow: visible !important;
+        }
+        
+        /* Ensure select dropdowns can overflow in iframe contexts */
+        .glass-effect .timeoff-form-container,
+        .glass-effect .timeoff-select {
+            overflow: visible !important;
+        }
+        
         /* Ensure calendar appears above footer and all other elements */
         footer {
             z-index: 1000 !important;
@@ -2759,10 +2799,10 @@
                     const isSickLeave = leaveTypeOptions.find(opt => String(opt.value) === String(defaultLeaveTypeId) && opt.label === 'Sick Leave');
                     
                     widgetsHtml = `
-                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full timeoff-form-container" style="box-sizing: border-box; overflow: visible;">
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box; position: relative; z-index: 1001;">
                                 <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Leave Type:</label>
-                                <select id="${leaveTypeId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                <select id="${leaveTypeId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0 timeoff-select" style="box-sizing: border-box; max-width: calc(100% - 120px); position: relative; z-index: 1002;">
                                     ${leaveTypeOptsHtml}
                                 </select>
                             </div>
@@ -2830,6 +2870,42 @@
                         const fullDaysFields = document.getElementById(`${wid}_full_days_fields`);
                         const customHoursFields = document.getElementById(`${wid}_custom_hours_fields`);
                         const documentFields = document.getElementById(`${wid}_document_fields`);
+                        
+                        // Fix for iframe dropdown issues (Teams) - ensure select dropdowns work
+                        const isInIframe = window.self !== window.top;
+                        if (leaveTypeEl && isInIframe) {
+                            // Ensure select has proper z-index and positioning
+                            leaveTypeEl.style.position = 'relative';
+                            leaveTypeEl.style.zIndex = '1002';
+                            leaveTypeEl.style.pointerEvents = 'auto';
+                            
+                            // Ensure parent containers allow overflow
+                            let parent = leaveTypeEl.parentElement;
+                            let depth = 0;
+                            while (parent && depth < 5) {
+                                if (parent.style) {
+                                    parent.style.overflow = 'visible';
+                                    if (parent.classList.contains('timeoff-form-container')) {
+                                        parent.style.overflow = 'visible';
+                                    }
+                                }
+                                parent = parent.parentElement;
+                                depth++;
+                            }
+                            
+                            // Add mousedown handler to ensure dropdown opens
+                            leaveTypeEl.addEventListener('mousedown', function(e) {
+                                this.focus();
+                                // Prevent event from being blocked
+                                e.stopPropagation();
+                            }, true);
+                            
+                            // Also handle click event
+                            leaveTypeEl.addEventListener('click', function(e) {
+                                this.focus();
+                                e.stopPropagation();
+                            }, true);
+                        }
                         
                         // Handle leave type change (show/hide document field for Sick Leave)
                         if (leaveTypeEl) {
@@ -3019,10 +3095,10 @@
                         }).join('');
                     
                     widgetsHtml = `
-                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full timeoff-form-container" style="box-sizing: border-box; overflow: visible;">
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box; position: relative; z-index: 1001;">
                                 <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Leave Type:</label>
-                                <select id="${leaveTypeId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                <select id="${leaveTypeId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0 timeoff-select" style="box-sizing: border-box; max-width: calc(100% - 120px); position: relative; z-index: 1002;">
                                     ${leaveTypeOptsHtml}
                                 </select>
                             </div>
