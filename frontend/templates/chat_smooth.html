@@ -754,6 +754,113 @@
             overflow: visible !important;
         }
         
+        /* Custom dropdown for Mac/iframe compatibility */
+        .custom-select-wrapper {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+            max-width: calc(100% - 120px);
+        }
+        
+        .custom-select-button {
+            width: 100%;
+            height: 40px;
+            padding: 0 12px;
+            border-radius: 9999px;
+            border: 1px solid #d1d5db;
+            background-color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            font-size: 16px;
+            color: #374151;
+            box-sizing: border-box;
+            transition: all 0.2s;
+            font-family: inherit;
+            text-align: left;
+        }
+        
+        .custom-select-button:hover {
+            border-color: #8A6EC4;
+        }
+        
+        .custom-select-button:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(138, 110, 196, 0.2);
+            border-color: #8A6EC4;
+        }
+        
+        .custom-select-button.open {
+            border-color: #8A6EC4;
+            box-shadow: 0 0 0 2px rgba(138, 110, 196, 0.2);
+        }
+        
+        .custom-select-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .custom-select-arrow {
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid #6b7280;
+            transition: transform 0.2s;
+        }
+        
+        .custom-select-button.open .custom-select-arrow {
+            transform: rotate(180deg);
+        }
+        
+        .custom-select-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin-top: 4px;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            z-index: 10000 !important;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        
+        .custom-select-dropdown.open {
+            display: block;
+        }
+        
+        .custom-select-option {
+            padding: 10px 12px;
+            cursor: pointer;
+            color: #374151;
+            transition: background-color 0.15s;
+        }
+        
+        .custom-select-option:hover {
+            background-color: #f3f4f6;
+        }
+        
+        .custom-select-option.selected {
+            background-color: #8A6EC4;
+            color: white;
+        }
+        
+        .custom-select-option.disabled {
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .custom-select-option.disabled:hover {
+            background-color: transparent;
+        }
+        
         /* Ensure calendar appears above footer and all other elements */
         footer {
             z-index: 1000 !important;
@@ -2871,10 +2978,126 @@
                         const customHoursFields = document.getElementById(`${wid}_custom_hours_fields`);
                         const documentFields = document.getElementById(`${wid}_document_fields`);
                         
-                        // Fix for iframe dropdown issues (Teams) - ensure select dropdowns work
+                        // Fix for iframe dropdown issues (Teams) - especially for Mac users
                         const isInIframe = window.self !== window.top;
-                        if (leaveTypeEl && isInIframe) {
-                            // Ensure select has proper z-index and positioning
+                        const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
+                        
+                        // Create custom dropdown for Mac users in iframes
+                        if (leaveTypeEl && isInIframe && isMac) {
+                            // Function to create custom dropdown
+                            function createCustomDropdown(selectEl, options) {
+                                const wrapper = document.createElement('div');
+                                wrapper.className = 'custom-select-wrapper';
+                                wrapper.style.width = '100%';
+                                wrapper.style.maxWidth = 'calc(100% - 120px)';
+                                
+                                const button = document.createElement('button');
+                                button.type = 'button';
+                                button.className = 'custom-select-button';
+                                button.setAttribute('aria-haspopup', 'listbox');
+                                button.setAttribute('aria-expanded', 'false');
+                                
+                                const buttonText = document.createElement('span');
+                                buttonText.className = 'custom-select-text';
+                                const selectedOption = options.find(opt => String(opt.value) === String(selectEl.value));
+                                buttonText.textContent = selectedOption ? selectedOption.label : (selectEl.options[0]?.text || 'Select leave type');
+                                button.appendChild(buttonText);
+                                
+                                const arrow = document.createElement('span');
+                                arrow.className = 'custom-select-arrow';
+                                button.appendChild(arrow);
+                                
+                                const dropdown = document.createElement('div');
+                                dropdown.className = 'custom-select-dropdown';
+                                dropdown.setAttribute('role', 'listbox');
+                                
+                                options.forEach(option => {
+                                    const optionEl = document.createElement('div');
+                                    optionEl.className = 'custom-select-option';
+                                    if (option.disabled) optionEl.classList.add('disabled');
+                                    if (String(option.value) === String(selectEl.value)) optionEl.classList.add('selected');
+                                    optionEl.textContent = option.label;
+                                    optionEl.setAttribute('data-value', option.value);
+                                    optionEl.setAttribute('role', 'option');
+                                    
+                                    optionEl.addEventListener('click', function(e) {
+                                        if (option.disabled) return;
+                                        e.stopPropagation();
+                                        const value = this.getAttribute('data-value');
+                                        selectEl.value = value;
+                                        buttonText.textContent = this.textContent;
+                                        
+                                        // Update selected state
+                                        dropdown.querySelectorAll('.custom-select-option').forEach(opt => {
+                                            opt.classList.remove('selected');
+                                        });
+                                        this.classList.add('selected');
+                                        
+                                        // Trigger change event on original select
+                                        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                                        
+                                        // Close dropdown
+                                        button.classList.remove('open');
+                                        dropdown.classList.remove('open');
+                                        button.setAttribute('aria-expanded', 'false');
+                                    });
+                                    
+                                    dropdown.appendChild(optionEl);
+                                });
+                                
+                                wrapper.appendChild(button);
+                                wrapper.appendChild(dropdown);
+                                
+                                // Toggle dropdown
+                                button.addEventListener('click', function(e) {
+                                    e.stopPropagation();
+                                    const isOpen = button.classList.contains('open');
+                                    
+                                    if (isOpen) {
+                                        button.classList.remove('open');
+                                        dropdown.classList.remove('open');
+                                        button.setAttribute('aria-expanded', 'false');
+                                    } else {
+                                        // Close other custom dropdowns
+                                        document.querySelectorAll('.custom-select-button.open').forEach(btn => {
+                                            btn.classList.remove('open');
+                                            btn.nextElementSibling?.classList.remove('open');
+                                            btn.setAttribute('aria-expanded', 'false');
+                                        });
+                                        
+                                        button.classList.add('open');
+                                        dropdown.classList.add('open');
+                                        button.setAttribute('aria-expanded', 'true');
+                                    }
+                                });
+                                
+                                // Close on outside click
+                                document.addEventListener('click', function closeDropdown(e) {
+                                    if (!wrapper.contains(e.target)) {
+                                        button.classList.remove('open');
+                                        dropdown.classList.remove('open');
+                                        button.setAttribute('aria-expanded', 'false');
+                                    }
+                                });
+                                
+                                // Replace select with custom dropdown
+                                selectEl.style.display = 'none';
+                                selectEl.parentNode.insertBefore(wrapper, selectEl);
+                                
+                                return wrapper;
+                            }
+                            
+                            // Convert select options to array
+                            const options = Array.from(leaveTypeEl.options).map(opt => ({
+                                value: opt.value,
+                                label: opt.text,
+                                disabled: opt.disabled
+                            }));
+                            
+                            // Create custom dropdown
+                            createCustomDropdown(leaveTypeEl, options);
+                        } else if (leaveTypeEl && isInIframe) {
+                            // For non-Mac iframe users, use enhanced native select
                             leaveTypeEl.style.position = 'relative';
                             leaveTypeEl.style.zIndex = '1002';
                             leaveTypeEl.style.pointerEvents = 'auto';
@@ -2896,11 +3119,9 @@
                             // Add mousedown handler to ensure dropdown opens
                             leaveTypeEl.addEventListener('mousedown', function(e) {
                                 this.focus();
-                                // Prevent event from being blocked
                                 e.stopPropagation();
                             }, true);
                             
-                            // Also handle click event
                             leaveTypeEl.addEventListener('click', function(e) {
                                 this.focus();
                                 e.stopPropagation();
