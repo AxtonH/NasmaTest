@@ -574,10 +574,10 @@ def build_timeoff_requests_table_widget(timeoff_requests: List[Dict]) -> Dict[st
             )
             
             if leave_started:
-                # Only show cancel button if leave has started
-                action_html = f"<div class=\"flex flex-col items-center\">{cancel_button_html}</div>"
+                # Don't show any buttons if leave has already started (cannot edit or cancel)
+                action_html = '<span class="text-gray-400">—</span>'
             else:
-                # Show both edit and cancel buttons if leave hasn't started
+                # Show both edit and cancel buttons if leave hasn't started yet
                 edit_button_html = (
                     f"<button class=\"approval-button btn-gradient text-white border-2 border-purple-700 edit-timeoff-btn\" "
                     f"data-request-id=\"{leave_id}\">Edit</button>"

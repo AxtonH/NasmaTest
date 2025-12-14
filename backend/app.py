@@ -2826,32 +2826,50 @@ def create_app():
                     # Refresh Odoo session using refresh token if needed
                     # This ensures we have valid credentials before fetching requests
                     odoo_session_data = get_odoo_session_data()
-                    if odoo_session_data and odoo_session_data.get('password'):
-                        # Update odoo_service credentials if password was retrieved from refresh token
-                        if not odoo_service.password and odoo_session_data.get('password'):
-                            odoo_service.password = odoo_session_data['password']
-                            odoo_service.username = odoo_session_data.get('username') or odoo_service.username
-                            debug_log(f"Refreshed Odoo service credentials from refresh token for 'show my requests'", "bot_logic")
+                    debug_log(f"[SHOW_MY_REQUESTS] Starting - odoo_session_data exists: {odoo_session_data is not None}, has password: {odoo_session_data.get('password') if odoo_session_data else False}", "bot_logic")
                     
-                    # Ensure session is active before fetching requests
-                    ok_session, session_msg = odoo_service.ensure_active_session()
-                    if not ok_session:
-                        debug_log(f"Session not active for 'show my requests': {session_msg}", "bot_logic")
-                        # Try to authenticate with refreshed credentials
-                        if odoo_session_data and odoo_session_data.get('username') and odoo_session_data.get('password'):
-                            auth_ok, auth_msg, auth_data = odoo_service.authenticate(odoo_session_data['username'], odoo_session_data['password'])
-                            if not auth_ok:
-                                response = { 'message': f"I couldn't retrieve your requests right now. Please try again." }
-                            else:
-                                debug_log(f"Successfully authenticated for 'show my requests'", "bot_logic")
-                                ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
-                        else:
+                    # Always update credentials from refresh token if available (even if password already exists)
+                    if odoo_session_data and odoo_session_data.get('password'):
+                        odoo_service.password = odoo_session_data['password']
+                        odoo_service.username = odoo_session_data.get('username') or odoo_service.username
+                        debug_log(f"[SHOW_MY_REQUESTS] Updated Odoo service credentials from refresh token (username: {odoo_service.username})", "bot_logic")
+                    
+                    # Force re-authentication if we have credentials (ensures fresh session)
+                    ok_requests = False
+                    requests_data = None
+                    
+                    if odoo_session_data and odoo_session_data.get('username') and odoo_session_data.get('password'):
+                        debug_log(f"[SHOW_MY_REQUESTS] Force re-authenticating to ensure fresh session", "bot_logic")
+                        auth_ok, auth_msg, auth_data = odoo_service.authenticate(odoo_session_data['username'], odoo_session_data['password'])
+                        if not auth_ok:
+                            debug_log(f"[SHOW_MY_REQUESTS] Authentication failed: {auth_msg}", "bot_logic")
                             response = { 'message': f"I couldn't retrieve your requests right now. Please try again." }
+                        else:
+                            debug_log(f"[SHOW_MY_REQUESTS] Successfully authenticated, fetching requests", "bot_logic")
+                            # Update Flask session with new session data if provided
+                            if auth_data and isinstance(auth_data, dict):
+                                try:
+                                    session['odoo_session_id'] = auth_data.get('session_id', session.get('odoo_session_id'))
+                                    session['user_id'] = auth_data.get('user_id', session.get('user_id'))
+                                    session.modified = True
+                                    debug_log(f"[SHOW_MY_REQUESTS] Updated Flask session with new Odoo session", "bot_logic")
+                                except Exception as sess_error:
+                                    debug_log(f"[SHOW_MY_REQUESTS] Error updating Flask session: {sess_error}", "bot_logic")
+                            ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
+                            debug_log(f"[SHOW_MY_REQUESTS] Fetch result - ok: {ok_requests}, data type: {type(requests_data)}", "bot_logic")
                     else:
-                        ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
+                        # Fallback: try ensure_active_session if no credentials available
+                        debug_log(f"[SHOW_MY_REQUESTS] No credentials from refresh token, using ensure_active_session", "bot_logic")
+                        ok_session, session_msg = odoo_service.ensure_active_session()
+                        if not ok_session:
+                            debug_log(f"[SHOW_MY_REQUESTS] Session not active: {session_msg}", "bot_logic")
+                            response = { 'message': f"I couldn't retrieve your requests right now. Please try again." }
+                        else:
+                            ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
+                            debug_log(f"[SHOW_MY_REQUESTS] Fetch result (fallback) - ok: {ok_requests}, data type: {type(requests_data)}", "bot_logic")
                     
                     # Process the requests data if we successfully fetched it
-                    if 'ok_requests' in locals() and ok_requests:
+                    if ok_requests and requests_data is not None:
                         if isinstance(requests_data, dict):
                             ot_requests = requests_data.get('overtime_requests', [])
                             to_requests = requests_data.get('timeoff_requests', [])
