@@ -2823,8 +2823,35 @@ def create_app():
             ):
                 # User query: show my overtime and time off requests
                 try:
-                    ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
-                    if ok_requests:
+                    # Refresh Odoo session using refresh token if needed
+                    # This ensures we have valid credentials before fetching requests
+                    odoo_session_data = get_odoo_session_data()
+                    if odoo_session_data and odoo_session_data.get('password'):
+                        # Update odoo_service credentials if password was retrieved from refresh token
+                        if not odoo_service.password and odoo_session_data.get('password'):
+                            odoo_service.password = odoo_session_data['password']
+                            odoo_service.username = odoo_session_data.get('username') or odoo_service.username
+                            debug_log(f"Refreshed Odoo service credentials from refresh token for 'show my requests'", "bot_logic")
+                    
+                    # Ensure session is active before fetching requests
+                    ok_session, session_msg = odoo_service.ensure_active_session()
+                    if not ok_session:
+                        debug_log(f"Session not active for 'show my requests': {session_msg}", "bot_logic")
+                        # Try to authenticate with refreshed credentials
+                        if odoo_session_data and odoo_session_data.get('username') and odoo_session_data.get('password'):
+                            auth_ok, auth_msg, auth_data = odoo_service.authenticate(odoo_session_data['username'], odoo_session_data['password'])
+                            if not auth_ok:
+                                response = { 'message': f"I couldn't retrieve your requests right now. Please try again." }
+                            else:
+                                debug_log(f"Successfully authenticated for 'show my requests'", "bot_logic")
+                                ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
+                        else:
+                            response = { 'message': f"I couldn't retrieve your requests right now. Please try again." }
+                    else:
+                        ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
+                    
+                    # Process the requests data if we successfully fetched it
+                    if 'ok_requests' in locals() and ok_requests:
                         if isinstance(requests_data, dict):
                             ot_requests = requests_data.get('overtime_requests', [])
                             to_requests = requests_data.get('timeoff_requests', [])
