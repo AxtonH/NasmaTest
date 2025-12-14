@@ -3814,17 +3814,51 @@
                                 
                                 // Handle cancel button clicks (similar to overtime cancel - no confirmation, show "Cancelled" text)
                                 const cancelTimeoffButtons = document.querySelectorAll('.cancel-timeoff-btn');
-                                cancelTimeoffButtons.forEach(btn => {
+                                console.log(`[CANCEL_TIMEOFF_FRONTEND] Found ${cancelTimeoffButtons.length} cancel buttons`);
+                                if (cancelTimeoffButtons.length === 0) {
+                                    console.warn(`[CANCEL_TIMEOFF_FRONTEND] WARNING: No cancel buttons found!`);
+                                }
+                                cancelTimeoffButtons.forEach((btn, index) => {
+                                    // Check if listener already attached to avoid duplicates
+                                    if (btn.hasAttribute('data-cancel-listener-attached')) {
+                                        console.log(`[CANCEL_TIMEOFF_FRONTEND] Button ${index} already has listener attached, skipping`);
+                                        return;
+                                    }
+                                    
+                                    const requestIdAttr = btn.getAttribute('data-request-id');
+                                    console.log(`[CANCEL_TIMEOFF_FRONTEND] Setting up cancel button ${index} for request_id=${requestIdAttr}, button:`, btn);
+                                    
+                                    if (!requestIdAttr) {
+                                        console.error(`[CANCEL_TIMEOFF_FRONTEND] ERROR: Button ${index} has no data-request-id attribute!`);
+                                        return;
+                                    }
+                                    
+                                    btn.setAttribute('data-cancel-listener-attached', 'true');
                                     btn.addEventListener('click', async function(e) {
+                                        console.log(`[CANCEL_TIMEOFF_FRONTEND] Cancel button clicked!`);
                                         e.stopPropagation();
                                         e.preventDefault(); // Prevent approval-button handler from catching this
+                                        
                                         const requestId = this.getAttribute('data-request-id');
-                                        if (!requestId) return;
+                                        console.log(`[CANCEL_TIMEOFF_FRONTEND] Request ID from button: ${requestId}`);
+                                        
+                                        if (!requestId) {
+                                            console.error(`[CANCEL_TIMEOFF_FRONTEND] ERROR: No request ID found on button`);
+                                            alert('Error: No request ID found');
+                                            return;
+                                        }
+                                        
+                                        console.log(`[CANCEL_TIMEOFF_FRONTEND] Processing cancel for request_id=${requestId}`);
                                         
                                         // Disable button immediately
                                         this.disabled = true;
+                                        const buttonElement = this;
                                         
                                         try {
+                                            const cancelMessage = `cancel_timeoff_request:${requestId}`;
+                                            console.log(`[CANCEL_TIMEOFF_FRONTEND] Sending cancel request: ${cancelMessage}`);
+                                            console.log(`[CANCEL_TIMEOFF_FRONTEND] Thread ID: ${currentThreadId}, Conversation history length: ${conversationHistory ? conversationHistory.length : 0}`);
+                                            
                                             // Send cancel request to backend via /api/chat endpoint
                                             const response = await authFetch('/api/chat', {
                                                 method: 'POST',
@@ -3832,17 +3866,25 @@
                                                     'Content-Type': 'application/json',
                                                 },
                                                 body: JSON.stringify({
-                                                    message: `cancel_timeoff_request:${requestId}`,
-                                                    conversation_history: conversationHistory,
-                                                    thread_id: currentThreadId
+                                                    message: cancelMessage,
+                                                    conversation_history: conversationHistory || [],
+                                                    thread_id: currentThreadId || ''
                                                 })
                                             });
                                             
+                                            console.log(`[CANCEL_TIMEOFF_FRONTEND] Response status: ${response.status}`);
+                                            
+                                            if (!response.ok) {
+                                                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                                            }
+                                            
                                             const data = await response.json();
+                                            console.log(`[CANCEL_TIMEOFF_FRONTEND] Response data:`, data);
                                             
                                             if (data.response && (data.response.includes('successfully') || data.response.includes('cancelled'))) {
+                                                console.log(`[CANCEL_TIMEOFF_FRONTEND] SUCCESS: Request cancelled`);
                                                 // Show "Cancelled" text below buttons (similar to "Denied" in approval flow)
-                                                const td = this.closest('td');
+                                                const td = buttonElement.closest('td');
                                                 if (td) {
                                                     // Remove any existing status text
                                                     const existingStatus = td.querySelector('.cancelled-status');
@@ -3858,14 +3900,17 @@
                                                     }
                                                 }
                                             } else {
+                                                console.error(`[CANCEL_TIMEOFF_FRONTEND] ERROR: Cancel failed - response: ${data.response || data.message || 'Unknown error'}`);
                                                 // Re-enable button on error
-                                                this.disabled = false;
+                                                buttonElement.disabled = false;
                                                 alert('Failed to cancel request: ' + (data.response || data.message || 'Unknown error'));
                                             }
                                         } catch (error) {
+                                            console.error(`[CANCEL_TIMEOFF_FRONTEND] EXCEPTION: Error cancelling request:`, error);
+                                            console.error(`[CANCEL_TIMEOFF_FRONTEND] Error stack:`, error.stack);
                                             // Re-enable button on error
-                                            this.disabled = false;
-                                            alert('Error cancelling request: ' + error);
+                                            buttonElement.disabled = false;
+                                            alert('Error cancelling request: ' + (error.message || error));
                                         }
                                     }, true); // Use capture phase to handle before approval-button handler
                                 });
@@ -4156,16 +4201,30 @@
                 const data = await resp.json();
                 if (!data.success) {
                     alert((action === 'approve' ? 'Approve' : 'Deny') + ' failed: ' + (data.message || 'Unknown error'));
+                    el.disabled = false;
                 } else {
                     const td = el.closest('td');
                     if (td) {
-                        if (action === 'approve') td.insertAdjacentHTML('beforeend', '<div class="text-green-600 text-xs mt-1 text-center w-full">Approved</div>');
-                        if (action === 'refuse') td.insertAdjacentHTML('beforeend', '<div class="text-red-600 text-xs mt-1 text-center w-full">Denied</div>');
+                        // Remove any existing status text
+                        const existingStatus = td.querySelector('.approved-status, .denied-status');
+                        if (existingStatus) existingStatus.remove();
+                        
+                        // Hide the button container (similar to cancel flow)
+                        const buttonContainer = td.querySelector('.flex.flex-col');
+                        if (buttonContainer) {
+                            buttonContainer.style.display = 'none';
+                        }
+                        
+                        // Show confirmation message in place of buttons
+                        if (action === 'approve') {
+                            td.insertAdjacentHTML('beforeend', '<div class="text-green-600 text-xs text-center w-full approved-status" style="font-weight: 600;">Approved</div>');
+                        } else if (action === 'refuse') {
+                            td.insertAdjacentHTML('beforeend', '<div class="text-red-600 text-xs text-center w-full denied-status" style="font-weight: 600;">Denied</div>');
+                        }
                     }
                 }
             } catch (e) {
                 alert('Action error: ' + e);
-            } finally {
                 try { ev.target.disabled = false; } catch(_) {}
             }
         }, true);
@@ -4966,17 +5025,44 @@
                     });
                     
                     const cancelTimeoffButtons = overlay.querySelectorAll('.cancel-timeoff-btn');
-                    cancelTimeoffButtons.forEach(btn => {
+                    console.log(`[CANCEL_TIMEOFF_FRONTEND] Found ${cancelTimeoffButtons.length} cancel buttons in overlay`);
+                    if (cancelTimeoffButtons.length === 0) {
+                        console.warn(`[CANCEL_TIMEOFF_FRONTEND] WARNING: No cancel buttons found in overlay!`);
+                    }
+                    cancelTimeoffButtons.forEach((btn, index) => {
+                        const requestIdAttr = btn.getAttribute('data-request-id');
+                        console.log(`[CANCEL_TIMEOFF_FRONTEND] Setting up overlay cancel button ${index} for request_id=${requestIdAttr}, button:`, btn);
+                        
+                        if (!requestIdAttr) {
+                            console.error(`[CANCEL_TIMEOFF_FRONTEND] ERROR: Overlay button ${index} has no data-request-id attribute!`);
+                            return;
+                        }
+                        
                         btn.addEventListener('click', async function(e) {
+                            console.log(`[CANCEL_TIMEOFF_FRONTEND] Overlay cancel button clicked!`);
                             e.stopPropagation(); // Prevent overlay close
                             e.preventDefault(); // Prevent approval-button handler from catching this
+                            
                             const requestId = this.getAttribute('data-request-id');
-                            if (!requestId) return;
+                            console.log(`[CANCEL_TIMEOFF_FRONTEND] Overlay request ID from button: ${requestId}`);
+                            
+                            if (!requestId) {
+                                console.error(`[CANCEL_TIMEOFF_FRONTEND] ERROR: No request ID found on overlay button`);
+                                alert('Error: No request ID found');
+                                return;
+                            }
+                            
+                            console.log(`[CANCEL_TIMEOFF_FRONTEND] Processing overlay cancel for request_id=${requestId}`);
                             
                             // Disable button immediately
                             this.disabled = true;
+                            const buttonElement = this;
                             
                             try {
+                                const cancelMessage = `cancel_timeoff_request:${requestId}`;
+                                console.log(`[CANCEL_TIMEOFF_FRONTEND] Sending overlay cancel request: ${cancelMessage}`);
+                                console.log(`[CANCEL_TIMEOFF_FRONTEND] Overlay Thread ID: ${currentThreadId}, Conversation history length: ${conversationHistory ? conversationHistory.length : 0}`);
+                                
                                 // Send cancel request to backend via /api/chat endpoint
                                 const response = await authFetch('/api/chat', {
                                     method: 'POST',
@@ -4984,15 +5070,23 @@
                                         'Content-Type': 'application/json',
                                     },
                                     body: JSON.stringify({
-                                        message: `cancel_timeoff_request:${requestId}`,
-                                        conversation_history: conversationHistory,
-                                        thread_id: currentThreadId
+                                        message: cancelMessage,
+                                        conversation_history: conversationHistory || [],
+                                        thread_id: currentThreadId || ''
                                     })
                                 });
                                 
+                                console.log(`[CANCEL_TIMEOFF_FRONTEND] Overlay response status: ${response.status}`);
+                                
+                                if (!response.ok) {
+                                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                                }
+                                
                                 const data = await response.json();
+                                console.log(`[CANCEL_TIMEOFF_FRONTEND] Overlay response data:`, data);
                                 
                                 if (data.response && (data.response.includes('successfully') || data.response.includes('cancelled'))) {
+                                    console.log(`[CANCEL_TIMEOFF_FRONTEND] SUCCESS: Overlay request cancelled`);
                                     // Close modal after successful cancel
                                     setTimeout(() => {
                                         if (document.body.contains(overlay)) {
@@ -5000,14 +5094,17 @@
                                         }
                                     }, 500);
                                 } else {
+                                    console.error(`[CANCEL_TIMEOFF_FRONTEND] ERROR: Overlay cancel failed - response: ${data.response || data.message || 'Unknown error'}`);
                                     // Re-enable button on error
-                                    this.disabled = false;
+                                    buttonElement.disabled = false;
                                     alert('Failed to cancel request: ' + (data.response || data.message || 'Unknown error'));
                                 }
                             } catch (error) {
+                                console.error(`[CANCEL_TIMEOFF_FRONTEND] EXCEPTION: Error cancelling overlay request:`, error);
+                                console.error(`[CANCEL_TIMEOFF_FRONTEND] Error stack:`, error.stack);
                                 // Re-enable button on error
-                                this.disabled = false;
-                                alert('Error cancelling request: ' + error);
+                                buttonElement.disabled = false;
+                                alert('Error cancelling request: ' + (error.message || error));
                             }
                         }, true); // Use capture phase to handle before approval-button handler
                     });

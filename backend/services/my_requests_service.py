@@ -1112,7 +1112,7 @@ def cancel_overtime_request(odoo_service, request_id: int) -> Tuple[bool, Any]:
         return False, f"Error cancelling request: {e}"
 
 
-def cancel_timeoff_request(odoo_service, leave_id: int) -> Tuple[bool, Any]:
+def cancel_timeoff_request(odoo_service, leave_id: int, employee_data: Dict = None) -> Tuple[bool, Any]:
     """Cancel or delete a time-off request.
     
     First attempts to delete the request. If deletion is not allowed (e.g., already approved),
@@ -1120,52 +1120,106 @@ def cancel_timeoff_request(odoo_service, leave_id: int) -> Tuple[bool, Any]:
     
     Args:
         leave_id: The ID of the hr.leave to cancel/delete
+        employee_data: Optional employee data dict for logging context
     """
     try:
+        # Import debug_log at the top level
+        try:
+            from .config.settings import debug_log
+        except Exception:
+            try:
+                from config.settings import debug_log
+            except Exception:
+                def debug_log(msg, cat):
+                    print(f"DEBUG [{cat}]: {msg}")
+        
+        # Log entry point with context
+        employee_id = employee_data.get('id') if employee_data else None
+        employee_name = employee_data.get('name') if employee_data else 'Unknown'
+        debug_log(f"[CANCEL_TIMEOFF] Starting cancel for leave_id={leave_id}, employee_id={employee_id}, employee_name={employee_name}", "bot_logic")
+        
         if not leave_id:
+            debug_log(f"[CANCEL_TIMEOFF] ERROR: Leave ID not provided", "bot_logic")
             return False, "Leave ID not provided"
 
         # Ensure session is active
         ok_session, msg = odoo_service.ensure_active_session()
         if not ok_session:
+            debug_log(f"[CANCEL_TIMEOFF] ERROR: Session not active - {msg}", "bot_logic")
             return False, msg
 
+        # First, read the current state of the request to understand what we're working with
+        try:
+            read_params = {
+                'args': [[leave_id]],
+                'kwargs': {'fields': ['id', 'employee_id', 'state', 'request_date_from', 'request_date_to']}
+            }
+            ok_read, leave_data = _make_odoo_request(odoo_service, 'hr.leave', 'read', read_params)
+            if ok_read and isinstance(leave_data, list) and len(leave_data) > 0:
+                current_state = leave_data[0].get('state', 'unknown')
+                request_employee_id = None
+                emp_data = leave_data[0].get('employee_id')
+                if isinstance(emp_data, (list, tuple)) and len(emp_data) > 0:
+                    request_employee_id = emp_data[0]
+                elif isinstance(emp_data, int):
+                    request_employee_id = emp_data
+                request_date_from = leave_data[0].get('request_date_from', '')
+                debug_log(f"[CANCEL_TIMEOFF] Request details - state={current_state}, request_employee_id={request_employee_id}, current_employee_id={employee_id}, request_date_from={request_date_from}", "bot_logic")
+                
+                # Check if employee matches (security check)
+                if employee_id and request_employee_id and employee_id != request_employee_id:
+                    debug_log(f"[CANCEL_TIMEOFF] ERROR: Employee mismatch - request belongs to {request_employee_id}, current user is {employee_id}", "bot_logic")
+                    return False, "You can only cancel your own requests"
+            else:
+                debug_log(f"[CANCEL_TIMEOFF] WARNING: Could not read request details - {leave_data}", "bot_logic")
+        except Exception as read_error:
+            debug_log(f"[CANCEL_TIMEOFF] WARNING: Error reading request details: {str(read_error)}", "bot_logic")
+
         # First, try to delete the request
+        debug_log(f"[CANCEL_TIMEOFF] Attempting to delete leave_id={leave_id}", "bot_logic")
         try:
             unlink_params = {
                 'args': [[leave_id]],
                 'kwargs': {}
             }
             ok_delete, result_delete = _make_odoo_request(odoo_service, 'hr.leave', 'unlink', unlink_params)
+            debug_log(f"[CANCEL_TIMEOFF] Delete attempt result - ok={ok_delete}, result={result_delete}", "bot_logic")
             if ok_delete:
+                debug_log(f"[CANCEL_TIMEOFF] SUCCESS: Request deleted successfully", "bot_logic")
                 return True, "Request deleted successfully"
+            else:
+                debug_log(f"[CANCEL_TIMEOFF] Delete failed: {result_delete}", "bot_logic")
         except Exception as delete_error:
-            # If deletion fails, try to set state to 'draft' (To Submit)
-            try:
-                from .config.settings import debug_log
-                debug_log(f"Deletion failed, attempting to set state to draft: {str(delete_error)}", "bot_logic")
-            except Exception:
-                pass
-            pass
+            debug_log(f"[CANCEL_TIMEOFF] Delete exception: {str(delete_error)}", "bot_logic")
+            import traceback
+            debug_log(f"[CANCEL_TIMEOFF] Delete traceback: {traceback.format_exc()}", "bot_logic")
 
-        # If deletion didn't work, set state to 'draft' (To Submit)
+        # If deletion didn't work, try to set state to 'draft' (To Submit)
+        debug_log(f"[CANCEL_TIMEOFF] Delete failed, attempting to set state to 'draft' for leave_id={leave_id}", "bot_logic")
         write_params = {
             'args': [[leave_id], {'state': 'draft'}],
             'kwargs': {}
         }
         ok, result = _make_odoo_request(odoo_service, 'hr.leave', 'write', write_params)
+        debug_log(f"[CANCEL_TIMEOFF] Write state to 'draft' result - ok={ok}, result={result}", "bot_logic")
         if not ok:
+            debug_log(f"[CANCEL_TIMEOFF] ERROR: Failed to cancel request - {result}", "bot_logic")
             return False, f"Failed to cancel request: {result}"
 
+        debug_log(f"[CANCEL_TIMEOFF] SUCCESS: Request cancelled (state set to draft)", "bot_logic")
         return True, "Request cancelled successfully"
     except Exception as e:
         import traceback
         try:
             from .config.settings import debug_log
-            debug_log(f"Error cancelling timeoff request: {str(e)}", "bot_logic")
-            debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
         except Exception:
-            pass
+            try:
+                from config.settings import debug_log
+            except Exception:
+                def debug_log(msg, cat):
+                    print(f"DEBUG [{cat}]: {msg}")
+        debug_log(f"[CANCEL_TIMEOFF] ERROR: Exception cancelling timeoff request: {str(e)}", "bot_logic")
+        debug_log(f"[CANCEL_TIMEOFF] Traceback: {traceback.format_exc()}", "bot_logic")
         return False, f"Error cancelling request: {e}"
 
 

@@ -2985,10 +2985,17 @@ def create_app():
                     # Format: cancel_timeoff_request:LEAVE_ID
                     parts = normalized_msg.split(':', 1)
                     if len(parts) < 2:
+                        debug_log(f"[CANCEL_TIMEOFF_HANDLER] Invalid cancel request format: {normalized_msg}", "bot_logic")
                         response = { 'message': 'Invalid cancel request format' }
                     else:
                         leave_id = int(parts[1])
-                        ok, result = cancel_timeoff_request(odoo_service, leave_id)
+                        employee_id = employee_data.get('id') if employee_data else None
+                        employee_name = employee_data.get('name') if employee_data else 'Unknown'
+                        debug_log(f"[CANCEL_TIMEOFF_HANDLER] Received cancel request for leave_id={leave_id}, employee_id={employee_id}, employee_name={employee_name}, thread_id={thread_id}", "bot_logic")
+                        
+                        ok, result = cancel_timeoff_request(odoo_service, leave_id, employee_data)
+                        debug_log(f"[CANCEL_TIMEOFF_HANDLER] Cancel result - ok={ok}, result={result}", "bot_logic")
+                        
                         if ok:
                             response = { 'message': 'Your time off request has been cancelled successfully!' }
                             # Log timeoff_cancellation metric
@@ -2996,8 +3003,12 @@ def create_app():
                                 'leave_id': leave_id
                             }, employee_data)
                         else:
+                            debug_log(f"[CANCEL_TIMEOFF_HANDLER] Cancel failed: {result}", "bot_logic")
                             response = { 'message': f"Could not cancel request: {result}" }
                 except Exception as e:
+                    import traceback
+                    debug_log(f"[CANCEL_TIMEOFF_HANDLER] Exception handling cancel request: {str(e)}", "bot_logic")
+                    debug_log(f"[CANCEL_TIMEOFF_HANDLER] Traceback: {traceback.format_exc()}", "bot_logic")
                     response = { 'message': f"An error occurred: {e}" }
             elif normalized_msg in {
                 'set up new users','setup new users','create new users','new users',
