@@ -1149,6 +1149,11 @@ def cancel_timeoff_request(odoo_service, leave_id: int, employee_data: Dict = No
             return False, msg
 
         # First, read the current state of the request to understand what we're working with
+        ok_read = False
+        leave_data = None
+        leave_started = False
+        request_date_from = None
+        
         try:
             read_params = {
                 'args': [[leave_id]],
@@ -1170,13 +1175,30 @@ def cancel_timeoff_request(odoo_service, leave_id: int, employee_data: Dict = No
                 if employee_id and request_employee_id and employee_id != request_employee_id:
                     debug_log(f"[CANCEL_TIMEOFF] ERROR: Employee mismatch - request belongs to {request_employee_id}, current user is {employee_id}", "bot_logic")
                     return False, "You can only cancel your own requests"
+                
+                # Check if leave has already started
+                if request_date_from:
+                    from datetime import date
+                    try:
+                        # Parse the date string (format: YYYY-MM-DD)
+                        if isinstance(request_date_from, str):
+                            leave_start_date = date.fromisoformat(request_date_from[:10])
+                        else:
+                            leave_start_date = request_date_from
+                        # Compare with today's date (if start date is today or before, leave has started)
+                        today = date.today()
+                        if leave_start_date <= today:
+                            leave_started = True
+                            debug_log(f"[CANCEL_TIMEOFF] Leave has already started (start_date={request_date_from}, today={today})", "bot_logic")
+                    except Exception as date_parse_error:
+                        debug_log(f"[CANCEL_TIMEOFF] WARNING: Error parsing date to check if started: {str(date_parse_error)}", "bot_logic")
             else:
                 debug_log(f"[CANCEL_TIMEOFF] WARNING: Could not read request details - {leave_data}", "bot_logic")
         except Exception as read_error:
             debug_log(f"[CANCEL_TIMEOFF] WARNING: Error reading request details: {str(read_error)}", "bot_logic")
 
         # First, try to delete the request
-        debug_log(f"[CANCEL_TIMEOFF] Attempting to delete leave_id={leave_id}", "bot_logic")
+        debug_log(f"[CANCEL_TIMEOFF] Attempting to delete leave_id={leave_id} (leave_started={leave_started})", "bot_logic")
         try:
             unlink_params = {
                 'args': [[leave_id]],
@@ -1189,13 +1211,27 @@ def cancel_timeoff_request(odoo_service, leave_id: int, employee_data: Dict = No
                 return True, "Request deleted successfully"
             else:
                 debug_log(f"[CANCEL_TIMEOFF] Delete failed: {result_delete}", "bot_logic")
+                # Check if deletion failed because leave has started
+                error_msg = str(result_delete) if result_delete else ''
+                if leave_started or 'started' in error_msg.lower() or 'manager' in error_msg.lower():
+                    debug_log(f"[CANCEL_TIMEOFF] Delete failed for started leave - returning permission error", "bot_logic")
+                    return False, "Cannot cancel a time off request that has already started. Please contact a Time Off Manager to cancel this request."
         except Exception as delete_error:
             debug_log(f"[CANCEL_TIMEOFF] Delete exception: {str(delete_error)}", "bot_logic")
             import traceback
             debug_log(f"[CANCEL_TIMEOFF] Delete traceback: {traceback.format_exc()}", "bot_logic")
+            # If deletion fails and leave has started, don't try state change
+            if leave_started:
+                debug_log(f"[CANCEL_TIMEOFF] Delete exception for started leave - returning permission error", "bot_logic")
+                return False, "Cannot cancel a time off request that has already started. Please contact a Time Off Manager to cancel this request."
 
-        # If deletion didn't work, try to set state to 'draft' (To Submit)
-        debug_log(f"[CANCEL_TIMEOFF] Delete failed, attempting to set state to 'draft' for leave_id={leave_id}", "bot_logic")
+        # If deletion didn't work and leave hasn't started, try to set state to 'draft' (To Submit)
+        # Only do this for leaves that haven't started yet
+        if leave_started:
+            debug_log(f"[CANCEL_TIMEOFF] Leave has started - skipping state change attempt", "bot_logic")
+            return False, "Cannot cancel a time off request that has already started. Please contact a Time Off Manager to cancel this request."
+        
+        debug_log(f"[CANCEL_TIMEOFF] Delete failed for non-started leave, attempting to set state to 'draft' for leave_id={leave_id}", "bot_logic")
         write_params = {
             'args': [[leave_id], {'state': 'draft'}],
             'kwargs': {}
@@ -1204,6 +1240,10 @@ def cancel_timeoff_request(odoo_service, leave_id: int, employee_data: Dict = No
         debug_log(f"[CANCEL_TIMEOFF] Write state to 'draft' result - ok={ok}, result={result}", "bot_logic")
         if not ok:
             debug_log(f"[CANCEL_TIMEOFF] ERROR: Failed to cancel request - {result}", "bot_logic")
+            # Check if the error is about started leave
+            error_msg = str(result) if result else ''
+            if 'started' in error_msg.lower() or 'manager' in error_msg.lower():
+                return False, "Cannot cancel a time off request that has already started. Please contact a Time Off Manager to cancel this request."
             return False, f"Failed to cancel request: {result}"
 
         debug_log(f"[CANCEL_TIMEOFF] SUCCESS: Request cancelled (state set to draft)", "bot_logic")
