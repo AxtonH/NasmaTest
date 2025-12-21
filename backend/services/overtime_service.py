@@ -349,7 +349,7 @@ class OvertimeService:
         return False, "No projects found or access denied"
 
     def _create_approval_request(self, category_id: int, date_start: str, date_end: str, project_id: int,
-                                 odoo_session_data: Dict = None) -> Tuple[bool, Any, Optional[Dict]]:
+                                 description: str = None, odoo_session_data: Dict = None) -> Tuple[bool, Any, Optional[Dict]]:
         """Create approval request (returns success, result, renewed_session)"""
         payload = {
             'category_id': category_id,
@@ -362,6 +362,10 @@ class OvertimeService:
         # Only include project if it's a valid integer (not False or None)
         if project_id and isinstance(project_id, int):
             payload['x_studio_project'] = project_id
+        
+        # Include description (reason field) if provided
+        if description and description.strip():
+            payload['reason'] = description.strip()
         
         # Use stateless if session data provided, otherwise fallback to regular
         use_stateless = odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id')
@@ -625,7 +629,7 @@ class OvertimeService:
                     'session_handled': True
                 }
             
-            # Parse form data: overtime_form=date|hour_from|hour_to|project_id
+            # Parse form data: overtime_form=date|hour_from|hour_to|project_id|description
             if not msg.startswith('overtime_form='):
                 # Invalid format, show form again
                 hour_options = self._generate_hour_options()
@@ -668,6 +672,7 @@ class OvertimeService:
             hour_from_str = parts[1].strip()
             hour_to_str = parts[2].strip()
             project_id_str = parts[3].strip()
+            description_str = parts[4].strip() if len(parts) > 4 else ''
             
             # Validate date
             date_dmy = self._parse_date_input(date_str)
@@ -766,6 +771,7 @@ class OvertimeService:
                 'hour_from': hour_from_str,
                 'hour_to': hour_to_str,
                 'project_id': project_id,
+                'description': description_str,  # Optional description field
                 'category_id': category_id,  # Store the category_id explicitly
                 'category_name': session.get('category_name'),
                 'user_tz': session.get('user_tz') or (employee_data or {}).get('tz') or 'Asia/Amman',
@@ -873,6 +879,7 @@ class OvertimeService:
                         date_start=start_dt,
                         date_end=end_dt,
                         project_id=int(data.get('project_id')) if data.get('project_id') else False,
+                        description=data.get('description', ''),  # Optional description field
                         odoo_session_data=odoo_session_data
                     )
                     
@@ -1252,13 +1259,18 @@ class OvertimeService:
                     project_name = p.get('label', project_name)
                     break
 
+        # Get description (optional)
+        description = data.get('description', '').strip()
+        description_text = f"📝 **Description:** {description}\n" if description else ""
+
         msg = (
             "Here are the details for your overtime request:\n\n"
             f"📂 **Category:** {data.get('category_name', 'Overtime')}\n"
             f"📅 **Date:** {fmt(date_dmy)}\n"
             f"⏰ **Hours:** {hour_from_12} → {hour_to_12}\n"
             f"🕒 **Time Requested:** {total_time}\n"
-            f"📁 **Project:** {project_name}\n\n"
+            f"📁 **Project:** {project_name}\n"
+            f"{description_text}\n"
             "Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to cancel"
         )
         buttons = [

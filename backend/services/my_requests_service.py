@@ -896,7 +896,7 @@ def get_overtime_request_for_edit(odoo_service, request_id: int, user_tz: Option
             'args': [[request_id]],
             'kwargs': {
                 'fields': ['id', 'date_start', 'date_end', 'x_studio_hours', 'x_studio_project', 
-                          'request_status', 'create_date']
+                          'request_status', 'create_date', 'reason']
             }
         }
         ok, requests = _make_odoo_request(odoo_service, 'approval.request', 'read', read_params)
@@ -932,6 +932,7 @@ def get_overtime_request_for_edit(odoo_service, request_id: int, user_tz: Option
             'hour_from': start_hour,
             'hour_to': end_hour,
             'project_id': request_data.get('x_studio_project')[0] if isinstance(request_data.get('x_studio_project'), list) else request_data.get('x_studio_project'),
+            'reason': request_data.get('reason', ''),  # Description/reason field
             'status': request_data.get('request_status')
         }
     except Exception as e:
@@ -939,7 +940,8 @@ def get_overtime_request_for_edit(odoo_service, request_id: int, user_tz: Option
 
 
 def update_overtime_request(odoo_service, request_id: int, date_start: str, date_end: str, 
-                            hour_from: str, hour_to: str, project_id: int, user_tz: Optional[str] = None) -> Tuple[bool, Any]:
+                            hour_from: str, hour_to: str, project_id: int, user_tz: Optional[str] = None,
+                            description: Optional[str] = None) -> Tuple[bool, Any]:
     """Update an overtime request.
     
     Workflow:
@@ -953,6 +955,7 @@ def update_overtime_request(odoo_service, request_id: int, date_start: str, date
         hour_from: Hour key (e.g., "9" or "9.5")
         hour_to: Hour key (e.g., "17" or "17.5")
         project_id: Project ID
+        description: Optional description/reason field
     """
     try:
         if not request_id:
@@ -1060,6 +1063,10 @@ def update_overtime_request(odoo_service, request_id: int, date_start: str, date
         # Add hours field if it exists (optional)
         if hours is not None:
             update_fields['x_studio_hours'] = hours
+        
+        # Add description (reason field) if provided
+        if description and description.strip():
+            update_fields['reason'] = description.strip()
 
         write_params = {
             'args': [[request_id], update_fields],

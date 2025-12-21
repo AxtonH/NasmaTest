@@ -2951,6 +2951,7 @@ def create_app():
                                     'hour_from': str(request_data.get('hour_from', '')),
                                     'hour_to': str(request_data.get('hour_to', '')),
                                     'project_id': str(request_data.get('project_id', '')),
+                                    'reason': request_data.get('reason', ''),  # Description/reason field
                                     'hour_options': hour_options,
                                     'project_options': project_options,
                                     'context_key': 'update_overtime_request'
@@ -2966,7 +2967,7 @@ def create_app():
             elif normalized_msg.startswith('update_overtime_request:'):
                 # Handle update overtime request - apply changes
                 try:
-                    # Format: update_overtime_request:REQUEST_ID|DATE_START|HOUR_FROM|HOUR_TO|PROJECT_ID
+                    # Format: update_overtime_request:REQUEST_ID|DATE_START|HOUR_FROM|HOUR_TO|PROJECT_ID|DESCRIPTION
                     parts = normalized_msg.split(':', 1)
                     if len(parts) < 2:
                         response = { 'message': 'Invalid update request format' }
@@ -2980,6 +2981,7 @@ def create_app():
                             hour_from = data_parts[2]
                             hour_to = data_parts[3]
                             project_id = int(data_parts[4])
+                            description = data_parts[5] if len(data_parts) > 5 else None  # Optional description
                             
                             # Get user timezone for timezone conversion
                             user_tz = None
@@ -2989,7 +2991,7 @@ def create_app():
                                 user_tz = None
                             
                             # Note: date_start is already in DD/MM/YYYY format, update_overtime_request will handle conversion
-                            ok, result = update_overtime_request(odoo_service, request_id, date_str, date_str, hour_from, hour_to, project_id, user_tz)
+                            ok, result = update_overtime_request(odoo_service, request_id, date_str, date_str, hour_from, hour_to, project_id, user_tz, description)
                             if ok:
                                 response = { 'message': 'Your overtime request has been updated successfully!' }
                                 # Log overtime_edit metric

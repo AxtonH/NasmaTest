@@ -437,6 +437,11 @@
              color: #291C48;
          }
 
+         /* Optional description placeholder styling */
+         input[placeholder="Optional description"]::placeholder {
+             opacity: 0.6;
+         }
+
          .send-icon {
              width: calc(32px * var(--ui-scale));
              height: calc(32px * var(--ui-scale));
@@ -2604,12 +2609,13 @@
                         }
                     }, 0);
                 } else if (buttons && buttons.widgets && buttons.widgets.overtime_form) {
-                    // Single-step overtime form widget (date picker, hour from/to inputs/dropdowns, project dropdown)
+                    // Single-step overtime form widget (date picker, hour from/to inputs/dropdowns, project dropdown, description)
                     const wid = `otf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
                     const dateId = `${wid}_date`;
                     const hourFromId = `${wid}_hour_from`;
                     const hourToId = `${wid}_hour_to`;
                     const projectId = `${wid}_project`;
+                    const descriptionId = `${wid}_description`;
                     const applyId = `${wid}_apply`;
                     
                     const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
@@ -2624,30 +2630,34 @@
                         .join('');
                     
                     widgetsHtml = `
-                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">Date:</label>
-                                <input type="text" id="${dateId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select a date" style="box-sizing: border-box; max-width: calc(100% - 90px);" />
+                        <div class="mt-3 flex flex-col items-start gap-4 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Date:</label>
+                                <input type="text" id="${dateId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select a date" style="box-sizing: border-box;" />
                             </div>
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">From:</label>
-                                <select id="${hourFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">From:</label>
+                                <select id="${hourFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;">
                                     <option value="" disabled selected>Select time</option>
                                     ${hourOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                                 </select>
                             </div>
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">To:</label>
-                                <select id="${hourToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">To:</label>
+                                <select id="${hourToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;">
                                     <option value="" disabled selected>Select time</option>
                                     ${hourOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('')}
                                 </select>
                             </div>
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">Project:</label>
-                                <select id="${projectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Project:</label>
+                                <select id="${projectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;">
                                     ${projectOptsHtml}
                                 </select>
+                            </div>
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description:</label>
+                                <input type="text" id="${descriptionId}" placeholder="Optional description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;" />
                             </div>
                             <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
                         </div>
@@ -2696,12 +2706,15 @@
                             });
                         }
                         
+                        const descriptionEl = document.getElementById(descriptionId);
+                        
                         if (applyBtn) {
                             applyBtn.addEventListener('click', () => {
                                 const dateVal = dateEl ? dateEl.value.trim() : '';
                                 const hourFromVal = hourFromEl ? hourFromEl.value.trim() : '';
                                 const hourToVal = hourToEl ? hourToEl.value.trim() : '';
                                 const projectVal = projectEl ? projectEl.value : '';
+                                const descriptionVal = descriptionEl ? descriptionEl.value.trim() : '';
                                 
                                 if (!dateVal) {
                                     alert('Please select a date.');
@@ -2721,12 +2734,12 @@
                                 // Date is already formatted as DD/MM/YYYY by flatpickr
                                 const formattedDate = dateVal;
                                 
-                                // Format: overtime_form=date|hour_from|hour_to|project_id
-                                const outgoing = `overtime_form=${formattedDate}|${hourFromVal}|${hourToVal}|${projectVal}`;
+                                // Format: overtime_form=date|hour_from|hour_to|project_id|description
+                                const outgoing = `overtime_form=${formattedDate}|${hourFromVal}|${hourToVal}|${projectVal}|${descriptionVal}`;
                                 
                                 // Show user-friendly message in chat
                                 const projectLabel = projectEl && projectEl.options && projectEl.selectedIndex >= 0 ? projectEl.options[projectEl.selectedIndex].text : projectVal;
-                                const userMsg = `Date: ${formattedDate}, Time: ${hourFromVal} to ${hourToVal}, Project: ${projectLabel}`;
+                                const userMsg = `Date: ${formattedDate}, Time: ${hourFromVal} to ${hourToVal}, Project: ${projectLabel}${descriptionVal ? ', Description: ' + descriptionVal : ''}`;
                                 addMessageToChat(userMsg, true);
                                 conversationHistory.push({role: 'user', content: userMsg});
                                 // Send internal format silently
@@ -2741,6 +2754,7 @@
                     const hourFromId = `${wid}_hour_from`;
                     const hourToId = `${wid}_hour_to`;
                     const projectId = `${wid}_project`;
+                    const descriptionId = `${wid}_description`;
                     const applyId = `${wid}_apply`;
                     const requestId = buttons.widgets.request_id || '';
                     
@@ -2751,6 +2765,9 @@
                     const defaultHourFrom = buttons.widgets.hour_from || '';
                     const defaultHourTo = buttons.widgets.hour_to || '';
                     const defaultProjectId = buttons.widgets.project_id || '';
+                    // Strip HTML tags from description (Odoo stores HTML formatted text)
+                    const rawDescription = buttons.widgets.reason || '';
+                    const defaultDescription = rawDescription ? rawDescription.replace(/<[^>]*>/g, '') : '';
                     
                     const projectOptsHtml = `<option value="" disabled ${!defaultProjectId ? 'selected' : ''}>Select project</option>` +
                         projectOptions.map(o => {
@@ -2759,14 +2776,14 @@
                         }).join('');
                     
                     widgetsHtml = `
-                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">Date:</label>
-                                <input type="text" id="${dateId}" value="${escapeHtml(defaultDate)}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select a date" style="box-sizing: border-box; max-width: calc(100% - 90px);" />
+                        <div class="mt-3 flex flex-col items-start gap-4 px-4 py-3 w-full overflow-hidden" style="box-sizing: border-box;">
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Date:</label>
+                                <input type="text" id="${dateId}" value="${escapeHtml(defaultDate)}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select a date" style="box-sizing: border-box;" />
                             </div>
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">From:</label>
-                                <select id="${hourFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">From:</label>
+                                <select id="${hourFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;">
                                     <option value="" disabled ${!defaultHourFrom ? 'selected' : ''}>Select time</option>
                                     ${hourOptions.map(o => {
                                         const isSelected = defaultHourFrom && String(o.value) === String(defaultHourFrom) ? 'selected' : '';
@@ -2774,9 +2791,9 @@
                                     }).join('')}
                                 </select>
                             </div>
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">To:</label>
-                                <select id="${hourToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">To:</label>
+                                <select id="${hourToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;">
                                     <option value="" disabled ${!defaultHourTo ? 'selected' : ''}>Select time</option>
                                     ${hourOptions.map(o => {
                                         const isSelected = defaultHourTo && String(o.value) === String(defaultHourTo) ? 'selected' : '';
@@ -2784,11 +2801,15 @@
                                     }).join('')}
                                 </select>
                             </div>
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                <label class="text-base font-medium flex-shrink-0" style="width: 70px;">Project:</label>
-                                <select id="${projectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 90px);">
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Project:</label>
+                                <select id="${projectId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;">
                                     ${projectOptsHtml}
                                 </select>
+                            </div>
+                            <div class="flex items-center justify-start gap-6 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description:</label>
+                                <input type="text" id="${descriptionId}" value="${escapeHtml(defaultDescription)}" placeholder="Optional description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;" />
                             </div>
                             <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
                         </div>
@@ -2837,12 +2858,15 @@
                             });
                         }
                         
+                        const descriptionEl = document.getElementById(descriptionId);
+                        
                         if (applyBtn) {
                             applyBtn.addEventListener('click', () => {
                                 const dateVal = dateEl ? dateEl.value.trim() : '';
                                 const hourFromVal = hourFromEl ? hourFromEl.value.trim() : '';
                                 const hourToVal = hourToEl ? hourToEl.value.trim() : '';
                                 const projectVal = projectEl ? projectEl.value : '';
+                                const descriptionVal = descriptionEl ? descriptionEl.value.trim() : '';
                                 
                                 if (!dateVal) {
                                     alert('Please select a date.');
@@ -2859,12 +2883,12 @@
                                     return;
                                 }
                                 
-                                // Format: update_overtime_request:REQUEST_ID|DATE_START|HOUR_FROM|HOUR_TO|PROJECT_ID
-                                const outgoing = `update_overtime_request:${requestId}|${dateVal}|${hourFromVal}|${hourToVal}|${projectVal}`;
+                                // Format: update_overtime_request:REQUEST_ID|DATE_START|HOUR_FROM|HOUR_TO|PROJECT_ID|DESCRIPTION
+                                const outgoing = `update_overtime_request:${requestId}|${dateVal}|${hourFromVal}|${hourToVal}|${projectVal}|${descriptionVal}`;
                                 
                                 // Show user-friendly message in chat
                                 const projectLabel = projectEl && projectEl.options && projectEl.selectedIndex >= 0 ? projectEl.options[projectEl.selectedIndex].text : projectVal;
-                                const userMsg = `Updated: Date: ${dateVal}, Time: ${hourFromVal} to ${hourToVal}, Project: ${projectLabel}`;
+                                const userMsg = `Updated: Date: ${dateVal}, Time: ${hourFromVal} to ${hourToVal}, Project: ${projectLabel}${descriptionVal ? ', Description: ' + descriptionVal : ''}`;
                                 addMessageToChat(userMsg, true);
                                 conversationHistory.push({role: 'user', content: userMsg});
                                 // Send internal format silently
