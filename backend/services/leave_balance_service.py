@@ -57,13 +57,14 @@ class LeaveBalanceService:
                             flask_session.modified = True
                         except Exception:
                             pass
-                    
-                    if 'error' in result_dict:
-                        error_msg = result_dict.get('error', 'Unknown error')
-                        debug_log(f"Odoo API error (stateless): {error_msg}", "odoo_data")
-                        return False, error_msg
-                    
-                    return True, result_dict.get('result', [])
+
+                    # If the stateless call returned an error, fall back to the stateful path below
+                    result_error = result_dict.get('error') if isinstance(result_dict, dict) else None
+                    has_result = isinstance(result_dict, dict) and 'result' in result_dict
+                    if result_error and not has_result:
+                        debug_log(f"Odoo API error (stateless): {result_error} - retrying with stateful request", "odoo_data")
+                    else:
+                        return True, result_dict.get('result', []) if isinstance(result_dict, dict) else result_dict
                 except Exception as e:
                     debug_log(f"Stateless request failed, falling back to regular request: {str(e)}", "odoo_data")
                     # Fall through to regular request
@@ -491,4 +492,3 @@ class LeaveBalanceService:
             lines.append(f"Available {leave_type}: {days_str} days ({hours_minutes_str})")
 
         return " | ".join(lines)
-
