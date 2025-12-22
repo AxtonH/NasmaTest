@@ -1512,9 +1512,10 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
             ok_lt, leave_type_data = _make_odoo_request(odoo_service, 'hr.leave.type', 'read', leave_type_read_params)
             
             if ok_lt and isinstance(leave_type_data, list) and len(leave_type_data) > 0:
-                new_leave_type_name = leave_type_data[0].get('name', '')
+                new_leave_type_name = (leave_type_data[0].get('name', '') or '').strip()
+                new_leave_type_is_unpaid = new_leave_type_name.lower().startswith('unpaid')
                 
-                if new_leave_type_name == 'Unpaid Leave':
+                if new_leave_type_is_unpaid:
                     # Read existing request to get its leave type and days
                     existing_read_params = {
                         'args': [[leave_id]],
@@ -1534,7 +1535,6 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                         elif isinstance(existing_holiday_status, dict):
                             existing_leave_type_name = existing_holiday_status.get('name')
                         
-                        # Get current Annual Leave balance
                         try:
                             from .leave_balance_service import LeaveBalanceService
                         except Exception:
@@ -1552,7 +1552,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                             
                             # If existing request was Annual Leave, add back those days to get original balance
                             original_annual_balance = current_annual_balance
-                            if existing_leave_type_name == 'Annual Leave':
+                            if existing_leave_type_name and str(existing_leave_type_name).strip().lower().startswith('annual'):
                                 try:
                                     existing_days = float(existing_number_of_days)
                                     original_annual_balance = current_annual_balance + existing_days
