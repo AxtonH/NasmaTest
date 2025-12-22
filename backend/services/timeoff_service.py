@@ -1141,44 +1141,55 @@ class TimeOffService:
             
             # CRITICAL: Check Annual Leave balance using the same method as display
             # This ensures consistency and simplicity - use calculate_remaining_leave directly
-            # Default to showing unpaid leave (only hide if we can confirm balance > 30 minutes)
-            annual_remaining = None  # None means we couldn't determine, so show unpaid leave
-            if employee_id and odoo_session_data:
+            # Default to hiding unpaid leave unless we confirm eligibility (fail closed to enforce policy)
+            annual_remaining = None  # None means we couldn't determine yet
+            if employee_id:
                 try:
                     try:
                         from .services.leave_balance_service import LeaveBalanceService
                     except Exception:
                         from services.leave_balance_service import LeaveBalanceService
-                    
+
                     leave_balance_service = LeaveBalanceService(self.odoo_service)
-                    remaining, error = leave_balance_service.calculate_remaining_leave(
-                        employee_id, 
-                        leave_type_name='Annual Leave',
-                        odoo_session_data=odoo_session_data
-                    )
-                    
-                    if not error and remaining and isinstance(remaining, dict):
-                        annual_remaining = remaining.get('Annual Leave', 0.0)
+
+                    def _fetch_remaining(session_data):
+                        rem, err = leave_balance_service.calculate_remaining_leave(
+                            employee_id,
+                            leave_type_name='Annual Leave',
+                            odoo_session_data=session_data
+                        )
+                        return rem, err
+
+                    # First try stateless (preferred)
+                    rem, err = _fetch_remaining(odoo_session_data if odoo_session_data and odoo_session_data.get('session_id') else None)
+
+                    # If stateless fails, retry with stateful session
+                    if err:
+                        debug_log(f"Annual Leave stateless check failed: {err}. Retrying with stateful session.", "bot_logic")
+                        rem, err = _fetch_remaining(None)
+
+                    if not err and isinstance(rem, dict):
+                        annual_remaining = rem.get('Annual Leave', 0.0)
                         debug_log(f"Annual Leave balance check: remaining={annual_remaining} days ({annual_remaining * 8:.1f} hours)", "bot_logic")
                     else:
-                        debug_log(f"Failed to get Annual Leave balance: {error}. Defaulting to show unpaid leave.", "bot_logic")
-                        # If we can't determine balance, default to showing unpaid leave (safer)
+                        debug_log(f"Unable to determine Annual Leave balance (err={err}). Enforcing policy by hiding unpaid leave.", "bot_logic")
                         annual_remaining = None
                 except Exception as e:
-                    debug_log(f"Error checking Annual Leave balance: {str(e)}. Defaulting to show unpaid leave.", "bot_logic")
-                    # If error, default to showing unpaid leave (safer)
+                    debug_log(f"Error checking Annual Leave balance: {str(e)}. Enforcing policy by hiding unpaid leave.", "bot_logic")
                     annual_remaining = None
             
             # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
-            # Only hide unpaid leave if we successfully determined balance AND it's > 30 minutes
-            if annual_remaining is not None and annual_remaining > 0.0625:
-                show_unpaid_leave = False
-                debug_log(f"Hiding Unpaid Leave option - user has {annual_remaining} days ({annual_remaining * 8:.1f} hours) of Annual Leave available", "bot_logic")
-            else:
-                if annual_remaining is not None:
-                    debug_log(f"Showing Unpaid Leave option - user has {annual_remaining} days ({annual_remaining * 8:.1f} hours) of Annual Leave remaining (threshold: 0.0625 days / 30 minutes)", "bot_logic")
+            # Hide unpaid leave unless we confirm balance is <= threshold
+            if annual_remaining is not None:
+                if annual_remaining > 0.0625:
+                    show_unpaid_leave = False
+                    debug_log(f"Hiding Unpaid Leave option - user has {annual_remaining} days ({annual_remaining * 8:.1f} hours) of Annual Leave available", "bot_logic")
                 else:
-                    debug_log(f"Showing Unpaid Leave option - could not determine Annual Leave balance, defaulting to show unpaid leave", "bot_logic")
+                    debug_log(f"Showing Unpaid Leave option - user has {annual_remaining} days ({annual_remaining * 8:.1f} hours) of Annual Leave remaining (threshold: 0.0625 days / 30 minutes)", "bot_logic")
+            else:
+                # Cannot determine balance -> enforce policy by hiding unpaid
+                show_unpaid_leave = False
+                debug_log("Hiding Unpaid Leave option - could not determine Annual Leave balance (fail closed)", "bot_logic")
             
             # Check allocations for Maternity, Paternity, and Compassionate Leave
             if allocated and isinstance(allocated, dict):
