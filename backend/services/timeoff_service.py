@@ -1140,22 +1140,88 @@ class TimeOffService:
                 return False, "Failed to fetch leave types"
             
             # Process balance results
-            if allocated:
-                # Check Annual Leave balance for Unpaid Leave filtering
+            # CRITICAL: Always check Annual Leave balance, even if allocated is empty
+            # This prevents showing Unpaid Leave when balance check fails silently
+            annual_allocated = 0.0
+            annual_taken = 0.0
+            
+            # Check if we got valid data from parallel calls
+            if allocated and isinstance(allocated, dict) and len(allocated) > 0:
                 annual_allocated = allocated.get('Annual Leave', 0.0)
+            else:
+                # Fallback: Try to fetch allocated leave synchronously if parallel call failed
+                debug_log(f"Warning: allocated is empty or invalid ({type(allocated)}), attempting fallback fetch", "bot_logic")
+                if employee_id and odoo_session_data:
+                    try:
+                        try:
+                            from .services.leave_balance_service import LeaveBalanceService
+                        except Exception:
+                            from services.leave_balance_service import LeaveBalanceService
+                        leave_balance_service = LeaveBalanceService(self.odoo_service)
+                        current_year = datetime.now().year
+                        allocated_fallback, alloc_error = leave_balance_service.get_total_allocated_leave(
+                            employee_id, current_year, current_year, odoo_session_data
+                        )
+                        if not alloc_error and allocated_fallback and isinstance(allocated_fallback, dict):
+                            allocated = allocated_fallback
+                            annual_allocated = allocated.get('Annual Leave', 0.0)
+                            debug_log(f"Fallback fetch successful: annual_allocated={annual_allocated}", "bot_logic")
+                        else:
+                            debug_log(f"Fallback fetch failed: {alloc_error}", "bot_logic")
+                    except Exception as e:
+                        debug_log(f"Error in fallback fetch: {str(e)}", "bot_logic")
+            
+            if taken and isinstance(taken, dict) and len(taken) > 0:
                 annual_taken = taken.get('Annual Leave', 0.0)
-                annual_remaining = annual_allocated - annual_taken
-                # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
-                if annual_remaining > 0.0625:
-                    show_unpaid_leave = False
-                    debug_log(f"Hiding Unpaid Leave option - user has {annual_remaining} days of Annual Leave available", "bot_logic")
-                
-                # Check allocations for Maternity, Paternity, and Compassionate Leave
+            else:
+                # Fallback: Try to fetch taken leave synchronously if parallel call failed
+                debug_log(f"Warning: taken is empty or invalid ({type(taken)}), attempting fallback fetch", "bot_logic")
+                if employee_id and odoo_session_data:
+                    try:
+                        try:
+                            from .services.leave_balance_service import LeaveBalanceService
+                        except Exception:
+                            from services.leave_balance_service import LeaveBalanceService
+                        leave_balance_service = LeaveBalanceService(self.odoo_service)
+                        current_year = datetime.now().year
+                        taken_fallback, taken_error = leave_balance_service.get_taken_leave(
+                            employee_id, current_year, current_year, odoo_session_data
+                        )
+                        if not taken_error and taken_fallback and isinstance(taken_fallback, dict):
+                            taken = taken_fallback
+                            annual_taken = taken.get('Annual Leave', 0.0)
+                            debug_log(f"Fallback fetch successful: annual_taken={annual_taken}", "bot_logic")
+                        else:
+                            debug_log(f"Fallback fetch failed: {taken_error}", "bot_logic")
+                    except Exception as e:
+                        debug_log(f"Error in fallback fetch: {str(e)}", "bot_logic")
+            
+            annual_remaining = annual_allocated - annual_taken
+            
+            # Debug: Log all leave types found in allocated/taken to catch naming mismatches
+            if allocated and isinstance(allocated, dict):
+                allocated_keys = list(allocated.keys())
+                debug_log(f"Leave types found in allocated: {allocated_keys}", "bot_logic")
+            if taken and isinstance(taken, dict):
+                taken_keys = list(taken.keys())
+                debug_log(f"Leave types found in taken: {taken_keys}", "bot_logic")
+            
+            debug_log(f"Annual Leave balance check: allocated={annual_allocated}, taken={annual_taken}, remaining={annual_remaining}", "bot_logic")
+            
+            # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
+            if annual_remaining > 0.0625:
+                show_unpaid_leave = False
+                debug_log(f"Hiding Unpaid Leave option - user has {annual_remaining} days ({annual_remaining * 8:.1f} hours) of Annual Leave available", "bot_logic")
+            else:
+                debug_log(f"Showing Unpaid Leave option - user has {annual_remaining} days ({annual_remaining * 8:.1f} hours) of Annual Leave remaining (threshold: 0.0625 days / 30 minutes)", "bot_logic")
+            
+            # Check allocations for Maternity, Paternity, and Compassionate Leave
+            if allocated and isinstance(allocated, dict):
                 for check_type in ['Maternity Leave', 'Paternity Leave', 'Compassionate Leave']:
                     type_allocated = allocated.get(check_type, 0.0)
                     if type_allocated > 0:
                         # Check if there's remaining balance
-                        type_taken = taken.get(check_type, 0.0)
+                        type_taken = taken.get(check_type, 0.0) if (taken and isinstance(taken, dict)) else 0.0
                         type_remaining = type_allocated - type_taken
                         if type_remaining > 0:
                             additional_types.append(check_type)
