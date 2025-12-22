@@ -1153,6 +1153,7 @@ class TimeOffService:
                     leave_balance_service = LeaveBalanceService(self.odoo_service)
 
                     def _fetch_remaining(session_data):
+                        debug_log(f"[TIMEOFF_FORM] Fetching Annual Leave balance (stateless={bool(session_data and session_data.get('session_id'))})", "bot_logic")
                         rem, err = leave_balance_service.calculate_remaining_leave(
                             employee_id,
                             leave_type_name='Annual Leave',
@@ -1190,7 +1191,9 @@ class TimeOffService:
                 # Cannot determine balance -> enforce policy by hiding unpaid
                 show_unpaid_leave = False
                 debug_log("Hiding Unpaid Leave option - could not determine Annual Leave balance (fail closed)", "bot_logic")
-            
+
+            debug_log(f"[TIMEOFF_FORM] Final unpaid visibility: {show_unpaid_leave}; annual_remaining={annual_remaining}", "bot_logic")
+
             # Check allocations for Maternity, Paternity, and Compassionate Leave
             if allocated and isinstance(allocated, dict):
                 for check_type in ['Maternity Leave', 'Paternity Leave', 'Compassionate Leave']:
@@ -1209,6 +1212,7 @@ class TimeOffService:
             if show_unpaid_leave:
                 main_types.append('Unpaid Leave')
             main_types.extend(additional_types)
+            debug_log(f"[TIMEOFF_FORM] main_types after filtering: {main_types}", "bot_logic")
             
             leave_type_options = []
             for lt in leave_types:

@@ -35,6 +35,7 @@ class LeaveBalanceService:
             # If session data provided, use stateless request (preferred)
             if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
                 try:
+                    debug_log(f"[LEAVE_BALANCE] _make_odoo_request stateless model={model} method={method}", "bot_logic")
                     result_dict = self.odoo_service.make_authenticated_request(
                         model=model,
                         method=method,
@@ -400,13 +401,16 @@ class LeaveBalanceService:
             - error_message: None if successful, error string if there was a problem fetching data
         """
         try:
+            debug_log(f"[LEAVE_BALANCE] calculate_remaining_leave start employee_id={employee_id}, leave_type_name={leave_type_name}, has_session={bool(odoo_session_data and odoo_session_data.get('session_id'))}", "bot_logic")
             current_year = datetime.now().year
             start_year = current_year - 1
             end_year = current_year
 
             # Get allocations and taken leave for the 2-year period
             allocated, alloc_error = self.get_total_allocated_leave(employee_id, start_year, end_year, odoo_session_data)
+            debug_log(f"[LEAVE_BALANCE] allocated={allocated if allocated else {}} error={alloc_error}", "bot_logic")
             taken, taken_error = self.get_taken_leave(employee_id, start_year, end_year, odoo_session_data)
+            debug_log(f"[LEAVE_BALANCE] taken={taken if taken else {}} error={taken_error}", "bot_logic")
 
             # Check if we got errors
             if alloc_error:
