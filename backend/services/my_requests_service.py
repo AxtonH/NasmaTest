@@ -1536,9 +1536,9 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                         
                         # Get current Annual Leave balance
                         try:
-                            from .services.leave_balance_service import LeaveBalanceService
+                            from .leave_balance_service import LeaveBalanceService
                         except Exception:
-                            from services.leave_balance_service import LeaveBalanceService
+                            from leave_balance_service import LeaveBalanceService
                         
                         leave_balance_service = LeaveBalanceService(odoo_service)
                         remaining, error = leave_balance_service.calculate_remaining_leave(
@@ -1742,4 +1742,3 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
         return True, f"Leave request updated successfully (new ID: {new_leave_id})"
     except Exception as e:
         return False, f"Error updating leave request: {e}"
-

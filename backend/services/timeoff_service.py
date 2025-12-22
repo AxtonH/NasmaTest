@@ -253,9 +253,9 @@ class TimeOffService:
                     if leave_type_name == 'Unpaid Leave':
                         # Check Annual Leave balance
                         try:
-                            from .services.leave_balance_service import LeaveBalanceService
+                            from .leave_balance_service import LeaveBalanceService
                         except Exception:
-                            from services.leave_balance_service import LeaveBalanceService
+                            from leave_balance_service import LeaveBalanceService
                         
                         leave_balance_service = LeaveBalanceService(self.odoo_service)
                         remaining, error = leave_balance_service.calculate_remaining_leave(
@@ -402,9 +402,9 @@ class TimeOffService:
                     if leave_type_name == 'Unpaid Leave':
                         # Check Annual Leave balance
                         try:
-                            from .services.leave_balance_service import LeaveBalanceService
+                            from .leave_balance_service import LeaveBalanceService
                         except Exception:
-                            from services.leave_balance_service import LeaveBalanceService
+                            from leave_balance_service import LeaveBalanceService
                         
                         leave_balance_service = LeaveBalanceService(self.odoo_service)
                         remaining, error = leave_balance_service.calculate_remaining_leave(
@@ -1091,9 +1091,9 @@ class TimeOffService:
                     return {}
                 try:
                     try:
-                        from .services.leave_balance_service import LeaveBalanceService
+                        from .leave_balance_service import LeaveBalanceService
                     except Exception:
-                        from services.leave_balance_service import LeaveBalanceService
+                        from leave_balance_service import LeaveBalanceService
                     
                     leave_balance_service = LeaveBalanceService(self.odoo_service)
                     current_year = datetime.now().year
@@ -1111,9 +1111,9 @@ class TimeOffService:
                     return {}
                 try:
                     try:
-                        from .services.leave_balance_service import LeaveBalanceService
+                        from .leave_balance_service import LeaveBalanceService
                     except Exception:
-                        from services.leave_balance_service import LeaveBalanceService
+                        from leave_balance_service import LeaveBalanceService
                     
                     leave_balance_service = LeaveBalanceService(self.odoo_service)
                     current_year = datetime.now().year
@@ -1146,9 +1146,9 @@ class TimeOffService:
             if employee_id:
                 try:
                     try:
-                        from .services.leave_balance_service import LeaveBalanceService
+                        from .leave_balance_service import LeaveBalanceService
                     except Exception:
-                        from services.leave_balance_service import LeaveBalanceService
+                        from leave_balance_service import LeaveBalanceService
 
                     leave_balance_service = LeaveBalanceService(self.odoo_service)
 
