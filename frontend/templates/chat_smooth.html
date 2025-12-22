@@ -2912,6 +2912,12 @@
                     
                     const leaveTypeOptions = Array.isArray(buttons.widgets.leave_type_options) ? buttons.widgets.leave_type_options : [];
                     const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
+                    const relationOptions = Array.isArray(buttons.widgets.relation_options) ? buttons.widgets.relation_options : [];
+                    
+                    // Debug logging for relation options (edit form)
+                    console.log('[EDIT_TIMEOFF_FORM] relation_options from backend:', buttons.widgets.relation_options);
+                    console.log('[EDIT_TIMEOFF_FORM] relationOptions array:', relationOptions);
+                    console.log('[EDIT_TIMEOFF_FORM] relationOptions length:', relationOptions.length);
                     
                     const defaultLeaveTypeId = buttons.widgets.leave_type_id || '';
                     const defaultDateFrom = buttons.widgets.date_from || '';
@@ -2919,6 +2925,7 @@
                     const defaultIsCustomHours = buttons.widgets.is_custom_hours || false;
                     const defaultHourFrom = buttons.widgets.hour_from || '';
                     const defaultHourTo = buttons.widgets.hour_to || '';
+                    const defaultRelation = buttons.widgets.x_studio_relation || '';
                     
                     const leaveTypeOptsHtml = `<option value="" disabled ${!defaultLeaveTypeId ? 'selected' : ''}>Select leave type</option>` +
                         leaveTypeOptions.map(o => {
@@ -2926,8 +2933,35 @@
                             return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
                         }).join('');
                     
+                    // Build relation options HTML - ensure we have options
+                    let relationOptsHtml = `<option value="" disabled ${!defaultRelation ? 'selected' : ''}>Select relation</option>`;
+                    if (relationOptions && relationOptions.length > 0) {
+                        relationOptsHtml += relationOptions.map(o => {
+                            const isSelected = defaultRelation && String(o.value) === String(defaultRelation) ? 'selected' : '';
+                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                        }).join('');
+                    } else {
+                        // Fallback: Add default options if backend didn't provide any
+                        console.warn('[EDIT_TIMEOFF_FORM] No relation options from backend, using fallback');
+                        const fallbackOptions = [
+                            {value: 'Father', label: 'Father'},
+                            {value: 'Mother', label: 'Mother'},
+                            {value: 'Grandmother', label: 'Grandmother'},
+                            {value: 'Grandfather', label: 'Grandfather'},
+                            {value: 'Son', label: 'Son'},
+                            {value: 'Daughter', label: 'Daughter'},
+                            {value: 'Husband', label: 'Husband'},
+                            {value: 'Wife', label: 'Wife'}
+                        ];
+                        relationOptsHtml += fallbackOptions.map(o => {
+                            const isSelected = defaultRelation && String(o.value) === String(defaultRelation) ? 'selected' : '';
+                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                        }).join('');
+                    }
+                    
                     // Determine if Sick Leave (needs document upload)
                     const isSickLeave = leaveTypeOptions.find(opt => String(opt.value) === String(defaultLeaveTypeId) && opt.label === 'Sick Leave');
+                    const isCompassionateLeave = leaveTypeOptions.find(opt => String(opt.value) === String(defaultLeaveTypeId) && opt.label === 'Compassionate Leave');
                     
                     widgetsHtml = `
                         <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full timeoff-form-container" style="box-sizing: border-box; overflow: visible;">
@@ -2937,7 +2971,13 @@
                                     ${leaveTypeOptsHtml}
                                 </select>
                             </div>
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                            <div id="${wid}_relation_field" class="flex items-center justify-start gap-3 w-full min-w-0" style="display: ${isCompassionateLeave ? 'flex' : 'none'}; box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Relation:</label>
+                                <select id="${wid}_relation" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                    ${relationOptsHtml}
+                                </select>
+                            </div>
+                            <div id="${wid}_mode_field" class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
                                 <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Mode:</label>
                                 <div class="flex gap-2 flex-1 min-w-0">
                                     <button id="${modeId}_full" class="h-10 px-4 rounded-full text-sm font-medium ${!defaultIsCustomHours ? 'btn-gradient text-white' : 'bg-white/70 text-gray-700 border border-gray-300'} transition-colors">Full Days</button>
@@ -2998,6 +3038,9 @@
                         const hourFromEl = document.getElementById(hourFromId);
                         const hourToEl = document.getElementById(hourToId);
                         const documentEl = document.getElementById(documentId);
+                        const relationField = document.getElementById(`${wid}_relation_field`);
+                        const relationEl = document.getElementById(`${wid}_relation`);
+                        const modeField = document.getElementById(`${wid}_mode_field`);
                         const fullDaysFields = document.getElementById(`${wid}_full_days_fields`);
                         const customHoursFields = document.getElementById(`${wid}_custom_hours_fields`);
                         const documentFields = document.getElementById(`${wid}_document_fields`);
@@ -3152,14 +3195,41 @@
                             }, true);
                         }
                         
-                        // Handle leave type change (show/hide document field for Sick Leave)
+                        // Handle leave type change (show/hide fields based on leave type)
                         if (leaveTypeEl) {
                             leaveTypeEl.addEventListener('change', () => {
                                 const selectedValue = leaveTypeEl.value;
                                 const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(selectedValue));
-                                const isSickLeave = selectedOption && selectedOption.label === 'Sick Leave';
+                                const leaveTypeName = selectedOption ? selectedOption.label : '';
+                                
+                                const isSickLeave = leaveTypeName === 'Sick Leave';
+                                const isCompassionateLeave = leaveTypeName === 'Compassionate Leave';
+                                const isMaternityLeave = leaveTypeName === 'Maternity Leave';
+                                const isPaternityLeave = leaveTypeName === 'Paternity Leave';
+                                
+                                // Show/hide document field for Sick Leave
                                 if (documentFields) {
                                     documentFields.style.display = isSickLeave ? 'flex' : 'none';
+                                }
+                                
+                                // Show/hide relation field for Compassionate Leave
+                                if (relationField) {
+                                    relationField.style.display = isCompassionateLeave ? 'flex' : 'none';
+                                }
+                                
+                                // Hide mode field (disable custom hours) for Maternity/Paternity/Compassionate Leave
+                                if (modeField) {
+                                    if (isMaternityLeave || isPaternityLeave || isCompassionateLeave) {
+                                        modeField.style.display = 'none';
+                                        // Force full days mode
+                                        isCustomHours = false;
+                                        if (modeFullBtn) modeFullBtn.className = 'h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors';
+                                        if (modeCustomBtn) modeCustomBtn.className = 'h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-gray-700 border border-gray-300 transition-colors';
+                                        if (fullDaysFields) fullDaysFields.style.display = 'flex';
+                                        if (customHoursFields) customHoursFields.style.display = 'none';
+                                    } else {
+                                        modeField.style.display = 'flex';
+                                    }
                                 }
                             });
                         }
@@ -3231,9 +3301,27 @@
                                 const dateToVal = isCustomHours ? dateFromVal : (dateToEl ? dateToEl.value.trim() : '');
                                 const hourFromVal = isCustomHours ? (hourFromEl ? hourFromEl.value.trim() : '') : '';
                                 const hourToVal = isCustomHours ? (hourToEl ? hourToEl.value.trim() : '') : '';
+                                const relationVal = relationEl ? relationEl.value.trim() : '';
+                                
+                                // Get selected leave type name
+                                const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(leaveTypeVal));
+                                const leaveTypeName = selectedOption ? selectedOption.label : '';
+                                const isCompassionateLeave = leaveTypeName === 'Compassionate Leave';
+                                const isMaternityLeave = leaveTypeName === 'Maternity Leave';
+                                const isPaternityLeave = leaveTypeName === 'Paternity Leave';
+                                
+                                // Force full days mode for Maternity/Paternity/Compassionate Leave
+                                if (isMaternityLeave || isPaternityLeave || isCompassionateLeave) {
+                                    isCustomHours = false;
+                                }
                                 
                                 if (!leaveTypeVal) {
                                     alert('Please select a leave type.');
+                                    return;
+                                }
+                                
+                                if (isCompassionateLeave && !relationVal) {
+                                    alert('Please select a relation.');
                                     return;
                                 }
                                 
@@ -3269,8 +3357,7 @@
                                 const hourToTime = isCustomHours ? hourKeyToTime(hourToVal) : '';
                                 
                                 // Handle document upload if provided (for Sick Leave)
-                                const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(leaveTypeVal));
-                                const isSickLeave = selectedOption && selectedOption.label === 'Sick Leave';
+                                const isSickLeave = leaveTypeName === 'Sick Leave';
                                 const fileInput = documentEl;
                                 
                                 if (isSickLeave && fileInput && fileInput.files && fileInput.files.length > 0) {
@@ -3281,8 +3368,8 @@
                                         const base64Data = e.target.result.split(',')[1]; // Remove data:type;base64, prefix
                                         
                                         // Send file data in request body instead of URL-encoded in command string
-                                        // Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
-                                        const outgoing = `update_timeoff_request:${leaveId}|${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromTime}|${hourToTime}`;
+                                        // Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO|RELATION
+                                        const outgoing = `update_timeoff_request:${leaveId}|${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromTime}|${hourToTime}|${relationVal}`;
                                         
                                         // Prepare file data to send in request body
                                         const fileData = {
@@ -3294,7 +3381,8 @@
                                         // Show user-friendly message in chat
                                         const leaveTypeLabel = leaveTypeEl && leaveTypeEl.options && leaveTypeEl.selectedIndex >= 0 ? leaveTypeEl.options[leaveTypeEl.selectedIndex].text : leaveTypeVal;
                                         const modeLabel = isCustomHours ? 'Custom Hours' : 'Full Days';
-                                        const userMsg = `Updated: ${leaveTypeLabel} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
+                                        const relationLabel = relationVal && relationEl ? (relationEl.options[relationEl.selectedIndex]?.text || relationVal) : '';
+                                        const userMsg = `Updated: ${leaveTypeLabel}${relationLabel ? ` (Relation: ${relationLabel})` : ''} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
                                         addMessageToChat(userMsg, true);
                                         conversationHistory.push({role: 'user', content: userMsg});
                                         // Send internal format with file data in request body
@@ -3303,13 +3391,14 @@
                                     reader.readAsDataURL(file);
                                 } else {
                                     // No document upload, proceed with regular update
-                                    // Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
-                                    const outgoing = `update_timeoff_request:${leaveId}|${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromTime}|${hourToTime}`;
+                                    // Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO|RELATION
+                                    const outgoing = `update_timeoff_request:${leaveId}|${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromTime}|${hourToTime}|${relationVal}`;
                                     
                                     // Show user-friendly message in chat
                                     const leaveTypeLabel = leaveTypeEl && leaveTypeEl.options && leaveTypeEl.selectedIndex >= 0 ? leaveTypeEl.options[leaveTypeEl.selectedIndex].text : leaveTypeVal;
                                     const modeLabel = isCustomHours ? 'Custom Hours' : 'Full Days';
-                                    const userMsg = `Updated: ${leaveTypeLabel} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
+                                    const relationLabel = relationVal && relationEl ? (relationEl.options[relationEl.selectedIndex]?.text || relationVal) : '';
+                                    const userMsg = `Updated: ${leaveTypeLabel}${relationLabel ? ` (Relation: ${relationLabel})` : ''} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
                                     addMessageToChat(userMsg, true);
                                     conversationHistory.push({role: 'user', content: userMsg});
                                     // Send internal format silently
@@ -3333,11 +3422,41 @@
                     
                     const leaveTypeOptions = Array.isArray(buttons.widgets.leave_type_options) ? buttons.widgets.leave_type_options : [];
                     const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
+                    const relationOptions = Array.isArray(buttons.widgets.relation_options) ? buttons.widgets.relation_options : [];
+                    
+                    // Debug logging for relation options
+                    console.log('[TIMEOFF_FORM] relation_options from backend:', buttons.widgets.relation_options);
+                    console.log('[TIMEOFF_FORM] relationOptions array:', relationOptions);
+                    console.log('[TIMEOFF_FORM] relationOptions length:', relationOptions.length);
                     
                     const leaveTypeOptsHtml = `<option value="" disabled selected>Select leave type</option>` +
                         leaveTypeOptions.map(o => {
                             return `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`;
                         }).join('');
+                    
+                    // Build relation options HTML - ensure we have options
+                    let relationOptsHtml = `<option value="" disabled selected>Select relation</option>`;
+                    if (relationOptions && relationOptions.length > 0) {
+                        relationOptsHtml += relationOptions.map(o => {
+                            return `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`;
+                        }).join('');
+                    } else {
+                        // Fallback: Add default options if backend didn't provide any
+                        console.warn('[TIMEOFF_FORM] No relation options from backend, using fallback');
+                        const fallbackOptions = [
+                            {value: 'Father', label: 'Father'},
+                            {value: 'Mother', label: 'Mother'},
+                            {value: 'Grandmother', label: 'Grandmother'},
+                            {value: 'Grandfather', label: 'Grandfather'},
+                            {value: 'Son', label: 'Son'},
+                            {value: 'Daughter', label: 'Daughter'},
+                            {value: 'Husband', label: 'Husband'},
+                            {value: 'Wife', label: 'Wife'}
+                        ];
+                        relationOptsHtml += fallbackOptions.map(o => {
+                            return `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`;
+                        }).join('');
+                    }
                     
                     widgetsHtml = `
                         <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full timeoff-form-container" style="box-sizing: border-box; overflow: visible;">
@@ -3347,7 +3466,13 @@
                                     ${leaveTypeOptsHtml}
                                 </select>
                             </div>
-                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                            <div id="${wid}_relation_field" class="flex items-center justify-start gap-3 w-full min-w-0" style="display: none; box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Relation:</label>
+                                <select id="${wid}_relation" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                    ${relationOptsHtml}
+                                </select>
+                            </div>
+                            <div id="${wid}_mode_field" class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
                                 <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Mode:</label>
                                 <div class="flex gap-2 flex-1 min-w-0">
                                     <button id="${modeId}_full" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors">Full Days</button>
@@ -3406,18 +3531,48 @@
                         const hourFromEl = document.getElementById(hourFromId);
                         const hourToEl = document.getElementById(hourToId);
                         const documentEl = document.getElementById(documentId);
+                        const relationField = document.getElementById(`${wid}_relation_field`);
+                        const relationEl = document.getElementById(`${wid}_relation`);
+                        const modeField = document.getElementById(`${wid}_mode_field`);
                         const fullDaysFields = document.getElementById(`${wid}_full_days_fields`);
                         const customHoursFields = document.getElementById(`${wid}_custom_hours_fields`);
                         const documentFields = document.getElementById(`${wid}_document_fields`);
                         
-                        // Handle leave type change (show/hide document field for Sick Leave)
+                        // Handle leave type change (show/hide fields based on leave type)
                         if (leaveTypeEl) {
                             leaveTypeEl.addEventListener('change', () => {
                                 const selectedValue = leaveTypeEl.value;
                                 const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(selectedValue));
-                                const isSickLeave = selectedOption && selectedOption.label === 'Sick Leave';
+                                const leaveTypeName = selectedOption ? selectedOption.label : '';
+                                
+                                const isSickLeave = leaveTypeName === 'Sick Leave';
+                                const isCompassionateLeave = leaveTypeName === 'Compassionate Leave';
+                                const isMaternityLeave = leaveTypeName === 'Maternity Leave';
+                                const isPaternityLeave = leaveTypeName === 'Paternity Leave';
+                                
+                                // Show/hide document field for Sick Leave
                                 if (documentFields) {
                                     documentFields.style.display = isSickLeave ? 'flex' : 'none';
+                                }
+                                
+                                // Show/hide relation field for Compassionate Leave
+                                if (relationField) {
+                                    relationField.style.display = isCompassionateLeave ? 'flex' : 'none';
+                                }
+                                
+                                // Hide mode field (disable custom hours) for Maternity/Paternity/Compassionate Leave
+                                if (modeField) {
+                                    if (isMaternityLeave || isPaternityLeave || isCompassionateLeave) {
+                                        modeField.style.display = 'none';
+                                        // Force full days mode
+                                        isCustomHours = false;
+                                        if (modeFullBtn) modeFullBtn.className = 'h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors';
+                                        if (modeCustomBtn) modeCustomBtn.className = 'h-10 px-4 rounded-full text-sm font-medium bg-white/70 text-gray-700 border border-gray-300 transition-colors';
+                                        if (fullDaysFields) fullDaysFields.style.display = 'flex';
+                                        if (customHoursFields) customHoursFields.style.display = 'none';
+                                    } else {
+                                        modeField.style.display = 'flex';
+                                    }
                                 }
                             });
                         }
@@ -3488,9 +3643,27 @@
                                 const dateToVal = isCustomHours ? dateFromVal : (dateToEl ? dateToEl.value.trim() : '');
                                 const hourFromVal = isCustomHours ? (hourFromEl ? hourFromEl.value.trim() : '') : '';
                                 const hourToVal = isCustomHours ? (hourToEl ? hourToEl.value.trim() : '') : '';
+                                const relationVal = relationEl ? relationEl.value.trim() : '';
+                                
+                                // Get selected leave type name
+                                const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(leaveTypeVal));
+                                const leaveTypeName = selectedOption ? selectedOption.label : '';
+                                const isCompassionateLeave = leaveTypeName === 'Compassionate Leave';
+                                const isMaternityLeave = leaveTypeName === 'Maternity Leave';
+                                const isPaternityLeave = leaveTypeName === 'Paternity Leave';
+                                
+                                // Force full days mode for Maternity/Paternity/Compassionate Leave
+                                if (isMaternityLeave || isPaternityLeave || isCompassionateLeave) {
+                                    isCustomHours = false;
+                                }
                                 
                                 if (!leaveTypeVal) {
                                     alert('Please select a leave type.');
+                                    return;
+                                }
+                                
+                                if (isCompassionateLeave && !relationVal) {
+                                    alert('Please select a relation.');
                                     return;
                                 }
                                 
@@ -3526,8 +3699,7 @@
                                 const hourToTime = isCustomHours ? hourKeyToTime(hourToVal) : '';
                                 
                                 // Handle document upload if provided (for Sick Leave)
-                                const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(leaveTypeVal));
-                                const isSickLeave = selectedOption && selectedOption.label === 'Sick Leave';
+                                const isSickLeave = leaveTypeName === 'Sick Leave';
                                 const fileInput = documentEl;
                                 
                                 // Store confirmation data for later use
@@ -3538,6 +3710,7 @@
                                     is_custom_hours: isCustomHours,
                                     hour_from: hourFromVal,
                                     hour_to: hourToVal,
+                                    relation: relationVal,  // For Compassionate Leave
                                     file_attachment: null
                                 };
                                 
@@ -3556,13 +3729,14 @@
                                             data: base64Data
                                         };
                                         
-                                        // Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
-                                        const outgoing = `confirm_timeoff_request:${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromVal}|${hourToVal}`;
+                                        // Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO|RELATION
+                                        const outgoing = `confirm_timeoff_request:${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromVal}|${hourToVal}|${relationVal}`;
                                         
                                         // Show user-friendly message in chat
                                         const leaveTypeLabel = leaveTypeEl && leaveTypeEl.options && leaveTypeEl.selectedIndex >= 0 ? leaveTypeEl.options[leaveTypeEl.selectedIndex].text : leaveTypeVal;
                                         const modeLabel = isCustomHours ? 'Custom Hours' : 'Full Days';
-                                        const userMsg = `Requesting: ${leaveTypeLabel} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
+                                        const relationLabel = relationVal && relationEl ? (relationEl.options[relationEl.selectedIndex]?.text || relationVal) : '';
+                                        const userMsg = `Requesting: ${leaveTypeLabel}${relationLabel ? ` (Relation: ${relationLabel})` : ''} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
                                         addMessageToChat(userMsg, true);
                                         conversationHistory.push({role: 'user', content: userMsg});
                                         
@@ -3575,13 +3749,14 @@
                                     reader.readAsDataURL(file);
                                 } else {
                                     // No document upload, proceed with confirmation
-                                    // Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
-                                    const outgoing = `confirm_timeoff_request:${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromVal}|${hourToVal}`;
+                                    // Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO|RELATION
+                                    const outgoing = `confirm_timeoff_request:${leaveTypeVal}|${dateFromVal}|${dateToVal}|${String(isCustomHours)}|${hourFromVal}|${hourToVal}|${relationVal}`;
                                     
                                     // Show user-friendly message in chat
                                     const leaveTypeLabel = leaveTypeEl && leaveTypeEl.options && leaveTypeEl.selectedIndex >= 0 ? leaveTypeEl.options[leaveTypeEl.selectedIndex].text : leaveTypeVal;
                                     const modeLabel = isCustomHours ? 'Custom Hours' : 'Full Days';
-                                    const userMsg = `Requesting: ${leaveTypeLabel} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
+                                    const relationLabel = relationVal && relationEl ? (relationEl.options[relationEl.selectedIndex]?.text || relationVal) : '';
+                                    const userMsg = `Requesting: ${leaveTypeLabel}${relationLabel ? ` (Relation: ${relationLabel})` : ''} (${modeLabel}), Date: ${dateFromVal}${!isCustomHours ? ` to ${dateToVal}` : ''}${isCustomHours ? `, Time: ${hourFromTime} to ${hourToTime}` : ''}`;
                                     addMessageToChat(userMsg, true);
                                     conversationHistory.push({role: 'user', content: userMsg});
                                     

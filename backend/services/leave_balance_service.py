@@ -270,7 +270,7 @@ class LeaveBalanceService:
     def get_taken_leave(self, employee_id: int, start_year: int, end_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
         Get total taken leave for the specified period (start_year to end_year) from hr.leave.
-        Only includes leaves with state 'validate' (Approved) or 'validate1' (Second Approval).
+        Includes leaves with state 'validate' (Approved), 'validate1' (Second Approval), or 'confirm' (To Approve).
         Handles leaves spanning multiple periods.
         
         Returns:
@@ -280,13 +280,13 @@ class LeaveBalanceService:
             - error_message: None if successful, error string if there was a problem fetching data
         """
         try:
-            # Domain: filter by employee, approved states, and dates within period
+            # Domain: filter by employee, approved states (including 'confirm' - To Approve), and dates within period
             period_start = date(start_year, 1, 1)
             period_end = date(end_year, 12, 31)
 
             domain = [
                 ('employee_id', '=', employee_id),
-                ('state', 'in', ['validate', 'validate1']),  # Approved or Second Approval
+                ('state', 'in', ['validate', 'validate1', 'confirm']),  # Approved, Second Approval, or To Approve
                 ('date_from', '<=', period_end.strftime('%Y-%m-%d')),
                 ('date_to', '>=', period_start.strftime('%Y-%m-%d'))
             ]
@@ -438,6 +438,25 @@ class LeaveBalanceService:
             debug_log(error_msg, "odoo_data")
             return {}, error_msg
 
+    def _days_to_hours_minutes(self, days: float, hours_per_day: float = 8.0) -> Tuple[int, int]:
+        """
+        Convert days to hours and minutes.
+        
+        Args:
+            days: Number of days (can be fractional)
+            hours_per_day: Hours per work day (default 8)
+        
+        Returns:
+            Tuple of (hours, minutes)
+        """
+        try:
+            total_hours = days * hours_per_day
+            hours = int(total_hours)
+            minutes = int((total_hours - hours) * 60)
+            return hours, minutes
+        except Exception:
+            return 0, 0
+
     def format_remaining_leave_message(self, remaining: Dict[str, float]) -> str:
         """
         Format remaining leave data into a user-friendly message line.
@@ -446,7 +465,7 @@ class LeaveBalanceService:
             remaining: Dict mapping leave type names to remaining days
         
         Returns:
-            Formatted message string, e.g., "Available Annual Leave: 16.0 days | Available Sick Leave: 8.0 days"
+            Formatted message string, e.g., "Available Annual Leave: 16 days (128:00) | Available Sick Leave: 8 days (64:00)"
         """
         if not remaining:
             return ""
@@ -456,12 +475,20 @@ class LeaveBalanceService:
             # Exclude Unpaid Leave from balance display (unlimited, no balance concept)
             if leave_type == 'Unpaid Leave':
                 continue
-            # Format days with 1 decimal place, but show as integer if whole number
+            
+            # Convert to hours and minutes
+            hours, minutes = self._days_to_hours_minutes(days)
+            
+            # Format days - show decimal if not whole number, otherwise show as integer
             if days == int(days):
                 days_str = str(int(days))
             else:
                 days_str = f"{days:.1f}"
-            lines.append(f"Available {leave_type}: {days_str} days")
+            
+            # Format hours:minutes
+            hours_minutes_str = f"{hours}:{minutes:02d}"
+            
+            lines.append(f"Available {leave_type}: {days_str} days ({hours_minutes_str})")
 
         return " | ".join(lines)
 

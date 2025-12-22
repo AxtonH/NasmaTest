@@ -173,16 +173,19 @@ class TimeOffService:
         return dates
     
     def get_leave_types(self) -> Tuple[bool, Any]:
-        """Get available leave types from Odoo"""
+        """Get available leave types from Odoo
+        
+        Optimized: Only fetch essential fields and skip allocation_info processing
+        """
         try:
             if not self.odoo_service.is_authenticated():
                 return False, "Not authenticated with Odoo"
             
-            # Fetch hr.leave.type records (using correct fields from your Odoo setup)
+            # Optimize: Only fetch essential fields (id, name, active) - skip allocation fields we don't use in form
             params = {
                 'args': [[]],
                 'kwargs': {
-                    'fields': ['id', 'name', 'active', 'requires_allocation', 'has_valid_allocation', 'max_leaves', 'allows_negative'],
+                    'fields': ['id', 'name', 'active'],  # Minimal fields for faster response
                     'limit': 50
                 }
             }
@@ -190,13 +193,16 @@ class TimeOffService:
             success, data = self._make_odoo_request('hr.leave.type', 'search_read', params)
             
             if success:
-                # Filter active leave types and add additional info
+                # Filter active leave types - skip allocation_info processing (not used in form)
                 leave_types = []
                 for lt in data:
                     if isinstance(lt, dict) and lt.get('active', True):
-                        # Add readable info about allocation requirements
-                        lt['allocation_info'] = self._get_allocation_info(lt)
-                        leave_types.append(lt)
+                        # Only keep essential fields
+                        leave_types.append({
+                            'id': lt.get('id'),
+                            'name': lt.get('name'),
+                            'active': lt.get('active', True)
+                        })
                 return True, leave_types
             else:
                 return False, data
@@ -223,7 +229,8 @@ class TimeOffService:
     def submit_leave_request(self, employee_id: int, leave_type_id: int,
                            start_date: str, end_date: str, description: str = None,
                            extra_fields: Optional[Dict] = None,
-                           supporting_attachments: Optional[List[Dict[str, Any]]] = None) -> Tuple[bool, Any]:
+                           supporting_attachments: Optional[List[Dict[str, Any]]] = None,
+                           odoo_session_data: Dict = None) -> Tuple[bool, Any]:
         """Submit a leave request to Odoo"""
         try:
             self._log(f"Starting leave request submission for employee {employee_id}", "bot_logic")
@@ -231,6 +238,42 @@ class TimeOffService:
             if not self.odoo_service.is_authenticated():
                 self._log("Not authenticated with Odoo", "bot_logic")
                 return False, "Not authenticated with Odoo"
+
+            # Check if this is an Unpaid Leave request and validate against Annual Leave balance
+            try:
+                # Get leave type name to check if it's Unpaid Leave
+                leave_type_params = {
+                    'args': [[leave_type_id]],
+                    'kwargs': {'fields': ['name']}
+                }
+                ok_lt, leave_type_data = self._make_odoo_request('hr.leave.type', 'read', leave_type_params, odoo_session_data)
+                
+                if ok_lt and isinstance(leave_type_data, list) and len(leave_type_data) > 0:
+                    leave_type_name = leave_type_data[0].get('name', '')
+                    if leave_type_name == 'Unpaid Leave':
+                        # Check Annual Leave balance
+                        try:
+                            from .services.leave_balance_service import LeaveBalanceService
+                        except Exception:
+                            from services.leave_balance_service import LeaveBalanceService
+                        
+                        leave_balance_service = LeaveBalanceService(self.odoo_service)
+                        remaining, error = leave_balance_service.calculate_remaining_leave(
+                            employee_id,
+                            'Annual Leave',
+                            odoo_session_data
+                        )
+                        
+                        if not error and remaining:
+                            annual_leave_balance = remaining.get('Annual Leave', 0.0)
+                            # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
+                            if annual_leave_balance > 0.0625:
+                                error_msg = "According to P&C policy Prezlabers cannot request unpaid time off while having unused Annual Leave time"
+                                self._log(f"Unpaid leave request blocked - user has {annual_leave_balance} days of Annual Leave available", "bot_logic")
+                                return False, error_msg
+            except Exception as e:
+                debug_log(f"Error validating unpaid leave request: {str(e)}", "bot_logic")
+                # On error, allow the request to proceed (fail open)
 
             # Prepare leave request data
             leave_data = {
@@ -331,6 +374,55 @@ class TimeOffService:
         try:
             if not session_id or not user_id:
                 return False, "Session data missing", None
+
+            # Check if this is an Unpaid Leave request and validate against Annual Leave balance
+            odoo_session_data = {
+                'session_id': session_id,
+                'user_id': user_id,
+                'username': username,
+                'password': password
+            }
+            
+            try:
+                # Get leave type name to check if it's Unpaid Leave
+                leave_type_params = {
+                    'args': [[leave_type_id]],
+                    'kwargs': {'fields': ['name']}
+                }
+                ok_lt, leave_type_data = self._make_odoo_request_stateless(
+                    'hr.leave.type', 'read', leave_type_params,
+                    session_id=session_id,
+                    user_id=user_id,
+                    username=username,
+                    password=password
+                )
+                
+                if ok_lt and isinstance(leave_type_data, list) and len(leave_type_data) > 0:
+                    leave_type_name = leave_type_data[0].get('name', '')
+                    if leave_type_name == 'Unpaid Leave':
+                        # Check Annual Leave balance
+                        try:
+                            from .services.leave_balance_service import LeaveBalanceService
+                        except Exception:
+                            from services.leave_balance_service import LeaveBalanceService
+                        
+                        leave_balance_service = LeaveBalanceService(self.odoo_service)
+                        remaining, error = leave_balance_service.calculate_remaining_leave(
+                            employee_id,
+                            'Annual Leave',
+                            odoo_session_data
+                        )
+                        
+                        if not error and remaining:
+                            annual_leave_balance = remaining.get('Annual Leave', 0.0)
+                            # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
+                            if annual_leave_balance > 0.0625:
+                                error_msg = "According to P&C policy Prezlabers cannot request unpaid time off while having unused Annual Leave time"
+                                self._log(f"Unpaid leave request blocked (stateless) - user has {annual_leave_balance} days of Annual Leave available", "bot_logic")
+                                return False, error_msg, None
+            except Exception as e:
+                debug_log(f"Error validating unpaid leave request (stateless): {str(e)}", "bot_logic")
+                # On error, allow the request to proceed (fail open)
 
             # Prepare leave request data
             leave_data = {
@@ -843,7 +935,8 @@ class TimeOffService:
     def build_timeoff_confirmation_message(self, leave_type_id: int, date_from: str, date_to: str, 
                                           is_custom_hours: bool, hour_from: str = '', hour_to: str = '',
                                           employee_data: Optional[Dict] = None,
-                                          leave_balance_service=None, odoo_session_data: Optional[Dict] = None) -> Tuple[bool, Any]:
+                                          leave_balance_service=None, odoo_session_data: Optional[Dict] = None,
+                                          relation: str = '') -> Tuple[bool, Any]:
         """Build confirmation message for time off request with all details.
         
         Args:
@@ -855,6 +948,7 @@ class TimeOffService:
             hour_to: End hour key (e.g., "17" or "17.5")
             employee_data: Employee data dict
             leave_balance_service: Leave balance service instance
+            relation: Relation field value for Compassionate Leave
         
         Returns:
             Tuple of (success: bool, confirmation_data: dict with message and buttons)
@@ -928,10 +1022,13 @@ class TimeOffService:
             # Build confirmation message
             employee_name = employee_data.get('name', 'Unknown') if employee_data else 'Unknown'
             
+            # Add relation field for Compassionate Leave
+            relation_text = f"\n👥 **Relation:** {relation}" if relation and leave_type_name == 'Compassionate Leave' else ""
+            
             if is_custom_hours:
                 msg = (
                     "Here are the details for your time off request:\n\n"
-                    f"📋 **Leave Type:** {leave_type_name}\n"
+                    f"📋 **Leave Type:** {leave_type_name}{relation_text}\n"
                     f"📅 **Date:** {date_from_formatted}\n"
                     f"⏰ **Hours:** {hour_from_formatted} → {hour_to_formatted}\n"
                     f"👤 **Employee:** {employee_name}{remaining_leave_text}\n\n"
@@ -940,7 +1037,7 @@ class TimeOffService:
             else:
                 msg = (
                     "Here are the details for your time off request:\n\n"
-                    f"📋 **Leave Type:** {leave_type_name}\n"
+                    f"📋 **Leave Type:** {leave_type_name}{relation_text}\n"
                     f"📅 **Start Date:** {date_from_formatted}\n"
                     f"📅 **End Date:** {date_to_formatted}\n"
                     f"👤 **Employee:** {employee_name}{remaining_leave_text}\n\n"
@@ -960,7 +1057,8 @@ class TimeOffService:
                 'date_to': date_to,
                 'is_custom_hours': is_custom_hours,
                 'hour_from': hour_from,
-                'hour_to': hour_to
+                'hour_to': hour_to,
+                'relation': relation  # For Compassionate Leave
             }
         except Exception as e:
             import traceback
@@ -968,19 +1066,108 @@ class TimeOffService:
             debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
             return False, f"Error building confirmation message: {str(e)}"
     
-    def build_timeoff_request_form_data(self, employee_id: int) -> Tuple[bool, Any]:
+    def build_timeoff_request_form_data(self, employee_id: int, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
         """Build form widget data for initial time off request.
         
         Returns widget data similar to edit form but for new requests.
+        Optimized with parallel API calls for faster performance.
         """
         try:
-            # Fetch leave types
-            ok_leave_types, leave_types = self.get_leave_types()
+            # Optimize: Run leave types fetch and balance checks in parallel
+            import concurrent.futures
+            
+            show_unpaid_leave = True
+            additional_types = []
+            leave_types = []
+            
+            def fetch_leave_types():
+                """Fetch leave types from Odoo"""
+                ok, result = self.get_leave_types()
+                return ok, result
+            
+            def fetch_allocated():
+                """Fetch allocated leave"""
+                if not employee_id:
+                    return {}
+                try:
+                    try:
+                        from .services.leave_balance_service import LeaveBalanceService
+                    except Exception:
+                        from services.leave_balance_service import LeaveBalanceService
+                    
+                    leave_balance_service = LeaveBalanceService(self.odoo_service)
+                    current_year = datetime.now().year
+                    allocated, alloc_error = leave_balance_service.get_total_allocated_leave(
+                        employee_id, current_year, current_year, odoo_session_data
+                    )
+                    return allocated if not alloc_error else {}
+                except Exception as e:
+                    debug_log(f"Error fetching allocated leave: {str(e)}", "bot_logic")
+                    return {}
+            
+            def fetch_taken():
+                """Fetch taken leave"""
+                if not employee_id:
+                    return {}
+                try:
+                    try:
+                        from .services.leave_balance_service import LeaveBalanceService
+                    except Exception:
+                        from services.leave_balance_service import LeaveBalanceService
+                    
+                    leave_balance_service = LeaveBalanceService(self.odoo_service)
+                    current_year = datetime.now().year
+                    taken, taken_error = leave_balance_service.get_taken_leave(
+                        employee_id, current_year, current_year, odoo_session_data
+                    )
+                    return taken if not taken_error else {}
+                except Exception as e:
+                    debug_log(f"Error fetching taken leave: {str(e)}", "bot_logic")
+                    return {}
+            
+            # Execute all three API calls in parallel for maximum speed
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                leave_types_future = executor.submit(fetch_leave_types)
+                allocated_future = executor.submit(fetch_allocated)
+                taken_future = executor.submit(fetch_taken)
+                
+                # Get results
+                ok_leave_types, leave_types = leave_types_future.result()
+                allocated = allocated_future.result()
+                taken = taken_future.result()
+            
             if not ok_leave_types:
                 return False, "Failed to fetch leave types"
             
-            # Filter to only show main types: Annual Leave, Sick Leave, Unpaid Leave
-            main_types = ['Annual Leave', 'Sick Leave', 'Unpaid Leave']
+            # Process balance results
+            if allocated:
+                # Check Annual Leave balance for Unpaid Leave filtering
+                annual_allocated = allocated.get('Annual Leave', 0.0)
+                annual_taken = taken.get('Annual Leave', 0.0)
+                annual_remaining = annual_allocated - annual_taken
+                # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
+                if annual_remaining > 0.0625:
+                    show_unpaid_leave = False
+                    debug_log(f"Hiding Unpaid Leave option - user has {annual_remaining} days of Annual Leave available", "bot_logic")
+                
+                # Check allocations for Maternity, Paternity, and Compassionate Leave
+                for check_type in ['Maternity Leave', 'Paternity Leave', 'Compassionate Leave']:
+                    type_allocated = allocated.get(check_type, 0.0)
+                    if type_allocated > 0:
+                        # Check if there's remaining balance
+                        type_taken = taken.get(check_type, 0.0)
+                        type_remaining = type_allocated - type_taken
+                        if type_remaining > 0:
+                            additional_types.append(check_type)
+                            debug_log(f"Including {check_type} in dropdown - user has {type_remaining} days remaining", "bot_logic")
+            
+            # Filter to only show main types: Annual Leave, Sick Leave, Unpaid Leave (if allowed)
+            # Plus Maternity/Paternity/Compassionate if user has allocations
+            main_types = ['Annual Leave', 'Sick Leave']
+            if show_unpaid_leave:
+                main_types.append('Unpaid Leave')
+            main_types.extend(additional_types)
+            
             leave_type_options = []
             for lt in leave_types:
                 lt_name = lt.get('name', '')
@@ -989,6 +1176,26 @@ class TimeOffService:
                         'value': str(lt.get('id')),
                         'label': lt_name
                     })
+            
+            # Get relation field options for Compassionate Leave (if it's in the list)
+            # Use fallback options immediately - Odoo fields_get is slow and not critical
+            fallback_relation_options = [
+                {'value': 'Father', 'label': 'Father'},
+                {'value': 'Mother', 'label': 'Mother'},
+                {'value': 'Grandmother', 'label': 'Grandmother'},
+                {'value': 'Grandfather', 'label': 'Grandfather'},
+                {'value': 'Son', 'label': 'Son'},
+                {'value': 'Daughter', 'label': 'Daughter'},
+                {'value': 'Husband', 'label': 'Husband'},
+                {'value': 'Wife', 'label': 'Wife'}
+            ]
+            
+            # Always use fallback for relation options - Odoo fetch is slow and not critical
+            # The fallback options match Odoo's selection field, so this is safe
+            relation_options = []
+            if 'Compassionate Leave' in main_types:
+                relation_options = fallback_relation_options.copy()
+                debug_log("Using fallback relation options (Odoo fetch skipped for speed)", "bot_logic")
             
             # Generate hour options (30-minute intervals)
             # Simple function to generate hour options without needing OvertimeService
@@ -1005,9 +1212,18 @@ class TimeOffService:
                     'label': f"{hour:02d}:30"
                 })
             
+            # Final safety check: if Compassionate Leave is in leave_type_options but relation_options is empty, use fallback
+            has_compassionate = any(opt.get('label') == 'Compassionate Leave' for opt in leave_type_options)
+            if has_compassionate and not relation_options:
+                debug_log("Final safety check: Compassionate Leave found in options but relation_options is empty, using fallback", "bot_logic")
+                relation_options = fallback_relation_options.copy()
+            
+            debug_log(f"Returning relation_options: {len(relation_options)} options", "bot_logic")
+            
             return True, {
                 'leave_type_options': leave_type_options,
-                'hour_options': hour_options
+                'hour_options': hour_options,
+                'relation_options': relation_options  # For Compassionate Leave
             }
         except Exception as e:
             return False, f"Error building time off request form: {str(e)}"

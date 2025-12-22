@@ -995,17 +995,20 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 timeoff_result = self._start_timeoff_session(message, thread_id, extracted_data, employee_data)
                 return timeoff_result
 
-            # If we have an active session, continue it
+            # If we have an active session, clear it and show the new single-step form
+            # Old multistep flow is deprecated - always use the new form widget
             if active_session and active_session.get('type') == 'timeoff':
-                # Validate session state - accept both 'started' and 'active' as valid
                 session_state = active_session.get('state', 'unknown')
                 if session_state in ['completed', 'cancelled']:
                     debug_log(f"Session is {session_state}, clearing and returning None", "bot_logic")
                     self.session_manager.clear_session(thread_id)
                     return None
-                elif session_state in ['started', 'active']:
-                    debug_log(f"Found active time-off session in step {active_session.get('step', 'unknown')}, continuing...", "bot_logic")
-                    return self._continue_timeoff_session(message, thread_id, active_session, employee_data)
+                else:
+                    # Clear old session and show new single-step form
+                    debug_log(f"Found old time-off session (state: {session_state}), clearing and showing new form", "bot_logic")
+                    self._reset_timeoff_sessions(thread_id, 'Old multistep flow detected - switching to new form', employee_data)
+                    # Show the new single-step form
+                    return self._start_timeoff_session(message, thread_id, extracted_data if is_timeoff else {}, employee_data)
 
             # Lower confidence time-off detection (0.3 - 0.7)
             if is_timeoff and confidence >= 0.3:
@@ -1226,17 +1229,9 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             mt_name = ''
                         if self._mode_config_for_leave(mt_name) and not self._get_leave_mode(session, mt_name):
                             return self._prompt_leave_mode(thread_id, mt_name)
-                        response_text = (
-                            f"I'll help you request {matched_type['name']}. \n\n"
-                            "You can pick dates from the calendar below or type them. Examples:\n"
-                            "- 23/9 to 24/9\n"
-                            "- 23/09/2025 to 24/09/2025\n"
-                            "- 23-9-2025 till 24-9-2025\n"
-                            "- 23rd of September till the 24th\n"
-                            "- next Monday to Wednesday\n\n"
-                            "Defaults: I assume DD/MM, current month and year unless you specify otherwise."
-                        )
-                        return self._create_response_with_datepicker(response_text, thread_id)
+                        # Old multistep flow deprecated - show new form instead
+                        debug_log("Old multistep datepicker flow detected, redirecting to new form", "bot_logic")
+                        # Continue to show new form below
             except Exception as extract_error:
                 debug_log(f"Error processing extracted data: {extract_error}", "general")
                 # Continue to present options
@@ -1244,9 +1239,16 @@ Be thorough and informative while maintaining clarity and accuracy."""
             # Present the time off request form widget (all fields in one bubble)
             try:
                 
-                # Build form widget data
+                # Build form widget data - get Odoo session data for balance check
+                odoo_session_data = None
+                try:
+                    odoo_session_data = self.get_current_odoo_session()
+                except Exception:
+                    pass
+                
                 ok_form, form_data = self.timeoff_service.build_timeoff_request_form_data(
-                    employee_data.get('id') if employee_data else None
+                    employee_data.get('id') if employee_data else None,
+                    odoo_session_data
                 )
                 
                 if not ok_form:
@@ -1272,6 +1274,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         'timeoff_request_form': True,
                         'leave_type_options': form_data.get('leave_type_options', []),
                         'hour_options': form_data.get('hour_options', []),
+                        'relation_options': form_data.get('relation_options', []),  # For Compassionate Leave
                         'context_key': 'submit_timeoff_request'
                     }
                 }
@@ -1305,229 +1308,36 @@ Be thorough and informative while maintaining clarity and accuracy."""
             }
     
     def _continue_timeoff_session(self, message: str, thread_id: str, session: dict, employee_data: dict) -> dict:
-        """Continue an active time-off session"""
+        """Continue an active time-off session - DEPRECATED: Always redirects to new single-step form"""
+        # Old multistep flow is deprecated - always clear and show new form
+        debug_log("Old multistep flow detected in _continue_timeoff_session, redirecting to new form", "bot_logic")
+        
+        # Check for exit commands
+        message_lower = message.lower().strip()
+        if message_lower in ['cancel', 'exit', 'stop', 'quit', 'nevermind', 'no thanks', 'end', 'abort', 'undo', 'no', 'n']:
+            debug_log(f"User said '{message_lower}', cancelling time-off session", "bot_logic")
+            try:
+                self.session_manager.cancel_session(thread_id, f"User requested to exit time-off flow with: {message_lower}")
+            finally:
+                self._reset_timeoff_flow_state(thread_id)
+            return {
+                'message': 'request cancelled, can i help you with anything else',
+                'thread_id': thread_id,
+                'source': self.model,
+                'confidence_score': 1.0,
+                'model_used': self.model
+            }
+        
+        # Clear old session and show new form
+        self._reset_timeoff_sessions(thread_id, 'Old multistep flow - redirecting to new form', employee_data)
+        payload = {}
         try:
-            # Refresh the session snapshot to pick up any updates from previous steps
-            try:
-                if thread_id:
-                    refreshed_session = self.session_manager.get_session(thread_id)
-                    if refreshed_session:
-                        session = refreshed_session
-            except Exception:
-                pass
-
-            # If session is already completed/cancelled, clear and do not continue
-            try:
-                state = session.get('state')
-                if state in ['completed', 'cancelled']:
-                    self.session_manager.clear_session(thread_id)
-                    return None
-            except Exception:
-                pass
-            # Check for exit commands
-            message_lower = message.lower().strip()
-            if message_lower in ['cancel', 'exit', 'stop', 'quit', 'nevermind', 'no thanks', 'end', 'abort', 'undo', 'no', 'n']:
-                debug_log(f"User said '{message_lower}', cancelling time-off session", "bot_logic")
-                try:
-                    self.session_manager.cancel_session(thread_id, f"User requested to exit time-off flow with: {message_lower}")
-                finally:
-                    # Clear any persisted state to avoid sticky sessions
-                    self._reset_timeoff_flow_state(thread_id)
-                return {
-                    'message': 'request cancelled, can i help you with anything else',
-                    'thread_id': thread_id,
-                    'source': self.model,
-                    'confidence_score': 1.0,
-                    'model_used': self.model
-                }
-
-            # Allow users to restart mid-flow with a fresh time-off request phrase
-            if self._is_timeoff_start_message(message):
-                debug_log("Restart phrase detected during continuation; resetting flow.", "bot_logic")
-                payload = {}
-                try:
-                    detected = self.timeoff_service.detect_timeoff_intent(message)
-                    if detected[0]:
-                        payload = detected[2] or {}
-                except Exception:
-                    payload = {}
-                self._reset_timeoff_sessions(thread_id, 'User restarted time-off flow during continuation', employee_data)
-                return self._start_timeoff_session(message, thread_id, payload, employee_data)
-
-            # Require supporting document upload (if pending) before moving on
-            if self._is_supporting_doc_stage(session):
-                return self._handle_supporting_document_step(message, thread_id, session, employee_data)
-
-            # Fast-path: confirmation keywords should move straight to submission when context exists
-            confirmation_tokens = {'yes', 'y', 'confirm', 'submit', 'ok', 'sure'}
-            if message_lower in confirmation_tokens:
-                ctx = self._resolve_timeoff_context(session)
-                selected_type_confirm = ctx.get('selected_leave_type')
-                start_confirm = ctx.get('start_date')
-                end_confirm = ctx.get('end_date')
-
-                if selected_type_confirm and start_confirm and end_confirm:
-                    try:
-                        # Ensure we are at confirmation step
-                        self.session_manager.update_session(thread_id, {'step': 3})
-                    except Exception:
-                        pass
-                    # Re-fetch once more so downstream logic sees the updated step/data
-                    try:
-                        if thread_id:
-                            refreshed_for_confirmation = self.session_manager.get_session(thread_id)
-                            if refreshed_for_confirmation:
-                                session = refreshed_for_confirmation
-                    except Exception:
-                        pass
-                    return self._handle_confirmation(message, thread_id, session, employee_data)
-
-                # If confirmation comes too early, strictly enforce order
-                if not selected_type_confirm:
-                    debug_log("Confirmation received but leave type missing; prompting user to reselect.", "bot_logic")
-                    try:
-                        self.session_manager.update_session(thread_id, {'step': 1})
-                    except Exception:
-                        pass
-                    leave_types = session.get('main_leave_types') or session.get('leave_types', [])
-                    if leave_types:
-                        prompt = "I lost track of which leave type you picked. Please choose it again:"
-                        return self._create_response_with_buttons(prompt, thread_id, leave_types)
-                    prompt = "I lost track of which leave type you picked. Please let me know the leave type you need."
-                    return self._create_response(prompt, thread_id)
-
-                debug_log("Confirmation received but dates missing; requesting date range again.", "bot_logic")
-                try:
-                    self.session_manager.update_session(thread_id, {'step': 2})
-                except Exception:
-                    pass
-                reprompt = (
-                    "I still need both the start and end date before I can submit the request. "
-                    "Please send them in one message, for example '15/10/2025 to 16/10/2025'."
-                )
-                return self._create_response_with_datepicker(reprompt, thread_id)
-
-            step = session.get('step', 1)
-            debug_log(f"Continuing session at step {step} for thread {thread_id}", "bot_logic")
-
-            # Enforce strict ordered steps: 1) leave type -> 2) dates -> 3) confirmation
-            if step <= 1:  # Waiting for leave type selection
-                return self._handle_leave_type_selection(message, thread_id, session, employee_data)
-            elif step == 2:  # Waiting for date range (start and end in one message)
-                # Insert leave-mode choice (Full Days vs Custom Hours) BEFORE date step when required
-                try:
-                    sd = session.get('data', {}) if isinstance(session, dict) else {}
-                    selected_type = sd.get('selected_leave_type') or session.get('selected_leave_type') or {}
-                    selected_name = (selected_type.get('name') or '').strip()
-                    cfg = self._mode_config_for_leave(selected_name)
-                    current_mode = self._get_leave_mode(session, selected_name) if cfg else None
-                except Exception:
-                    selected_name = ''
-                    cfg = {}
-                    current_mode = None
-
-                # Handle response to mode-selection buttons when applicable
-                try:
-                    ml_raw = (message or '').strip()
-                    # Normalize whitespace variants (space, NBSP, thin space) and collapse
-                    ml_ws = ml_raw.replace('\u00A0', ' ').replace('\u2007', ' ').replace('\u202F', ' ')
-                    import re as _re_norm
-                    ml_ws = _re_norm.sub(r"\s+", " ", ml_ws).strip()
-                    ml = ml_ws.lower()
-
-                    awaiting_mode = bool(cfg) and not bool(current_mode)
-                    if cfg and awaiting_mode:
-                        field_key = cfg.get('session_key') or ''
-                        prefix = cfg.get('button_prefix') or selected_name.upper().replace(' ', '_')
-                        label = cfg.get('prompt_label') or selected_name or 'this leave type'
-
-                        # Accept explicit widget payload format: <field_key>=VALUE
-                        if field_key and ml.startswith(f"{field_key.lower()}="):
-                            val = ml_raw.split('=', 1)[1].strip()
-                            val_upper = val.upper()
-                            if val_upper == f"{prefix}_FULL_DAYS" or val_upper == "FULL_DAYS":
-                                self._store_leave_mode(thread_id, session, selected_name, 'full_days')
-                                guidance = (
-                                    f"Great, we will request {label} for full days. "
-                                    "Please send both dates in one message, for example '15/10/2025 to 16/10/2025'."
-                                )
-                                return self._create_response_with_datepicker(guidance, thread_id)
-                            elif val_upper == f"{prefix}_CUSTOM_HOURS" or val_upper == "CUSTOM_HOURS":
-                                self._store_leave_mode(thread_id, session, selected_name, 'custom_hours')
-                                guidance = (
-                                    f"Great, we will request {label} for custom hours. \n\n"
-                                    "Pick your date from the calendar below or type it (single day only). Examples:\n"
-                                    "- 23/9\n"
-                                    "- 23/09/2025\n"
-                                    "- next Monday\n\n"
-                                    "Defaults: I assume DD/MM, current month and year unless you specify otherwise."
-                                )
-                                return self._create_response_with_datepicker_single(guidance, thread_id)
-
-                        # Normalize common variants users/typeahead may send
-                        is_full_days = (
-                            ml == 'full days' or ml == 'fulldays' or ml == 'full-day' or
-                            bool(_re_norm.search(r"\bfull\s*[- ]?\s*days\b", ml)) or ml_raw.upper() == f"{prefix}_FULL_DAYS"
-                        )
-                        is_custom_hours = (
-                            ml == 'custom hours' or ml == 'custom-hours' or ml == 'custom hour' or
-                            bool(_re_norm.search(r"\bcustom\s*[- ]?\s*hours?\b", ml)) or ml_raw.upper() == f"{prefix}_CUSTOM_HOURS"
-                        )
-                        if is_full_days or is_custom_hours:
-                            mode_label = 'full_days' if is_full_days else 'custom_hours'
-                            debug_log(f"{label} mode selected: {'Full Days' if is_full_days else 'Custom Hours'} (raw: {ml_raw})", "bot_logic")
-                            self._store_leave_mode(thread_id, session, selected_name, mode_label)
-                            if mode_label == 'full_days':
-                                guidance = (
-                                    f"Great, we will request {label} for full days. "
-                                    "Please send both dates in one message, for example '15/10/2025 to 16/10/2025'."
-                                )
-                                return self._create_response_with_datepicker(guidance, thread_id)
-                            else:
-                                guidance = (
-                                    f"Great, we will request {label} for custom hours. \n\n"
-                                    "Pick your date from the calendar below or type it (single day only). Examples:\n"
-                                    "- 23/9\n"
-                                    "- 23/09/2025\n"
-                                    "- next Monday\n\n"
-                                    "Defaults: I assume DD/MM, current month and year unless you specify otherwise."
-                                )
-                                return self._create_response_with_datepicker_single(guidance, thread_id)
-                except Exception as e:
-                    debug_log(f"Error handling leave mode selection: {e}", "general")
-                    import traceback
-                    traceback.print_exc()
-
-                # If a mode is required but not chosen yet, prompt the user
-                if cfg and not current_mode and selected_name:
-                    return self._prompt_leave_mode(thread_id, selected_name)
-
-                # Safety: if no leave type was selected (e.g., residue from a previous flow), reset to step 1
-                try:
-                    sd = session.get('data', {}) if isinstance(session, dict) else {}
-                    selected_type = sd.get('selected_leave_type') or session.get('selected_leave_type')
-                except Exception:
-                    selected_type = None
-                if not selected_type:
-                    debug_log("Step=2 but no selected_leave_type found; resetting to step 1", "bot_logic")
-                    self.session_manager.update_session(thread_id, {'step': 1})
-                    return self._handle_leave_type_selection(message, thread_id, session, employee_data)
-                return self._handle_date_range_input(message, thread_id, session, employee_data)
-            elif step >= 3:  # Waiting for confirmation
-                return self._handle_confirmation(message, thread_id, session, employee_data)
-            else:
-                debug_log(f"Session in unknown state (step {step}), restarting", "bot_logic")
-                # Session in unknown state, restart
-                self.session_manager.clear_session(thread_id)
-                return None
-
-        except Exception as e:
-            debug_log(f"Error continuing time-off session: {e}", "general")
-            import traceback
-            traceback.print_exc()
-            # Clear the broken session
-            self.session_manager.clear_session(thread_id)
-            return None
+            detected = self.timeoff_service.detect_timeoff_intent(message)
+            if detected[0]:
+                payload = detected[2] or {}
+        except Exception:
+            payload = {}
+        return self._start_timeoff_session(message, thread_id, payload, employee_data)
     
     def _handle_leave_type_selection(self, message: str, thread_id: str, session: dict, employee_data: dict) -> dict:
         """Handle leave type selection step"""

@@ -1531,30 +1531,27 @@ def create_app():
                         # There was an error fetching data
                         assistant_text = "I couldn't retrieve your leave balance at the moment. Please try again later."
                     elif remaining:
-                        # Format message with each leave type on a separate line
-                        # Filter out Unpaid Leave (unlimited, no balance concept)
-                        lines = []
-                        for leave_type, days in sorted(remaining.items()):
-                            # Skip Unpaid Leave
-                            if leave_type == 'Unpaid Leave':
-                                continue
-                            # Format days with 1 decimal place, but show as integer if whole number
-                            if days == int(days):
-                                days_str = str(int(days))
-                            else:
-                                days_str = f"{days:.1f}"
-                            lines.append(f"\tAvailable {leave_type}: {days_str} days")
+                        # Use the service's formatting function which includes days and hours:minutes
+                        formatted_message = leave_balance_service.format_remaining_leave_message(remaining)
                         
-                        if lines:
-                            formatted_message = "\n".join(lines)
-                            assistant_text = f"Here's your leave balance:\n\n{formatted_message}"
+                        if formatted_message:
+                            # Convert pipe-separated format to newline-separated with tabs for better readability
+                            lines = formatted_message.split(" | ")
+                            formatted_lines = "\n".join([f"\t{line}" for line in lines])
+                            assistant_text = f"Here's your leave balance:\n\n{formatted_lines}"
                         else:
                             # Only Unpaid Leave was found, show no balance message
                             assistant_text = "Here's your leave balance:\n\n\tNo leave allocations found."
                     else:
                         # No allocations found (valid case - show 0 days)
                         if leave_type_name:
-                            assistant_text = f"Here's your leave balance:\n\n\tAvailable {leave_type_name}: 0 days"
+                            # Use service function for consistent formatting
+                            remaining_zero = {leave_type_name: 0.0}
+                            formatted_message = leave_balance_service.format_remaining_leave_message(remaining_zero)
+                            if formatted_message:
+                                assistant_text = f"Here's your leave balance:\n\n\t{formatted_message}"
+                            else:
+                                assistant_text = f"Here's your leave balance:\n\n\tAvailable {leave_type_name}: 0 days (0:00)"
                         else:
                             assistant_text = "Here's your leave balance:\n\n\tNo leave allocations found."
                     
@@ -2387,8 +2384,60 @@ def create_app():
                             ok_leave_types, leave_types = timeoff_service.get_leave_types()
                             leave_type_options = []
                             if ok_leave_types and isinstance(leave_types, list):
-                                # Filter to only show Annual Leave, Sick Leave, Unpaid Leave
-                                main_types = ['Annual Leave', 'Sick Leave', 'Unpaid Leave']
+                                # Check Annual Leave balance to determine if Unpaid Leave should be shown
+                                # Hide Unpaid Leave if user has more than 30 minutes (0.0625 days) of Annual Leave available
+                                show_unpaid_leave = True
+                                try:
+                                    try:
+                                        from .services.leave_balance_service import LeaveBalanceService
+                                    except Exception:
+                                        from services.leave_balance_service import LeaveBalanceService
+                                    
+                                    leave_balance_service = LeaveBalanceService(odoo_service)
+                                    odoo_session_data = get_odoo_session_data()
+                                    remaining, error = leave_balance_service.calculate_remaining_leave(
+                                        employee_data.get('id') if employee_data else None,
+                                        'Annual Leave',
+                                        odoo_session_data
+                                    )
+                                    
+                                    if not error and remaining and employee_data:
+                                        annual_leave_balance = remaining.get('Annual Leave', 0.0)
+                                        # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
+                                        if annual_leave_balance > 0.0625:
+                                            show_unpaid_leave = False
+                                            debug_log(f"Hiding Unpaid Leave option in edit form - user has {annual_leave_balance} days of Annual Leave available", "bot_logic")
+                                except Exception as e:
+                                    debug_log(f"Error checking Annual Leave balance for unpaid leave filter in edit form: {str(e)}", "bot_logic")
+                                    # On error, allow unpaid leave to be shown (fail open)
+                                
+                                # Check for allocations of Maternity, Paternity, and Compassionate Leave
+                                additional_types = []
+                                try:
+                                    odoo_session_data = get_odoo_session_data()
+                                    # Check each leave type for allocations
+                                    for check_type in ['Maternity Leave', 'Paternity Leave', 'Compassionate Leave']:
+                                        remaining, error = leave_balance_service.calculate_remaining_leave(
+                                            employee_data.get('id') if employee_data else None,
+                                            check_type,
+                                            odoo_session_data
+                                        )
+                                        if not error and remaining:
+                                            balance = remaining.get(check_type, 0.0)
+                                            if balance > 0:
+                                                additional_types.append(check_type)
+                                                debug_log(f"Including {check_type} in edit form dropdown - user has {balance} days allocated", "bot_logic")
+                                except Exception as e:
+                                    debug_log(f"Error checking allocations for additional leave types in edit form: {str(e)}", "bot_logic")
+                                    # On error, continue without these types (fail safe)
+                                
+                                # Filter to only show Annual Leave, Sick Leave, Unpaid Leave (if allowed)
+                                # Plus Maternity/Paternity/Compassionate if user has allocations
+                                main_types = ['Annual Leave', 'Sick Leave']
+                                if show_unpaid_leave:
+                                    main_types.append('Unpaid Leave')
+                                main_types.extend(additional_types)
+                                
                                 for lt in leave_types:
                                     lt_name = lt.get('name', '')
                                     if lt_name in main_types:
@@ -2396,6 +2445,71 @@ def create_app():
                                             'value': str(lt.get('id')),
                                             'label': lt_name
                                         })
+                            
+                            # Get relation field options for Compassionate Leave (if it's in the list)
+                            relation_options = []
+                            if 'Compassionate Leave' in main_types:
+                                try:
+                                    # Find Compassionate Leave type ID
+                                    compassionate_leave_id = None
+                                    for lt in leave_types:
+                                        if lt.get('name') == 'Compassionate Leave':
+                                            compassionate_leave_id = lt.get('id')
+                                            break
+                                    
+                                    if compassionate_leave_id:
+                                        # Get selection options from Odoo model fields
+                                        try:
+                                            fields_get_params = {
+                                                'args': [['x_studio_relation']],
+                                                'kwargs': {}
+                                            }
+                                            ok_fields, fields_info = odoo_service._make_odoo_request('hr.leave', 'fields_get', fields_get_params)
+                                            
+                                            if ok_fields and isinstance(fields_info, dict):
+                                                relation_field = fields_info.get('x_studio_relation', {})
+                                                selection = relation_field.get('selection', [])
+                                                debug_log(f"Fetched relation field selection from Odoo (edit form): {selection}", "bot_logic")
+                                                if isinstance(selection, list) and len(selection) > 0:
+                                                    for option in selection:
+                                                        if isinstance(option, (list, tuple)) and len(option) >= 2:
+                                                            # Use exact value from Odoo - don't modify case
+                                                            option_value = str(option[0]).strip()
+                                                            option_label = str(option[1]).strip()
+                                                            debug_log(f"Adding relation option (edit form): value='{option_value}', label='{option_label}'", "bot_logic")
+                                                            relation_options.append({
+                                                                'value': option_value,  # Use exact value from Odoo
+                                                                'label': option_label   # Use exact label from Odoo
+                                                            })
+                                        except Exception as fetch_error:
+                                            debug_log(f"Error fetching relation options from Odoo fields_get (edit form): {str(fetch_error)}", "bot_logic")
+                                        
+                                        # Fallback: Use hardcoded options if Odoo doesn't return them or if list is empty
+                                        if not relation_options:
+                                            debug_log("Using hardcoded fallback relation options (edit form)", "bot_logic")
+                                            relation_options = [
+                                                {'value': 'Father', 'label': 'Father'},
+                                                {'value': 'Mother', 'label': 'Mother'},
+                                                {'value': 'Grandmother', 'label': 'Grandmother'},
+                                                {'value': 'Grandfather', 'label': 'Grandfather'},
+                                                {'value': 'Son', 'label': 'Son'},
+                                                {'value': 'Daughter', 'label': 'Daughter'},
+                                                {'value': 'Husband', 'label': 'Husband'},
+                                                {'value': 'Wife', 'label': 'Wife'}
+                                            ]
+                                except Exception as e:
+                                    debug_log(f"Error fetching relation options for Compassionate Leave in edit form: {str(e)}", "bot_logic")
+                                    # Fallback to hardcoded options
+                                    relation_options = [
+                                        {'value': 'Father', 'label': 'Father'},
+                                        {'value': 'Mother', 'label': 'Mother'},
+                                        {'value': 'Grandmother', 'label': 'Grandmother'},
+                                        {'value': 'Grandfather', 'label': 'Grandfather'},
+                                        {'value': 'Son', 'label': 'Son'},
+                                        {'value': 'Daughter', 'label': 'Daughter'},
+                                        {'value': 'Husband', 'label': 'Husband'},
+                                        {'value': 'Wife', 'label': 'Wife'}
+                                    ]
                             
                             # Generate hour options (similar to overtime)
                             try:
@@ -2406,6 +2520,27 @@ def create_app():
                             edit_timeoff_service = OvertimeService(odoo_service, employee_service, session_manager, metrics_service)
                             # Use 30-minute intervals for time off custom hours
                             hour_options = edit_timeoff_service._generate_hour_options_30min()
+                            
+                            # Get existing relation value if this is a Compassionate Leave request
+                            existing_relation = request_data.get('x_studio_relation', '')
+                            
+                            # Final safety check: if Compassionate Leave is in leave_type_options but relation_options is empty, use fallback
+                            fallback_relation_options = [
+                                {'value': 'Father', 'label': 'Father'},
+                                {'value': 'Mother', 'label': 'Mother'},
+                                {'value': 'Grandmother', 'label': 'Grandmother'},
+                                {'value': 'Grandfather', 'label': 'Grandfather'},
+                                {'value': 'Son', 'label': 'Son'},
+                                {'value': 'Daughter', 'label': 'Daughter'},
+                                {'value': 'Husband', 'label': 'Husband'},
+                                {'value': 'Wife', 'label': 'Wife'}
+                            ]
+                            has_compassionate = any(opt.get('label') == 'Compassionate Leave' for opt in leave_type_options)
+                            if has_compassionate and not relation_options:
+                                debug_log("Final safety check (edit form): Compassionate Leave found in options but relation_options is empty, using fallback", "bot_logic")
+                                relation_options = fallback_relation_options.copy()
+                            
+                            debug_log(f"Returning relation_options (edit form): {len(relation_options)} options", "bot_logic")
                             
                             response = {
                                 'message': '**Edit Time Off Request**\n\nPlease update the details below:',
@@ -2421,6 +2556,8 @@ def create_app():
                                     'has_existing_attachments': len(request_data.get('existing_attachment_ids', [])) > 0,
                                     'leave_type_options': leave_type_options,
                                     'hour_options': hour_options,
+                                    'relation_options': relation_options,  # For Compassionate Leave
+                                    'x_studio_relation': existing_relation,  # Existing relation value
                                     'context_key': 'update_timeoff_request'
                                 }
                             }
@@ -2434,7 +2571,7 @@ def create_app():
             elif normalized_msg.startswith('update_timeoff_request:'):
                 # Handle update time off request - apply changes
                 try:
-                    # Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                    # Format: update_timeoff_request:LEAVE_ID|LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO|RELATION
                     parts = normalized_msg.split(':', 1)
                     if len(parts) < 2:
                         response = { 'message': 'Invalid update request format' }
@@ -2450,6 +2587,7 @@ def create_app():
                             is_custom_hours = data_parts[4].lower() == 'true'
                             hour_from = data_parts[5] if len(data_parts) > 5 else ''
                             hour_to = data_parts[6] if len(data_parts) > 6 else ''
+                            relation = data_parts[7] if len(data_parts) > 7 else ''  # For Compassionate Leave
                             
                             # Get user timezone for timezone conversion
                             user_tz = None
@@ -2486,7 +2624,8 @@ def create_app():
                                                                hour_from, hour_to, 
                                                                existing_attachment_ids=existing_attachment_ids,
                                                                new_attachment_data=new_attachment_data,
-                                                               user_tz=user_tz)
+                                                               user_tz=user_tz,
+                                                               relation=relation)
                             if ok:
                                 response = { 'message': 'Your time off request has been updated successfully!' }
                                 # Log timeoff_edit metric
@@ -2507,7 +2646,7 @@ def create_app():
                 # Handle time off request confirmation - show confirmation message
                 debug_log(f"Processing confirm_timeoff_request: message={normalized_msg[:100]}", "bot_logic")
                 try:
-                    # Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO
+                    # Format: confirm_timeoff_request:LEAVE_TYPE_ID|DATE_FROM|DATE_TO|IS_CUSTOM_HOURS|HOUR_FROM|HOUR_TO|RELATION
                     parts = normalized_msg.split(':', 1)
                     if len(parts) < 2:
                         debug_log("Invalid confirmation request format: parts < 2", "bot_logic")
@@ -2526,6 +2665,7 @@ def create_app():
                                 is_custom_hours = data_parts[3].lower() == 'true'
                                 hour_from = data_parts[4] if len(data_parts) > 4 else ''
                                 hour_to = data_parts[5] if len(data_parts) > 5 else ''
+                                relation = data_parts[6] if len(data_parts) > 6 else ''  # For Compassionate Leave
                             except (ValueError, IndexError) as ve:
                                 debug_log(f"Error parsing confirmation data: {ve}", "bot_logic")
                                 response = { 'message': 'Invalid confirmation data format' }
@@ -2553,7 +2693,8 @@ def create_app():
                                         debug_log(f"Building confirmation message for leave_type_id={leave_type_id}, date_from={date_from}, date_to={date_to}, is_custom_hours={is_custom_hours}", "bot_logic")
                                         ok, confirmation_data = timeoff_service.build_timeoff_confirmation_message(
                                             leave_type_id, date_from, date_to, is_custom_hours,
-                                            hour_from, hour_to, employee_data, leave_balance_service, odoo_session_data
+                                            hour_from, hour_to, employee_data, leave_balance_service, odoo_session_data,
+                                            relation=relation
                                         )
                                         
                                         debug_log(f"Confirmation message build result: ok={ok}, confirmation_data type={type(confirmation_data)}", "bot_logic")
@@ -2604,6 +2745,7 @@ def create_app():
                         is_custom_hours = confirmation_data.get('is_custom_hours', False)
                         hour_from = confirmation_data.get('hour_from', '')
                         hour_to = confirmation_data.get('hour_to', '')
+                        relation = confirmation_data.get('relation', '')  # For Compassionate Leave
                         
                         if not leave_type_id or not date_from or not date_to:
                             response = { 'message': 'Missing required confirmation data. Please try submitting your request again.' }
@@ -2622,7 +2764,7 @@ def create_app():
                             except Exception as e:
                                 response = { 'message': f"Invalid date format: {e}" }
                             else:
-                                # Prepare extra fields for custom hours
+                                # Prepare extra fields for custom hours and relation
                                 extra_fields = {}
                                 if is_custom_hours:
                                     extra_fields['request_unit_hours'] = True
@@ -2646,6 +2788,18 @@ def create_app():
                                         hour_to_odoo = hour_key_to_odoo(hour_to)
                                         if hour_to_odoo:
                                             extra_fields['request_hour_to'] = hour_to_odoo
+                                
+                                # Add relation field for Compassionate Leave
+                                if relation:
+                                    # Odoo selection fields are case-sensitive
+                                    # The selection values in Odoo are capitalized: "Father", "Mother", etc.
+                                    # Ensure we capitalize the first letter to match Odoo's expected format
+                                    relation_trimmed = relation.strip()
+                                    relation_capitalized = relation_trimmed.capitalize() if relation_trimmed else ''
+                                    debug_log(f"Relation value received: '{relation}' -> capitalized: '{relation_capitalized}'", "bot_logic")
+                                    
+                                    if relation_capitalized:
+                                        extra_fields['x_studio_relation'] = relation_capitalized
                                 
                                 # Handle file attachment if present
                                 file_attachment_data = confirmation_data.get('file_attachment')
@@ -2789,11 +2943,14 @@ def create_app():
                             if not employee_id:
                                 response = { 'message': 'Employee ID not found' }
                             else:
+                                # Get Odoo session data for validation
+                                odoo_session_data = get_odoo_session_data()
                                 ok, result = timeoff_service.submit_leave_request(
                                     employee_id, leave_type_id, date_from_ymd, date_to_ymd,
                                     description="Time off request submitted via Nasma chatbot",
                                     extra_fields=extra_fields if extra_fields else None,
-                                    supporting_attachments=[new_attachment_data] if new_attachment_data else None
+                                    supporting_attachments=[new_attachment_data] if new_attachment_data else None,
+                                    odoo_session_data=odoo_session_data
                                 )
                                 if ok:
                                     leave_id = result.get('leave_id') if isinstance(result, dict) else result

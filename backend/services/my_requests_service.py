@@ -5,6 +5,16 @@ try:
 except Exception:
     ZoneInfo = None
 
+# Import debug_log for logging
+try:
+    from .config.settings import debug_log
+except Exception:
+    try:
+        from config.settings import debug_log
+    except Exception:
+        def debug_log(msg, cat):
+            pass
+
 
 def _parse_datetime(dt_str: str, user_tz: Optional[str] = None) -> Tuple[str, str]:
     """Parse datetime string (DD/MM/YYYY HH:MM:SS or YYYY-MM-DD HH:MM:SS) and return (date, hour).
@@ -1290,7 +1300,7 @@ def get_timeoff_request_for_edit(odoo_service, leave_id: int, user_tz: Optional[
             'kwargs': {
                 'fields': ['id', 'holiday_status_id', 'request_date_from', 'request_date_to', 
                           'request_unit_hours', 'request_hour_from', 'request_hour_to', 
-                          'state', 'number_of_days', 'duration_display', 'supported_attachment_ids']
+                          'state', 'number_of_days', 'duration_display', 'supported_attachment_ids', 'x_studio_relation']
             }
         }
         ok, leaves = _make_odoo_request(odoo_service, 'hr.leave', 'read', read_params)
@@ -1415,7 +1425,8 @@ def get_timeoff_request_for_edit(odoo_service, leave_id: int, user_tz: Optional[
             'hour_from': hour_from,
             'hour_to': hour_to,
             'state': leave_data.get('state'),
-            'existing_attachment_ids': existing_attachment_ids
+            'existing_attachment_ids': existing_attachment_ids,
+            'x_studio_relation': leave_data.get('x_studio_relation', '')  # For Compassionate Leave
         }
     except Exception as e:
         return False, f"Error fetching leave request for edit: {e}"
@@ -1426,7 +1437,8 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                            hour_from: str = '', hour_to: str = '', 
                            existing_attachment_ids: Optional[List[int]] = None,
                            new_attachment_data: Optional[Dict[str, Any]] = None,
-                           user_tz: Optional[str] = None) -> Tuple[bool, Any]:
+                           user_tz: Optional[str] = None,
+                           relation: str = '') -> Tuple[bool, Any]:
     """Update a time off request by deleting the old one and creating a new one.
     
     This approach works for all users since all creatives have permissions to delete
@@ -1490,6 +1502,74 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
         else:
             return False, f"Invalid employee_id format: {employee_id_data}"
         
+        # Validation: Check if changing to Unpaid Leave - need to verify original balance
+        try:
+            # Get the new leave type name
+            leave_type_read_params = {
+                'args': [[leave_type_id]],
+                'kwargs': {'fields': ['name']}
+            }
+            ok_lt, leave_type_data = _make_odoo_request(odoo_service, 'hr.leave.type', 'read', leave_type_read_params)
+            
+            if ok_lt and isinstance(leave_type_data, list) and len(leave_type_data) > 0:
+                new_leave_type_name = leave_type_data[0].get('name', '')
+                
+                if new_leave_type_name == 'Unpaid Leave':
+                    # Read existing request to get its leave type and days
+                    existing_read_params = {
+                        'args': [[leave_id]],
+                        'kwargs': {'fields': ['holiday_status_id', 'number_of_days']}
+                    }
+                    ok_existing, existing_leave_data = _make_odoo_request(odoo_service, 'hr.leave', 'read', existing_read_params)
+                    
+                    if ok_existing and isinstance(existing_leave_data, list) and len(existing_leave_data) > 0:
+                        existing_leave_record = existing_leave_data[0]
+                        existing_holiday_status = existing_leave_record.get('holiday_status_id')
+                        existing_number_of_days = existing_leave_record.get('number_of_days', 0.0)
+                        
+                        # Extract existing leave type name
+                        existing_leave_type_name = None
+                        if isinstance(existing_holiday_status, (list, tuple)) and len(existing_holiday_status) > 1:
+                            existing_leave_type_name = existing_holiday_status[1]
+                        elif isinstance(existing_holiday_status, dict):
+                            existing_leave_type_name = existing_holiday_status.get('name')
+                        
+                        # Get current Annual Leave balance
+                        try:
+                            from .services.leave_balance_service import LeaveBalanceService
+                        except Exception:
+                            from services.leave_balance_service import LeaveBalanceService
+                        
+                        leave_balance_service = LeaveBalanceService(odoo_service)
+                        remaining, error = leave_balance_service.calculate_remaining_leave(
+                            employee_id,
+                            'Annual Leave',
+                            None  # Will use odoo_service session
+                        )
+                        
+                        if not error and remaining:
+                            current_annual_balance = remaining.get('Annual Leave', 0.0)
+                            
+                            # If existing request was Annual Leave, add back those days to get original balance
+                            original_annual_balance = current_annual_balance
+                            if existing_leave_type_name == 'Annual Leave':
+                                try:
+                                    existing_days = float(existing_number_of_days)
+                                    original_annual_balance = current_annual_balance + existing_days
+                                    debug_log(f"Changing from Annual Leave to Unpaid Leave - current balance: {current_annual_balance}, existing request days: {existing_days}, original balance: {original_annual_balance}", "bot_logic")
+                                except Exception:
+                                    pass
+                            
+                            # Check if original balance was > 30 minutes (0.0625 days)
+                            # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
+                            if original_annual_balance > 0.0625:
+                                error_msg = "According to P&C policy Prezlabers cannot request unpaid time off while having unused Annual Leave time"
+                                debug_log(f"Blocked change to Unpaid Leave - original Annual Leave balance was {original_annual_balance} days (threshold: 0.0625 days)", "bot_logic")
+                                return False, error_msg
+        except Exception as e:
+            debug_log(f"Error validating unpaid leave change: {str(e)}", "bot_logic")
+            # On error, allow the change to proceed (fail open)
+        
         # Step 2: Convert dates from DD/MM/YYYY to YYYY-MM-DD
         try:
             dt_from = datetime.strptime(date_from, '%d/%m/%Y')
@@ -1513,6 +1593,14 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
             'name': "Time off request via Nasma chatbot",
             'state': 'confirm'  # Submit for approval
         }
+        
+        # Add relation field for Compassionate Leave
+        if relation:
+            # Odoo selection fields are case-sensitive
+            # Capitalize the relation value to match Odoo's expected format
+            relation_capitalized = relation.capitalize()
+            debug_log(f"Adding relation field (update): '{relation}' -> '{relation_capitalized}'", "bot_logic")
+            leave_data['x_studio_relation'] = relation_capitalized
         
         # Add custom hours fields if needed
         if is_custom_hours:
