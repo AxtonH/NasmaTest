@@ -954,7 +954,7 @@
                             <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="i want time off">
                                 <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
                                 <div class="relative">
-                                    <h3 class="text-lg font-semibold text-gray-800">Ask for time off</h3>
+                                    <h3 class="text-lg font-semibold text-gray-800">Request time off</h3>
                                     <p class="text-sm text-gray-500 mt-1">Plan your next vacation</p>
                                 </div>
                             </div>
@@ -965,17 +965,17 @@
                                     <p class="text-sm text-gray-500 mt-1">Create documents</p>
                                 </div>
                             </div>
-                            <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="Ask for overtime">
+                            <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="Request Overtime">
                                 <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
                                 <div class="relative">
-                                    <h3 class="text-lg font-semibold text-gray-800">Ask for overtime</h3>
+                                    <h3 class="text-lg font-semibold text-gray-800">Request Overtime</h3>
                                     <p class="text-sm text-gray-500 mt-1">Request extra hours</p>
                                 </div>
                             </div>
                             <div class="suggestion-card group relative rounded-xl border border-gray-200/80 bg-white/50 backdrop-blur-lg shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out cursor-pointer p-4 text-center flex items-center justify-center min-h-[120px]" data-suggestion="i want to request a reimbursement">
                                 <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
                                 <div class="relative">
-                                    <h3 class="text-lg font-semibold text-gray-800">Ask for reimbursement</h3>
+                                    <h3 class="text-lg font-semibold text-gray-800">Request reimbursement</h3>
                                     <p class="text-sm text-gray-500 mt-1">Request expense reimbursement</p>
                                 </div>
                             </div>
@@ -1018,13 +1018,13 @@
                         <button class="suggestion-card card" data-suggestion="i want time off">
                             <div class="card-content">
                                 <div class="icon"><img src="/static/Timeoff.svg" alt="Time off" class="w-10 h-10"/></div>
-                                <div class="label"><p>Ask for time off</p></div>
+                                <div class="label"><p>Request time off</p></div>
                             </div>
                         </button>
-                        <button class="suggestion-card card" data-suggestion="Ask for overtime">
+                        <button class="suggestion-card card" data-suggestion="Request Overtime">
                             <div class="card-content">
-                                <div class="icon"><img src="/static/Overtime.svg" alt="Ask for overtime" class="w-10 h-10"/></div>
-                                <div class="label"><p>Ask for overtime</p></div>
+                                <div class="icon"><img src="/static/Overtime.svg" alt="Request Overtime" class="w-10 h-10"/></div>
+                                <div class="label"><p>Request Overtime</p></div>
                             </div>
                         </button>
                         <button class="suggestion-card card" data-suggestion="Generate letters">
@@ -1035,8 +1035,8 @@
                         </button>
                         <button class="suggestion-card card" data-suggestion="i want to request a reimbursement">
                             <div class="card-content">
-                                <div class="icon"><img src="/static/Reimbursement.svg" alt="Ask for reimbursement" class="w-10 h-10"/></div>
-                                <div class="label"><p>Ask for reimbursement</p></div>
+                                <div class="icon"><img src="/static/Reimbursement.svg" alt="Request reimbursement" class="w-10 h-10"/></div>
+                                <div class="label"><p>Request reimbursement</p></div>
                             </div>
                         </button>
                         {% if is_manager %}
@@ -1164,10 +1164,10 @@
                         <button class="suggestion-btn suggestion-chip" id="logMyHoursChip" data-suggestion="log my hours">Log my hours</button>
                         {% endif %}
                         <button class="suggestion-btn suggestion-chip" data-suggestion="Balances & Requests">Balances & Requests</button>
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want time off">Ask for time off</button>
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="Request Overtime">Ask for overtime</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want time off">Request time off</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="Request Overtime">Request Overtime</button>
                         <button class="suggestion-btn suggestion-chip" data-suggestion="Generate letters">Generate letters</button>
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want to request a reimbursement">Ask for reimbursement</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="i want to request a reimbursement">Request reimbursement</button>
                         {% if is_manager %}
                         <button class="suggestion-btn suggestion-chip" id="logMyHoursChipManager" data-suggestion="log my hours">Log my hours</button>
                         {% endif %}
@@ -4008,7 +4008,7 @@
 
                 // Optional main_overview + team_overview + overtime table widgets
                 let tableHtml = '';
-                if (buttons && buttons.widgets && (buttons.widgets.main_overview || buttons.widgets.team_overview || buttons.widgets.overtime_overview || buttons.widgets.new_user_confirm_rows || buttons.widgets.tasks_table || buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests)) {
+                if (buttons && buttons.widgets && (buttons.widgets.main_overview || buttons.widgets.team_overview || buttons.widgets.overtime_overview || buttons.widgets.new_user_confirm_rows || buttons.widgets.tasks_table || buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests || buttons.widgets.my_leave_balance)) {
                     if (buttons.widgets.new_user_confirm_rows) {
                         try {
                             const rows = Array.isArray(buttons.widgets.new_user_confirm_rows) ? buttons.widgets.new_user_confirm_rows : [];
@@ -4179,10 +4179,11 @@
                                 </div>
                             </div>
                         `;
-                    } else if (buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests) {
-                        // My requests table widgets (for show my requests flow) - separate tables for overtime and time off
+                    } else if (buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests || buttons.widgets.my_leave_balance) {
+                        // My requests table widgets (for show my requests flow) - separate tables for overtime, time off, and leave balance
                         let overtimeHtml = '';
                         let timeoffHtml = '';
+                        let leaveBalanceHtml = '';
                         
                         if (buttons.widgets.my_overtime_requests && Array.isArray(buttons.widgets.my_overtime_requests.rows) && buttons.widgets.my_overtime_requests.rows.length) {
                             const otData = renderTable(buttons.widgets.my_overtime_requests);
@@ -4443,7 +4444,50 @@
                             `;
                         }
                         
-                        tableHtml = overtimeHtml + timeoffHtml + actionedHtml;
+                        // Add leave balance table if available (rendered right after message, before "Would you like to edit a request?")
+                        if (buttons.widgets.my_leave_balance && Array.isArray(buttons.widgets.my_leave_balance.rows) && buttons.widgets.my_leave_balance.rows.length) {
+                            const balanceData = renderTable(buttons.widgets.my_leave_balance);
+                            leaveBalanceHtml = `
+                                <div class="mt-6">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="text-sm font-semibold text-gray-700">Leave Balance</div>
+                                    </div>
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full bg-white/70 rounded-lg overflow-hidden">
+                                            <thead class="bg-gray-50/80"><tr>${balanceData.head}</tr></thead>
+                                            <tbody>${balanceData.body}</tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Check if there are any editable requests (overtime or timeoff with edit/cancel buttons)
+                        let hasEditableRequests = false;
+                        
+                        // Check overtime requests for edit buttons
+                        if (buttons.widgets.my_overtime_requests && Array.isArray(buttons.widgets.my_overtime_requests.rows)) {
+                            hasEditableRequests = buttons.widgets.my_overtime_requests.rows.some(row => {
+                                const editAction = row.edit || '';
+                                return editAction.includes('edit-overtime-btn') || editAction.includes('cancel-overtime-btn');
+                            });
+                        }
+                        
+                        // Check timeoff requests for edit buttons if not found in overtime
+                        if (!hasEditableRequests && buttons.widgets.my_timeoff_requests && Array.isArray(buttons.widgets.my_timeoff_requests.rows)) {
+                            hasEditableRequests = buttons.widgets.my_timeoff_requests.rows.some(row => {
+                                const editAction = row.edit || '';
+                                return editAction.includes('edit-timeoff-btn') || editAction.includes('cancel-timeoff-btn');
+                            });
+                        }
+                        
+                        // Add "Would you like to edit a request?" only if there are editable requests
+                        const nextStepHtml = hasEditableRequests 
+                            ? '<div class="mt-6"><p class="text-gray-800"><em>Would you like to edit a request?</em></p></div>'
+                            : '';
+                        
+                        // Order: leave balance table + "Would you like to edit a request?" (if applicable) + other tables
+                        tableHtml = leaveBalanceHtml + nextStepHtml + overtimeHtml + timeoffHtml + actionedHtml;
                     } else {
                         // Team overview and overtime tables (for show my team flow)
                         const teamData = renderTable(buttons.widgets.team_overview || { columns: [], rows: [] });
@@ -4497,7 +4541,7 @@
 
                 // Use wider max-width if table is present to prevent column cutoff
                 // Use even wider for "show my requests" tables
-                const hasMyRequestsTables = (buttons && buttons.widgets && (buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests));
+                const hasMyRequestsTables = (buttons && buttons.widgets && (buttons.widgets.my_overtime_requests || buttons.widgets.my_timeoff_requests || buttons.widgets.my_leave_balance));
                 const hasTable = tableHtml && tableHtml.trim() !== '';
                 const bubbleMaxWidth = hasMyRequestsTables ? 'max-w-6xl' : (hasTable ? 'max-w-4xl' : 'max-w-xl');
 

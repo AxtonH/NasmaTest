@@ -31,6 +31,7 @@ try:
         get_my_requests,
         build_my_requests_table_widget,
         format_my_requests_message,
+        build_leave_balance_table_widget,
         get_overtime_request_for_edit,
         update_overtime_request,
         cancel_overtime_request,
@@ -67,6 +68,7 @@ except Exception:
         get_my_requests,
         build_my_requests_table_widget,
         format_my_requests_message,
+        build_leave_balance_table_widget,
         get_overtime_request_for_edit,
         update_overtime_request,
         cancel_overtime_request,
@@ -2867,7 +2869,7 @@ def create_app():
                                                 pass
                                         if ok:
                                             leave_id = result.get('leave_id') if isinstance(result, dict) else result
-                                            response = { 'message': f'Your time off request has been submitted successfully! Request ID: #{leave_id}' }
+                                            response = { 'message': f'✅ Time off request #{leave_id} submitted for approval.' }
                                             # Log timeoff metric
                                             _log_usage_metric('timeoff', thread_id, {
                                                 'leave_id': leave_id,
@@ -3059,7 +3061,7 @@ def create_app():
                         # Fetch requests and leave balance in parallel using threading
                         import threading
                         requests_result = [None, None]  # [ok, data]
-                        balance_result = [""]  # [leave_balance_text]
+                        balance_result = [None]  # [remaining_dict or None]
                         
                         def fetch_requests():
                             """Fetch requests in background thread"""
@@ -3087,18 +3089,14 @@ def create_app():
                                         None,
                                         odoo_session_data
                                     )
-                                    if not balance_error:
-                                        formatted_balance = leave_balance_service.format_remaining_leave_message(remaining)
-                                        if formatted_balance:
-                                            balance_result[0] = "\n".join(formatted_balance.split(" | "))
-                                        else:
-                                            balance_result[0] = "No leave allocations found."
+                                    if not balance_error and remaining:
+                                        balance_result[0] = remaining  # Store dict for table widget
                                     else:
-                                        balance_result[0] = "Unable to retrieve leave balance right now."
+                                        balance_result[0] = None  # Will show empty table
                                 else:
-                                    balance_result[0] = "Unable to retrieve leave balance right now."
+                                    balance_result[0] = None  # Will show empty table
                             except Exception:
-                                balance_result[0] = "Unable to retrieve leave balance right now."
+                                balance_result[0] = None  # Will show empty table
                         
                         # Start both threads
                         thread1 = threading.Thread(target=fetch_requests)
@@ -3112,7 +3110,7 @@ def create_app():
                         
                         ok_requests = requests_result[0]
                         requests_data = requests_result[1]
-                        leave_balance_text = balance_result[0]
+                        remaining_leave = balance_result[0] if balance_result[0] else {}
                     
                     # Process the requests data if we successfully fetched it
                     if ok_requests and requests_data is not None:
@@ -3130,16 +3128,19 @@ def create_app():
                             except Exception:
                                 user_tz = None
                             
-                            # leave_balance_text is already fetched in parallel above
-                            
-                            msg = format_my_requests_message(ot_count, to_count, leave_balance_text)
+                            # Build message and widgets
+                            msg = format_my_requests_message(ot_count, to_count)
                             actioned_ot_requests = requests_data.get('actioned_overtime_requests', [])
                             actioned_to_requests = requests_data.get('actioned_timeoff_requests', [])
                             tables = build_my_requests_table_widget(ot_requests, to_requests, actioned_ot_requests, actioned_to_requests, user_tz)
                             
+                            # Build leave balance table widget (ensure it's always a dict, not None)
+                            leave_balance_table = build_leave_balance_table_widget(remaining_leave if remaining_leave else {})
+                            
                             widgets_dict = {
                                 'my_overtime_requests': tables.get('overtime'),
                                 'my_timeoff_requests': tables.get('timeoff'),
+                                'my_leave_balance': leave_balance_table,
                             }
                             # Add actioned requests if available
                             if tables.get('actioned'):

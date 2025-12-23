@@ -867,8 +867,70 @@ def get_my_requests(odoo_service, employee_data: Dict) -> Tuple[bool, Any]:
         return False, f"Error getting my requests: {e}"
 
 
-def format_my_requests_message(overtime_count: int, timeoff_count: int, leave_balance: str = "") -> str:
-    """Format a message describing the user's requests along with leave balance."""
+def build_leave_balance_table_widget(remaining: Dict[str, float]) -> Dict[str, Any]:
+    """Build a table widget for leave balance.
+    
+    Columns: Leave Type, Days, Time
+    
+    Args:
+        remaining: Dict mapping leave type names to remaining days (e.g., {'Annual Leave': 3.3, 'Sick Leave': 8.1})
+    
+    Returns:
+        Table widget dict with columns and rows
+    """
+    columns = [
+        { 'key': 'leave_type', 'label': 'Leave Type' },
+        { 'key': 'days', 'label': 'Days' },
+        { 'key': 'time', 'label': 'Time' },
+    ]
+    
+    rows: List[Dict[str, str]] = []
+    
+    if not remaining:
+        return { 'columns': columns, 'rows': rows }
+    
+    # Helper function to convert days to hours:minutes format
+    def days_to_hours_minutes(days: float, hours_per_day: float = 8.0) -> Tuple[int, int]:
+        """Convert days to hours and minutes."""
+        try:
+            total_hours = days * hours_per_day
+            hours = int(total_hours)
+            minutes = int((total_hours - hours) * 60)
+            return hours, minutes
+        except Exception:
+            return 0, 0
+    
+    # Process each leave type
+    for leave_type, days in sorted(remaining.items()):
+        # Exclude Unpaid Leave from balance display (unlimited, no balance concept)
+        if leave_type == 'Unpaid Leave':
+            continue
+        
+        # Format days - show decimal if not whole number, otherwise show as integer
+        if days == int(days):
+            days_str = f"{int(days)} days"
+        else:
+            days_str = f"{days:.1f} days"
+        
+        # Convert to hours and minutes
+        hours, minutes = days_to_hours_minutes(days)
+        time_str = f"{hours}:{minutes:02d}"
+        
+        rows.append({
+            'leave_type': leave_type,
+            'days': days_str,
+            'time': time_str,
+        })
+    
+    return { 'columns': columns, 'rows': rows }
+
+
+def format_my_requests_message(overtime_count: int, timeoff_count: int) -> str:
+    """Format a message describing the user's requests.
+    
+    Note: Leave balance is now displayed in a separate table widget, not in the message text.
+    "What would you like to do next?" is rendered separately after the leave balance table.
+    """
     total_requests = max(0, (overtime_count or 0) + (timeoff_count or 0))
     
     message_lines = [
@@ -876,10 +938,7 @@ def format_my_requests_message(overtime_count: int, timeoff_count: int, leave_ba
         f"You have {total_requests} request{'s' if total_requests != 1 else ''} waiting for approvals and your leave balance is:"
     ]
     
-    if leave_balance:
-        message_lines.append(leave_balance.strip())
-    
-    message_lines.append("*What would you like to do next?*")
+    # Note: "What would you like to do next?" is rendered separately in frontend after leave balance table
     
     return "\n\n".join(message_lines)
 
