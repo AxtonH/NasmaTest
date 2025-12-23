@@ -1009,10 +1009,10 @@
                             </div>
                         </button>
                         {% endif %}
-                        <button class="suggestion-card card" data-suggestion="show my requests">
+                        <button class="suggestion-card card" data-suggestion="Balances & Requests">
                             <div class="card-content">
-                                <div class="icon"><img src="/static/show-my-requests.png" alt="Show my requests" class="w-18 h-18"/></div>
-                                <div class="label"><p>Show my requests</p></div>
+                                <div class="icon"><img src="/static/show-my-requests.png" alt="Balances & Requests" class="w-18 h-18"/></div>
+                                <div class="label"><p>Balances & Requests</p></div>
                             </div>
                         </button>
                         <button class="suggestion-card card" data-suggestion="i want time off">
@@ -1163,7 +1163,7 @@
                         {% if not is_manager %}
                         <button class="suggestion-btn suggestion-chip" id="logMyHoursChip" data-suggestion="log my hours">Log my hours</button>
                         {% endif %}
-                        <button class="suggestion-btn suggestion-chip" data-suggestion="show my requests">Show my requests</button>
+                        <button class="suggestion-btn suggestion-chip" data-suggestion="Balances & Requests">Balances & Requests</button>
                         <button class="suggestion-btn suggestion-chip" data-suggestion="i want time off">Ask for time off</button>
                         <button class="suggestion-btn suggestion-chip" data-suggestion="Request Overtime">Ask for overtime</button>
                         <button class="suggestion-btn suggestion-chip" data-suggestion="Generate letters">Generate letters</button>
@@ -2911,6 +2911,7 @@
                     const leaveId = buttons.widgets.leave_id || '';
                     
                     const leaveTypeOptions = Array.isArray(buttons.widgets.leave_type_options) ? buttons.widgets.leave_type_options : [];
+                    const leaveTypeBalances = buttons.widgets.leave_type_balances || {};
                     const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
                     const relationOptions = Array.isArray(buttons.widgets.relation_options) ? buttons.widgets.relation_options : [];
                     
@@ -2930,7 +2931,9 @@
                     const leaveTypeOptsHtml = `<option value="" disabled ${!defaultLeaveTypeId ? 'selected' : ''}>Select leave type</option>` +
                         leaveTypeOptions.map(o => {
                             const isSelected = defaultLeaveTypeId && String(o.value) === String(defaultLeaveTypeId) ? 'selected' : '';
-                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                            const bal = leaveTypeBalances && leaveTypeBalances[String(o.value)];
+                            const displayLabel = bal ? `${o.label} — Balance: ${bal}` : o.label;
+                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(displayLabel)}</option>`;
                         }).join('');
                     
                     // Build relation options HTML - ensure we have options
@@ -3195,6 +3198,9 @@
                             }, true);
                         }
                         
+                        // Mode state
+                        let isCustomHours = defaultIsCustomHours;
+
                         // Handle leave type change (show/hide fields based on leave type)
                         if (leaveTypeEl) {
                             leaveTypeEl.addEventListener('change', () => {
@@ -3235,7 +3241,6 @@
                         }
                         
                         // Handle mode toggle (Full Days vs Custom Hours)
-                        let isCustomHours = defaultIsCustomHours;
                         if (modeFullBtn && modeCustomBtn) {
                             modeFullBtn.addEventListener('click', () => {
                                 isCustomHours = false;
@@ -3421,6 +3426,7 @@
                     const submitId = `${wid}_submit`;
                     
                     const leaveTypeOptions = Array.isArray(buttons.widgets.leave_type_options) ? buttons.widgets.leave_type_options : [];
+                    const leaveTypeBalances = buttons.widgets.leave_type_balances || {};
                     const hourOptions = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
                     const relationOptions = Array.isArray(buttons.widgets.relation_options) ? buttons.widgets.relation_options : [];
                     
@@ -3431,7 +3437,9 @@
                     
                     const leaveTypeOptsHtml = `<option value="" disabled selected>Select leave type</option>` +
                         leaveTypeOptions.map(o => {
-                            return `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`;
+                            const bal = leaveTypeBalances && leaveTypeBalances[String(o.value)];
+                            const displayLabel = bal ? `${o.label} — Balance: ${bal}` : o.label;
+                            return `<option value="${escapeHtml(o.value)}">${escapeHtml(displayLabel)}</option>`;
                         }).join('');
                     
                     // Build relation options HTML - ensure we have options
@@ -3537,6 +3545,8 @@
                         const fullDaysFields = document.getElementById(`${wid}_full_days_fields`);
                         const customHoursFields = document.getElementById(`${wid}_custom_hours_fields`);
                         const documentFields = document.getElementById(`${wid}_document_fields`);
+                        // initialize mode state
+                        let isCustomHours = false;
                         
                         // Handle leave type change (show/hide fields based on leave type)
                         if (leaveTypeEl) {
@@ -3544,7 +3554,6 @@
                                 const selectedValue = leaveTypeEl.value;
                                 const selectedOption = leaveTypeOptions.find(opt => String(opt.value) === String(selectedValue));
                                 const leaveTypeName = selectedOption ? selectedOption.label : '';
-                                
                                 const isSickLeave = leaveTypeName === 'Sick Leave';
                                 const isCompassionateLeave = leaveTypeName === 'Compassionate Leave';
                                 const isMaternityLeave = leaveTypeName === 'Maternity Leave';
@@ -3576,9 +3585,7 @@
                                 }
                             });
                         }
-                        
                         // Handle mode toggle (Full Days vs Custom Hours)
-                        let isCustomHours = false;
                         if (modeFullBtn && modeCustomBtn) {
                             modeFullBtn.addEventListener('click', () => {
                                 isCustomHours = false;
@@ -6596,4 +6603,3 @@
 
 </body>
 </html>
-

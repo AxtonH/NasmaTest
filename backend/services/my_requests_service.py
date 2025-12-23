@@ -867,23 +867,21 @@ def get_my_requests(odoo_service, employee_data: Dict) -> Tuple[bool, Any]:
         return False, f"Error getting my requests: {e}"
 
 
-def format_my_requests_message(overtime_count: int, timeoff_count: int) -> str:
-    """Format a message describing the user's requests."""
-    if overtime_count == 0 and timeoff_count == 0:
-        return "You don't have any pending requests at the moment.\n\n*What would you like to do next?*"
+def format_my_requests_message(overtime_count: int, timeoff_count: int, leave_balance: str = "") -> str:
+    """Format a message describing the user's requests along with leave balance."""
+    total_requests = max(0, (overtime_count or 0) + (timeoff_count or 0))
     
-    parts = []
-    if overtime_count > 0:
-        parts.append(f"{overtime_count} overtime request{'s' if overtime_count > 1 else ''}")
-    if timeoff_count > 0:
-        parts.append(f"{timeoff_count} time off request{'s' if timeoff_count > 1 else ''}")
+    message_lines = [
+        "Here are your pending requests:",
+        f"You have {total_requests} request{'s' if total_requests != 1 else ''} waiting for approvals and your leave balance is:"
+    ]
     
-    message = f"Here are your pending requests:\n\n"
-    if parts:
-        message += f"You have {', and '.join(parts)} waiting for approval.\n\n"
-    message += "*What would you like to do next?*"
+    if leave_balance:
+        message_lines.append(leave_balance.strip())
     
-    return message
+    message_lines.append("*What would you like to do next?*")
+    
+    return "\n\n".join(message_lines)
 
 
 def get_overtime_request_for_edit(odoo_service, request_id: int, user_tz: Optional[str] = None) -> Tuple[bool, Any]:

@@ -1079,6 +1079,7 @@ class TimeOffService:
             show_unpaid_leave = True
             additional_types = []
             leave_types = []
+            leave_type_balances = {}
             
             def fetch_leave_types():
                 """Fetch leave types from Odoo"""
@@ -1143,7 +1144,20 @@ class TimeOffService:
             # This ensures consistency and simplicity - use calculate_remaining_leave directly
             # Default to hiding unpaid leave unless we confirm eligibility (fail closed to enforce policy)
             annual_remaining = None  # None means we couldn't determine yet
-            if employee_id:
+            # Fast path: derive from allocated/taken already fetched
+            try:
+                alloc_val = allocated.get('Annual Leave', None) if isinstance(allocated, dict) else None
+                taken_val = taken.get('Annual Leave', None) if isinstance(taken, dict) else None
+                if alloc_val is not None or taken_val is not None:
+                    alloc_val = alloc_val or 0.0
+                    taken_val = taken_val or 0.0
+                    annual_remaining = max(0.0, alloc_val - taken_val)
+                    debug_log(f"Annual Leave balance (fast path from allocations): remaining={annual_remaining} days ({annual_remaining * 8:.1f} hours)", "bot_logic")
+            except Exception:
+                annual_remaining = None
+
+            # Fallback: stateless/stateful balance check only if fast path missing
+            if annual_remaining is None and employee_id:
                 try:
                     try:
                         from .leave_balance_service import LeaveBalanceService
@@ -1208,13 +1222,41 @@ class TimeOffService:
             if show_unpaid_leave:
                 main_types.append('Unpaid Leave')
             main_types.extend(additional_types)
-            
+
+            # Build balance map for UI (leave type id -> formatted balance) using fetched allocations/taken
+            remaining_all = {}
+            try:
+                if isinstance(allocated, dict) or isinstance(taken, dict):
+                    all_types = set((allocated or {}).keys()) | set((taken or {}).keys())
+                    for lt_name in all_types:
+                        alloc_val = (allocated or {}).get(lt_name, 0.0)
+                        taken_val = (taken or {}).get(lt_name, 0.0)
+                        remaining_all[lt_name] = max(0.0, alloc_val - taken_val)
+            except Exception:
+                remaining_all = {}
+
             leave_type_options = []
             for lt in leave_types:
                 lt_name = lt.get('name', '')
                 if lt_name in main_types:
+                    lt_id_str = str(lt.get('id'))
+                    balance_txt = ''
+                    if lt_name and lt_name.lower().startswith('unpaid'):
+                        balance_txt = 'Unlimited'
+                    elif isinstance(remaining_all, dict):
+                        days_left = remaining_all.get(lt_name)
+                        if days_left is None:
+                            days_left = 0.0
+                        try:
+                            hours_total = days_left * 8.0
+                            hours_int = int(hours_total)
+                            minutes_int = int(round((hours_total - hours_int) * 60))
+                            balance_txt = f"{days_left:.2f} days ({hours_int}:{minutes_int:02d})"
+                        except Exception:
+                            balance_txt = f"{days_left:.2f} days"
+                    leave_type_balances[lt_id_str] = balance_txt
                     leave_type_options.append({
-                        'value': str(lt.get('id')),
+                        'value': lt_id_str,
                         'label': lt_name
                     })
             
@@ -1263,6 +1305,7 @@ class TimeOffService:
             
             return True, {
                 'leave_type_options': leave_type_options,
+                'leave_type_balances': leave_type_balances,
                 'hour_options': hour_options,
                 'relation_options': relation_options  # For Compassionate Leave
             }

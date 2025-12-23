@@ -1273,6 +1273,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                     'widgets': {
                         'timeoff_request_form': True,
                         'leave_type_options': form_data.get('leave_type_options', []),
+                        'leave_type_balances': form_data.get('leave_type_balances', {}),
                         'hour_options': form_data.get('hour_options', []),
                         'relation_options': form_data.get('relation_options', []),  # For Compassionate Leave
                         'context_key': 'submit_timeoff_request'

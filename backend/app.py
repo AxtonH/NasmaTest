@@ -2383,6 +2383,7 @@ def create_app():
                             # Fetch leave types for dropdown
                             ok_leave_types, leave_types = timeoff_service.get_leave_types()
                             leave_type_options = []
+                            leave_type_balances = {}
                             if ok_leave_types and isinstance(leave_types, list):
                                 # Check Annual Leave balance to determine if Unpaid Leave should be shown
                                 # Hide Unpaid Leave if user has more than 30 minutes (0.0625 days) of Annual Leave available
@@ -2437,12 +2438,38 @@ def create_app():
                                 if show_unpaid_leave:
                                     main_types.append('Unpaid Leave')
                                 main_types.extend(additional_types)
+
+                                # Build balance map for UI (leave type id -> formatted balance)
+                                remaining_all = {}
+                                try:
+                                    remaining_all, _ = leave_balance_service.calculate_remaining_leave(
+                                        employee_data.get('id') if employee_data else None,
+                                        None,
+                                        odoo_session_data
+                                    )
+                                except Exception:
+                                    remaining_all = {}
                                 
                                 for lt in leave_types:
                                     lt_name = lt.get('name', '')
                                     if lt_name in main_types:
+                                        lt_id_str = str(lt.get('id'))
+                                        balance_txt = ''
+                                        if lt_name.lower().startswith('unpaid'):
+                                            balance_txt = 'Unlimited'
+                                        elif isinstance(remaining_all, dict):
+                                            days_left = remaining_all.get(lt_name)
+                                            if days_left is not None:
+                                                try:
+                                                    hours_total = days_left * 8.0
+                                                    hours_int = int(hours_total)
+                                                    minutes_int = int(round((hours_total - hours_int) * 60))
+                                                    balance_txt = f"{days_left:.2f} days ({hours_int}:{minutes_int:02d})"
+                                                except Exception:
+                                                    balance_txt = f"{days_left:.2f} days"
+                                        leave_type_balances[lt_id_str] = balance_txt
                                         leave_type_options.append({
-                                            'value': str(lt.get('id')),
+                                            'value': lt_id_str,
                                             'label': lt_name
                                         })
                             
@@ -2555,6 +2582,7 @@ def create_app():
                                     'hour_to': request_data.get('hour_to', ''),
                                     'has_existing_attachments': len(request_data.get('existing_attachment_ids', [])) > 0,
                                     'leave_type_options': leave_type_options,
+                                    'leave_type_balances': leave_type_balances,
                                     'hour_options': hour_options,
                                     'relation_options': relation_options,  # For Compassionate Leave
                                     'x_studio_relation': existing_relation,  # Existing relation value
@@ -2965,7 +2993,8 @@ def create_app():
             elif (
                 normalized_msg in {
                     'show my requests', 'my requests', 'show requests', 'view my requests',
-                    'pending requests', 'my pending requests', 'show my pending requests'
+                    'pending requests', 'my pending requests', 'show my pending requests',
+                    'balances & requests', 'balances and requests'
                 }
                 or (
                     'request' in normalized_msg and (
@@ -2980,50 +3009,110 @@ def create_app():
             ):
                 # User query: show my overtime and time off requests
                 try:
-                    # Refresh Odoo session using refresh token if needed
-                    # This ensures we have valid credentials before fetching requests
+                    # CRITICAL: Get credentials from refresh token FIRST (before ensure_active_session)
+                    # This ensures we have password available for session renewal if needed
                     odoo_session_data = get_odoo_session_data()
-                    debug_log(f"[SHOW_MY_REQUESTS] Starting - odoo_session_data exists: {odoo_session_data is not None}, has password: {odoo_session_data.get('password') if odoo_session_data else False}", "bot_logic")
                     
-                    # Always update credentials from refresh token if available (even if password already exists)
+                    # Update odoo_service credentials from refresh token if available
+                    # This is essential for ensure_active_session to be able to renew expired sessions
                     if odoo_session_data and odoo_session_data.get('password'):
                         odoo_service.password = odoo_session_data['password']
                         odoo_service.username = odoo_session_data.get('username') or odoo_service.username
-                        debug_log(f"[SHOW_MY_REQUESTS] Updated Odoo service credentials from refresh token (username: {odoo_service.username})", "bot_logic")
+                        debug_log(f"[SHOW_MY_REQUESTS] Updated credentials from refresh token (username: {odoo_service.username})", "bot_logic")
                     
-                    # Force re-authentication if we have credentials (ensures fresh session)
+                    # Optimized: Use ensure_active_session (faster than full re-auth)
+                    # Now it can renew session if needed because we have credentials from refresh token
+                    ok_session, session_msg = odoo_service.ensure_active_session()
                     ok_requests = False
                     requests_data = None
+                    leave_balance_text = ""
                     
-                    if odoo_session_data and odoo_session_data.get('username') and odoo_session_data.get('password'):
-                        debug_log(f"[SHOW_MY_REQUESTS] Force re-authenticating to ensure fresh session", "bot_logic")
-                        auth_ok, auth_msg, auth_data = odoo_service.authenticate(odoo_session_data['username'], odoo_session_data['password'])
-                        if not auth_ok:
-                            debug_log(f"[SHOW_MY_REQUESTS] Authentication failed: {auth_msg}", "bot_logic")
-                            response = { 'message': f"I couldn't retrieve your requests right now. Please try again." }
+                    if not ok_session:
+                        # Session invalid even after ensure_active_session attempt
+                        # Try full re-authentication if we have credentials
+                        if odoo_session_data and odoo_session_data.get('username') and odoo_session_data.get('password'):
+                            debug_log(f"[SHOW_MY_REQUESTS] Session still invalid after ensure_active_session, attempting full re-auth", "bot_logic")
+                            auth_ok, auth_msg, auth_data = odoo_service.authenticate(odoo_session_data['username'], odoo_session_data['password'])
+                            if not auth_ok:
+                                debug_log(f"[SHOW_MY_REQUESTS] Full authentication failed: {auth_msg}", "bot_logic")
+                                response = { 'message': f"I couldn't retrieve your requests right now. Please try again." }
+                            else:
+                                # Update Flask session with new session data
+                                if auth_data and isinstance(auth_data, dict):
+                                    try:
+                                        session['odoo_session_id'] = auth_data.get('session_id', session.get('odoo_session_id'))
+                                        session['user_id'] = auth_data.get('user_id', session.get('user_id'))
+                                        session.modified = True
+                                        ok_session = True  # Mark as successful after full auth
+                                        debug_log(f"[SHOW_MY_REQUESTS] Full authentication successful", "bot_logic")
+                                    except Exception:
+                                        pass
                         else:
-                            debug_log(f"[SHOW_MY_REQUESTS] Successfully authenticated, fetching requests", "bot_logic")
-                            # Update Flask session with new session data if provided
-                            if auth_data and isinstance(auth_data, dict):
-                                try:
-                                    session['odoo_session_id'] = auth_data.get('session_id', session.get('odoo_session_id'))
-                                    session['user_id'] = auth_data.get('user_id', session.get('user_id'))
-                                    session.modified = True
-                                    debug_log(f"[SHOW_MY_REQUESTS] Updated Flask session with new Odoo session", "bot_logic")
-                                except Exception as sess_error:
-                                    debug_log(f"[SHOW_MY_REQUESTS] Error updating Flask session: {sess_error}", "bot_logic")
-                            ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
-                            debug_log(f"[SHOW_MY_REQUESTS] Fetch result - ok: {ok_requests}, data type: {type(requests_data)}", "bot_logic")
-                    else:
-                        # Fallback: try ensure_active_session if no credentials available
-                        debug_log(f"[SHOW_MY_REQUESTS] No credentials from refresh token, using ensure_active_session", "bot_logic")
-                        ok_session, session_msg = odoo_service.ensure_active_session()
-                        if not ok_session:
-                            debug_log(f"[SHOW_MY_REQUESTS] Session not active: {session_msg}", "bot_logic")
+                            debug_log(f"[SHOW_MY_REQUESTS] Session not active and no credentials available: {session_msg}", "bot_logic")
                             response = { 'message': f"I couldn't retrieve your requests right now. Please try again." }
-                        else:
-                            ok_requests, requests_data = get_my_requests(odoo_service, employee_data)
-                            debug_log(f"[SHOW_MY_REQUESTS] Fetch result (fallback) - ok: {ok_requests}, data type: {type(requests_data)}", "bot_logic")
+                            ok_session = False
+                    
+                    if ok_session:
+                        # Get session data for parallel leave balance fetch
+                        odoo_session_data = get_odoo_session_data()
+                        
+                        # Fetch requests and leave balance in parallel using threading
+                        import threading
+                        requests_result = [None, None]  # [ok, data]
+                        balance_result = [""]  # [leave_balance_text]
+                        
+                        def fetch_requests():
+                            """Fetch requests in background thread"""
+                            try:
+                                ok, data = get_my_requests(odoo_service, employee_data)
+                                requests_result[0] = ok
+                                requests_result[1] = data
+                            except Exception as e:
+                                requests_result[0] = False
+                                requests_result[1] = str(e)
+                        
+                        def fetch_balance():
+                            """Fetch leave balance in background thread"""
+                            try:
+                                employee_id = (employee_data or {}).get('id') if isinstance(employee_data, dict) else None
+                                if employee_id and odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+                                    try:
+                                        from .services.leave_balance_service import LeaveBalanceService
+                                    except Exception:
+                                        from services.leave_balance_service import LeaveBalanceService
+                                    
+                                    leave_balance_service = LeaveBalanceService(odoo_service)
+                                    remaining, balance_error = leave_balance_service.calculate_remaining_leave(
+                                        employee_id,
+                                        None,
+                                        odoo_session_data
+                                    )
+                                    if not balance_error:
+                                        formatted_balance = leave_balance_service.format_remaining_leave_message(remaining)
+                                        if formatted_balance:
+                                            balance_result[0] = "\n".join(formatted_balance.split(" | "))
+                                        else:
+                                            balance_result[0] = "No leave allocations found."
+                                    else:
+                                        balance_result[0] = "Unable to retrieve leave balance right now."
+                                else:
+                                    balance_result[0] = "Unable to retrieve leave balance right now."
+                            except Exception:
+                                balance_result[0] = "Unable to retrieve leave balance right now."
+                        
+                        # Start both threads
+                        thread1 = threading.Thread(target=fetch_requests)
+                        thread2 = threading.Thread(target=fetch_balance)
+                        thread1.start()
+                        thread2.start()
+                        
+                        # Wait for both to complete
+                        thread1.join()
+                        thread2.join()
+                        
+                        ok_requests = requests_result[0]
+                        requests_data = requests_result[1]
+                        leave_balance_text = balance_result[0]
                     
                     # Process the requests data if we successfully fetched it
                     if ok_requests and requests_data is not None:
@@ -3041,7 +3130,9 @@ def create_app():
                             except Exception:
                                 user_tz = None
                             
-                            msg = format_my_requests_message(ot_count, to_count)
+                            # leave_balance_text is already fetched in parallel above
+                            
+                            msg = format_my_requests_message(ot_count, to_count, leave_balance_text)
                             actioned_ot_requests = requests_data.get('actioned_overtime_requests', [])
                             actioned_to_requests = requests_data.get('actioned_timeoff_requests', [])
                             tables = build_my_requests_table_widget(ot_requests, to_requests, actioned_ot_requests, actioned_to_requests, user_tz)
