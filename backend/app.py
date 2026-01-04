@@ -2380,7 +2380,8 @@ def create_app():
                             user_tz = (employee_data or {}).get('tz') if isinstance(employee_data, dict) else None
                         except Exception:
                             user_tz = None
-                        ok, request_data = get_timeoff_request_for_edit(odoo_service, leave_id, user_tz)
+                        odoo_session_data = get_odoo_session_data()
+                        ok, request_data = get_timeoff_request_for_edit(odoo_service, leave_id, user_tz, odoo_session_data)
                         if ok:
                             # Fetch leave types for dropdown
                             ok_leave_types, leave_types = timeoff_service.get_leave_types()
@@ -2649,13 +2650,15 @@ def create_app():
                             except Exception:
                                 pass
                             
+                            odoo_session_data = get_odoo_session_data()
                             ok, result = update_timeoff_request(odoo_service, leave_id, leave_type_id, 
                                                                date_from, date_to, is_custom_hours,
                                                                hour_from, hour_to, 
                                                                existing_attachment_ids=existing_attachment_ids,
                                                                new_attachment_data=new_attachment_data,
                                                                user_tz=user_tz,
-                                                               relation=relation)
+                                                               relation=relation,
+                                                               odoo_session_data=odoo_session_data)
                             if ok:
                                 response = { 'message': 'Your time off request has been updated successfully!' }
                                 # Log timeoff_edit metric

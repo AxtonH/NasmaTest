@@ -122,10 +122,60 @@ def _format_date_label(d: str) -> str:
         return d or ''
 
 
-def _make_odoo_request(odoo_service, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
-    """Lightweight wrapper to call Odoo via the existing session using the same endpoint as services."""
+def _make_odoo_request(odoo_service, model: str, method: str, params: Dict, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
+    """Lightweight wrapper to call Odoo via the existing session using the same endpoint as services.
+    
+    Args:
+        odoo_service: OdooService instance
+        model: Odoo model name
+        method: Method to call
+        params: Request parameters
+        odoo_session_data: Optional session data dict with session_id, user_id, username, password.
+                         If provided, uses stateless requests (preferred to avoid shared state issues).
+    
+    Returns:
+        Tuple[bool, Any]: (success, result_data)
+    """
     import requests
     try:
+        # Use stateless requests if session data provided (preferred to avoid shared state issues)
+        if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+            try:
+                result_dict = odoo_service.make_authenticated_request(
+                    model=model,
+                    method=method,
+                    args=params.get('args', []),
+                    kwargs=params.get('kwargs', {}),
+                    session_id=odoo_session_data['session_id'],
+                    user_id=odoo_session_data['user_id'],
+                    username=odoo_session_data.get('username'),
+                    password=odoo_session_data.get('password')
+                )
+                
+                # Check if session was renewed
+                renewed_session = result_dict.pop('_renewed_session', None) if isinstance(result_dict, dict) else None
+                if renewed_session:
+                    # Update Flask session if renewed
+                    try:
+                        from flask import session as flask_session
+                        flask_session['odoo_session_id'] = renewed_session['session_id']
+                        flask_session['user_id'] = renewed_session['user_id']
+                        flask_session.modified = True
+                    except Exception:
+                        pass
+                
+                if 'error' in result_dict and 'result' not in result_dict:
+                    return False, f"Odoo API error: {result_dict.get('error', 'Unknown error')}"
+                
+                if 'result' in result_dict:
+                    return True, result_dict['result']
+                else:
+                    return False, "Unknown error in Odoo response"
+            except Exception as stateless_error:
+                # Fall through to stateful request below
+                pass
+        
+        # Fallback to stateful request using shared odoo_service instance
         url = f"{odoo_service.odoo_url}/web/dataset/call_kw"
         payload = {
             "jsonrpc": "2.0",
@@ -1337,7 +1387,7 @@ def cancel_timeoff_request(odoo_service, leave_id: int, employee_data: Dict = No
         return False, f"Error cancelling request: {e}"
 
 
-def get_timeoff_request_for_edit(odoo_service, leave_id: int, user_tz: Optional[str] = None) -> Tuple[bool, Any]:
+def get_timeoff_request_for_edit(odoo_service, leave_id: int, user_tz: Optional[str] = None, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
     """Fetch time off request details for editing.
     
     Returns (ok, request_data) where request_data contains fields needed for editing.
@@ -1360,7 +1410,7 @@ def get_timeoff_request_for_edit(odoo_service, leave_id: int, user_tz: Optional[
                           'state', 'number_of_days', 'duration_display', 'supported_attachment_ids', 'x_studio_relation']
             }
         }
-        ok, leaves = _make_odoo_request(odoo_service, 'hr.leave', 'read', read_params)
+        ok, leaves = _make_odoo_request(odoo_service, 'hr.leave', 'read', read_params, odoo_session_data)
         if not ok:
             return False, leaves
 
@@ -1495,7 +1545,8 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                            existing_attachment_ids: Optional[List[int]] = None,
                            new_attachment_data: Optional[Dict[str, Any]] = None,
                            user_tz: Optional[str] = None,
-                           relation: str = '') -> Tuple[bool, Any]:
+                           relation: str = '',
+                           odoo_session_data: Dict = None) -> Tuple[bool, Any]:
     """Update a time off request by deleting the old one and creating a new one.
     
     This approach works for all users since all creatives have permissions to delete
@@ -1535,7 +1586,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
             'args': [[leave_id]],
             'kwargs': {'fields': ['employee_id', 'state']}
         }
-        ok_read, leave_data = _make_odoo_request(odoo_service, 'hr.leave', 'read', read_params)
+        ok_read, leave_data = _make_odoo_request(odoo_service, 'hr.leave', 'read', read_params, odoo_session_data)
         if not ok_read or not leave_data or not isinstance(leave_data, list) or len(leave_data) == 0:
             return False, f"Failed to read leave request: {leave_data}"
         
@@ -1566,7 +1617,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                 'args': [[leave_type_id]],
                 'kwargs': {'fields': ['name']}
             }
-            ok_lt, leave_type_data = _make_odoo_request(odoo_service, 'hr.leave.type', 'read', leave_type_read_params)
+            ok_lt, leave_type_data = _make_odoo_request(odoo_service, 'hr.leave.type', 'read', leave_type_read_params, odoo_session_data)
             
             if ok_lt and isinstance(leave_type_data, list) and len(leave_type_data) > 0:
                 new_leave_type_name = (leave_type_data[0].get('name', '') or '').strip()
@@ -1578,7 +1629,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                         'args': [[leave_id]],
                         'kwargs': {'fields': ['holiday_status_id', 'number_of_days']}
                     }
-                    ok_existing, existing_leave_data = _make_odoo_request(odoo_service, 'hr.leave', 'read', existing_read_params)
+                    ok_existing, existing_leave_data = _make_odoo_request(odoo_service, 'hr.leave', 'read', existing_read_params, odoo_session_data)
                     
                     if ok_existing and isinstance(existing_leave_data, list) and len(existing_leave_data) > 0:
                         existing_leave_record = existing_leave_data[0]
@@ -1706,7 +1757,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                         'args': [[att_id]],
                         'kwargs': {'fields': ['name', 'datas', 'mimetype', 'type']}
                     }
-                    att_ok, att_data = _make_odoo_request(odoo_service, 'ir.attachment', 'read', att_read_params)
+                    att_ok, att_data = _make_odoo_request(odoo_service, 'ir.attachment', 'read', att_read_params, odoo_session_data)
                     if att_ok and isinstance(att_data, list) and len(att_data) > 0:
                         att_info = att_data[0]
                         # Store attachment data for recreation
@@ -1726,7 +1777,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
             'args': [[leave_id]],
             'kwargs': {}
         }
-        ok_delete, delete_result = _make_odoo_request(odoo_service, 'hr.leave', 'unlink', unlink_params)
+        ok_delete, delete_result = _make_odoo_request(odoo_service, 'hr.leave', 'unlink', unlink_params, odoo_session_data)
         if not ok_delete:
             return False, f"Failed to delete existing request: {delete_result}. Cannot proceed with update."
 
@@ -1735,7 +1786,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
             'args': [leave_data],
             'kwargs': {}
         }
-        ok_create, new_leave_id = _make_odoo_request(odoo_service, 'hr.leave', 'create', create_params)
+        ok_create, new_leave_id = _make_odoo_request(odoo_service, 'hr.leave', 'create', create_params, odoo_session_data)
         if not ok_create:
             return False, f"Failed to create new request: {new_leave_id}. The old request has been deleted."
         
@@ -1759,7 +1810,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                 att_ok, att_id = _make_odoo_request(odoo_service, 'ir.attachment', 'create', {
                     'args': [attachment_payload],
                     'kwargs': {}
-                })
+                }, odoo_session_data)
                 if att_ok and isinstance(att_id, int):
                     attachment_ids.append(att_id)
             except Exception:
@@ -1780,7 +1831,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                 att_ok, att_id = _make_odoo_request(odoo_service, 'ir.attachment', 'create', {
                     'args': [attachment_payload],
                     'kwargs': {}
-                })
+                }, odoo_session_data)
                 if att_ok and isinstance(att_id, int):
                     attachment_ids.append(att_id)
             except Exception:
@@ -1793,7 +1844,7 @@ def update_timeoff_request(odoo_service, leave_id: int, leave_type_id: int,
                 'args': [[new_leave_id], {'supported_attachment_ids': [(6, 0, attachment_ids)]}],
                 'kwargs': {}
             }
-            _make_odoo_request(odoo_service, 'hr.leave', 'write', link_params)
+            _make_odoo_request(odoo_service, 'hr.leave', 'write', link_params, odoo_session_data)
             # Don't fail if linking fails - the request was created successfully
 
         return True, f"Leave request updated successfully (new ID: {new_leave_id})"

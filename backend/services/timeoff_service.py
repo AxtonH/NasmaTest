@@ -298,7 +298,7 @@ class TimeOffService:
             }
 
             self._log(f"Making Odoo request to create leave", "bot_logic")
-            success, data = self._make_odoo_request('hr.leave', 'create', params)
+            success, data = self._make_odoo_request('hr.leave', 'create', params, odoo_session_data)
 
             self._log(f"Odoo request result - Success: {success}, Data: {data}", "bot_logic")
 
@@ -329,7 +329,7 @@ class TimeOffService:
                             att_success, att_id = self._make_odoo_request('ir.attachment', 'create', {
                                 'args': [attachment_payload],
                                 'kwargs': {}
-                            })
+                            }, odoo_session_data)
                             if att_success and isinstance(att_id, int):
                                 attachment_ids.append(att_id)
                             else:
@@ -342,7 +342,7 @@ class TimeOffService:
                             'args': [[leave_id], {'supported_attachment_ids': [(6, 0, attachment_ids)]}],
                             'kwargs': {}
                         }
-                        link_success, link_resp = self._make_odoo_request('hr.leave', 'write', link_args)
+                        link_success, link_resp = self._make_odoo_request('hr.leave', 'write', link_args, odoo_session_data)
                         if not link_success:
                             self._log(f"Failed to link supporting attachments: {link_resp}", "general")
                 return True, {
@@ -503,9 +503,60 @@ class TimeOffService:
         except Exception as e:
             return False, f"Error submitting leave request: {str(e)}", None
 
-    def _make_odoo_request(self, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
-        """Make authenticated request to Odoo using web session"""
+    def _make_odoo_request(self, model: str, method: str, params: Dict, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
+        """Make authenticated request to Odoo using web session or stateless request.
+        
+        Args:
+            model: Odoo model name
+            method: Method to call
+            params: Request parameters
+            odoo_session_data: Optional session data dict with session_id, user_id, username, password.
+                             If provided, uses stateless requests (preferred to avoid shared state issues).
+        
+        Returns:
+            Tuple[bool, Any]: (success, result_data)
+        """
         try:
+            # Use stateless requests if session data provided (preferred to avoid shared state issues)
+            if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+                try:
+                    result_dict = self.odoo_service.make_authenticated_request(
+                        model=model,
+                        method=method,
+                        args=params.get('args', []),
+                        kwargs=params.get('kwargs', {}),
+                        session_id=odoo_session_data['session_id'],
+                        user_id=odoo_session_data['user_id'],
+                        username=odoo_session_data.get('username'),
+                        password=odoo_session_data.get('password')
+                    )
+                    
+                    # Check if session was renewed
+                    renewed_session = result_dict.pop('_renewed_session', None) if isinstance(result_dict, dict) else None
+                    if renewed_session:
+                        # Update Flask session if renewed
+                        try:
+                            from flask import session as flask_session
+                            flask_session['odoo_session_id'] = renewed_session['session_id']
+                            flask_session['user_id'] = renewed_session['user_id']
+                            flask_session.modified = True
+                        except Exception:
+                            pass
+                    
+                    if 'error' in result_dict and 'result' not in result_dict:
+                        error_msg = f"Odoo API error: {result_dict.get('error', 'Unknown error')}"
+                        debug_log(f"Odoo API error: {error_msg}", "odoo_data")
+                        return False, error_msg
+                    
+                    if 'result' in result_dict:
+                        return True, result_dict['result']
+                    else:
+                        return False, "Unknown error in Odoo response"
+                except Exception as stateless_error:
+                    debug_log(f"Stateless request failed, falling back to stateful: {stateless_error}", "general")
+                    # Fall through to stateful request below
+            
+            # Fallback to stateful request using shared odoo_service instance
             # Ensure session is active before making request
             session_ok, session_msg = self.odoo_service.ensure_active_session()
             if not session_ok:
