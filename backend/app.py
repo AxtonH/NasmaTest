@@ -3887,7 +3887,9 @@ def create_app():
             if not isinstance(response, dict) or not response.get('message'):
                 try:
                     debug_log(f"Calling reimbursement service with message: '{message[:50]}...'", "bot_logic")
-                    reimb_resp = reimbursement_service.handle_flow(message, thread_id, employee_data or {})
+                    # Get Odoo session data to pass to reimbursement service
+                    odoo_session_data = get_odoo_session_data()
+                    reimb_resp = reimbursement_service.handle_flow(message, thread_id, employee_data or {}, odoo_session_data)
                     debug_log(f"Reimbursement service response: {reimb_resp is not None}", "bot_logic")
                     if reimb_resp:
                         resp_thread = reimb_resp.get('thread_id') or thread_id

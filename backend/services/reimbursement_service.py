@@ -312,6 +312,34 @@ class ReimbursementService:
                     "Please log in again and resubmit your reimbursement."
                 ), None
             
+            # Validate that session user_id matches employee's user_id (if available)
+            if odoo_session_data and odoo_session_data.get('user_id'):
+                session_user_id = odoo_session_data.get('user_id')
+                # Extract employee user_id from employee_data (could be direct field or nested in user_id_details)
+                employee_user_id = None
+                if 'user_id' in employee_data:
+                    user_id_val = employee_data.get('user_id')
+                    if isinstance(user_id_val, (list, tuple)) and len(user_id_val) > 0:
+                        employee_user_id = user_id_val[0]
+                    elif isinstance(user_id_val, int):
+                        employee_user_id = user_id_val
+                elif 'user_id_details' in employee_data:
+                    user_id_details = employee_data.get('user_id_details')
+                    if isinstance(user_id_details, dict) and user_id_details.get('id'):
+                        employee_user_id = user_id_details.get('id')
+                
+                # If we have both user_ids, validate they match
+                if employee_user_id is not None and session_user_id != employee_user_id:
+                    self._log(
+                        f"Session user_id mismatch: session has user_id={session_user_id}, "
+                        f"but employee has user_id={employee_user_id}. This may cause access errors.",
+                        "bot_logic"
+                    )
+                    return False, (
+                        "Session user mismatch detected. Please refresh the page and try again. "
+                        "If the issue persists, please log out and log back in."
+                    ), None
+            
             # Use stateless requests if session data provided
             use_stateless = odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id')
             
