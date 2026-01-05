@@ -1148,9 +1148,12 @@ class TimeOffService:
                         from leave_balance_service import LeaveBalanceService
                     
                     leave_balance_service = LeaveBalanceService(self.odoo_service)
+                    # Use same 2-year period as calculate_remaining_leave for consistency
                     current_year = datetime.now().year
+                    start_year = current_year - 1
+                    end_year = current_year
                     allocated, alloc_error = leave_balance_service.get_total_allocated_leave(
-                        employee_id, current_year, current_year, odoo_session_data
+                        employee_id, start_year, end_year, odoo_session_data
                     )
                     return allocated if not alloc_error else {}
                 except Exception as e:
@@ -1168,9 +1171,12 @@ class TimeOffService:
                         from leave_balance_service import LeaveBalanceService
                     
                     leave_balance_service = LeaveBalanceService(self.odoo_service)
+                    # Use same 2-year period as calculate_remaining_leave for consistency
                     current_year = datetime.now().year
+                    start_year = current_year - 1
+                    end_year = current_year
                     taken, taken_error = leave_balance_service.get_taken_leave(
-                        employee_id, current_year, current_year, odoo_session_data
+                        employee_id, start_year, end_year, odoo_session_data
                     )
                     return taken if not taken_error else {}
                 except Exception as e:
@@ -1274,17 +1280,44 @@ class TimeOffService:
                 main_types.append('Unpaid Leave')
             main_types.extend(additional_types)
 
-            # Build balance map for UI (leave type id -> formatted balance) using fetched allocations/taken
+            # Build balance map for UI (leave type id -> formatted balance)
+            # Use calculate_remaining_leave for consistency with the "Leaves and Balances" view
             remaining_all = {}
             try:
-                if isinstance(allocated, dict) or isinstance(taken, dict):
-                    all_types = set((allocated or {}).keys()) | set((taken or {}).keys())
-                    for lt_name in all_types:
-                        alloc_val = (allocated or {}).get(lt_name, 0.0)
-                        taken_val = (taken or {}).get(lt_name, 0.0)
-                        remaining_all[lt_name] = max(0.0, alloc_val - taken_val)
-            except Exception:
-                remaining_all = {}
+                try:
+                    from .leave_balance_service import LeaveBalanceService
+                except Exception:
+                    from leave_balance_service import LeaveBalanceService
+                
+                leave_balance_service = LeaveBalanceService(self.odoo_service)
+                # Use calculate_remaining_leave to ensure consistency with balance display
+                remaining_all, remaining_error = leave_balance_service.calculate_remaining_leave(
+                    employee_id,
+                    leave_type_name=None,  # Get all leave types
+                    odoo_session_data=odoo_session_data
+                )
+                
+                if remaining_error:
+                    debug_log(f"Error calculating remaining leave for balance display: {remaining_error}. Falling back to manual calculation.", "bot_logic")
+                    # Fallback to manual calculation if calculate_remaining_leave fails
+                    if isinstance(allocated, dict) or isinstance(taken, dict):
+                        all_types = set((allocated or {}).keys()) | set((taken or {}).keys())
+                        for lt_name in all_types:
+                            alloc_val = (allocated or {}).get(lt_name, 0.0)
+                            taken_val = (taken or {}).get(lt_name, 0.0)
+                            remaining_all[lt_name] = max(0.0, alloc_val - taken_val)
+            except Exception as e:
+                debug_log(f"Error building remaining balances: {str(e)}. Falling back to manual calculation.", "bot_logic")
+                # Fallback to manual calculation
+                try:
+                    if isinstance(allocated, dict) or isinstance(taken, dict):
+                        all_types = set((allocated or {}).keys()) | set((taken or {}).keys())
+                        for lt_name in all_types:
+                            alloc_val = (allocated or {}).get(lt_name, 0.0)
+                            taken_val = (taken or {}).get(lt_name, 0.0)
+                            remaining_all[lt_name] = max(0.0, alloc_val - taken_val)
+                except Exception:
+                    remaining_all = {}
 
             leave_type_options = []
             for lt in leave_types:
