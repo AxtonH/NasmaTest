@@ -1213,6 +1213,17 @@ class ReimbursementService:
             if self.session_manager:
                 session = self.session_manager.start_session(thread_id, 'reimbursement', session_data)
 
+            # Always get fresh Odoo session data (with refresh token if needed) - same approach as confirmation
+            # This ensures we have valid credentials even if session expired
+            odoo_session_data = self._get_fresh_odoo_session_data(odoo_session_data)
+            
+            # Log session data status for debugging
+            if odoo_session_data:
+                has_password = bool(odoo_session_data.get('password'))
+                self._log(f"Building form with session_data: has_session_id={bool(odoo_session_data.get('session_id'))}, has_user_id={bool(odoo_session_data.get('user_id'))}, has_password={has_password}", "bot_logic")
+            else:
+                self._log(f"Building form with no session_data - will use stateful fallback", "bot_logic")
+
             # Build form data
             employee_id = employee_data.get('id')
             ok, form_data = self.build_reimbursement_request_form_data(employee_id, odoo_session_data)
@@ -1252,86 +1263,6 @@ class ReimbursementService:
                 'thread_id': thread_id,
                 'source': 'reimbursement_service'
             }
-
-    def build_reimbursement_request_form_data(self, employee_id: int, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
-        """Build form widget data for reimbursement request.
-        
-        Returns widget data with category options, currency options, destination options, and analytic account options.
-        Similar structure to build_timeoff_request_form_data for consistency.
-        """
-        try:
-            # Fetch currency, destination, and analytic account options in parallel for better performance
-            import concurrent.futures
-            
-            def fetch_currency_options():
-                """Fetch currency options from Odoo"""
-                return self._get_currency_options(odoo_session_data)
-            
-            def fetch_destination_options():
-                """Fetch destination options from Odoo"""
-                return self._get_destination_options(odoo_session_data)
-            
-            def fetch_analytic_accounts():
-                """Fetch analytic account options from Odoo, separated by plan"""
-                return self._get_analytic_account_options_by_plan(odoo_session_data)
-            
-            # Execute API calls in parallel
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                currency_future = executor.submit(fetch_currency_options)
-                destination_future = executor.submit(fetch_destination_options)
-                analytic_future = executor.submit(fetch_analytic_accounts)
-                
-                # Get results
-                currency_options, currency_error = currency_future.result()
-                destination_options, destination_error = destination_future.result()
-                analytic_options = analytic_future.result()  # Returns dict directly, not tuple
-            
-            # Handle errors gracefully
-            if currency_error:
-                self._log(f"Error fetching currency options: {currency_error}", "bot_logic")
-                currency_options = []
-            
-            if destination_error:
-                self._log(f"Error fetching destination options: {destination_error}", "bot_logic")
-                destination_options = []
-            
-            # analytic_options is a dict with 'project', 'market', 'pool' keys
-            if not isinstance(analytic_options, dict):
-                self._log(f"Error fetching analytic account options: Invalid format", "bot_logic")
-                analytic_options = {'project': [], 'market': [], 'pool': []}
-            
-            # Get default currency based on company
-            default_currency_code = self._get_default_currency_for_company(
-                {'id': employee_id} if employee_id else {}
-            )
-            
-            # Build category options
-            category_options = [
-                {'value': 'miscellaneous', 'label': 'Miscellaneous'},
-                {'value': 'per_diem', 'label': 'Per Diem'},
-                {'value': 'travel_accommodation', 'label': 'Travel & Accommodation'}
-            ]
-            
-            # Separate analytic options by plan (Project, Market, Pool)
-            project_options = analytic_options.get('project', [])
-            market_options = analytic_options.get('market', [])
-            pool_options = analytic_options.get('pool', [])
-            
-            return True, {
-                'category_options': category_options,
-                'currency_options': currency_options,
-                'destination_options': destination_options,
-                'project_options': project_options,
-                'market_options': market_options,
-                'pool_options': pool_options,
-                'default_currency': default_currency_code
-            }
-            
-        except Exception as e:
-            self._log(f"Error building reimbursement request form: {str(e)}", "general")
-            import traceback
-            traceback.print_exc()
-            return False, f"Error building form: {str(e)}"
 
     def build_reimbursement_request_form_data(self, employee_id: int, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
         """Build form widget data for reimbursement request.
