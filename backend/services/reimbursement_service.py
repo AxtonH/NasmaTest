@@ -20,10 +20,11 @@ def debug_log(message: str, category: str = "general"):
 class ReimbursementService:
     """Service for managing expense reimbursement requests with fuzzy logic detection"""
 
-    def __init__(self, odoo_service, employee_service, metrics_service=None):
+    def __init__(self, odoo_service, employee_service, metrics_service=None, auth_token_service=None):
         self.odoo_service = odoo_service
         self.employee_service = employee_service
         self.metrics_service = metrics_service
+        self.auth_token_service = auth_token_service
 
         # Reimbursement detection patterns (fuzzy logic)
         self.reimbursement_patterns = [
@@ -375,7 +376,7 @@ class ReimbursementService:
                         'args': [[]],
                         'kwargs': {'attributes': ['string']}
                     }
-                    success, fields = self._make_odoo_request(model, 'fields_get', params)
+                    success, fields = self._make_odoo_request(model, 'fields_get', params, odoo_session_data)
                     if success and isinstance(fields, dict):
                         for tech, meta in fields.items():
                             if isinstance(meta, dict) and meta.get('string') and str(meta.get('string')).strip().lower() == label.strip().lower():
@@ -383,6 +384,7 @@ class ReimbursementService:
                 except Exception:
                     return None
                 return None
+            
 
             # Default description per category if not provided
             default_desc = expense_data.get('description', '')
@@ -434,6 +436,48 @@ class ReimbursementService:
             attached_link = expense_data.get('attached_link', '')
             if attached_link:
                 expense_values['x_studio_attached_link'] = attached_link
+            
+            # Add analytic distribution if provided
+            analytic_distribution = expense_data.get('analytic_distribution')
+            if analytic_distribution and isinstance(analytic_distribution, list):
+                # Try to resolve the actual field name dynamically
+                analytic_field_name = _resolve_field_by_label('hr.expense', 'Analytic Distribution')
+                if not analytic_field_name:
+                    analytic_field_name = 'analytic_distribution'  # Fallback to default
+                
+                self._log(f"Using analytic distribution field name: {analytic_field_name}", "bot_logic")
+                
+                try:
+                    if len(analytic_distribution) > 0:
+                        first_line = analytic_distribution[0]
+                        if isinstance(first_line, dict):
+                            project_id = first_line.get('project_id')
+                            market_id = first_line.get('market_id')
+                            pool_id = first_line.get('pool_id')
+                            
+                            account_ids = []
+                            if project_id:
+                                account_ids.append(int(project_id))
+                            if market_id:
+                                account_ids.append(int(market_id))
+                            if pool_id:
+                                account_ids.append(int(pool_id))
+                            
+                            if account_ids:
+                                # Odoo stores ONE line with all columns using a comma-separated string key
+                                # Format: {'153,265,269': 100.0} creates one row with Project, Market, Pool columns all filled
+                                account_ids_str = ','.join(str(int(acc_id)) for acc_id in account_ids)
+                                analytic_dict = {account_ids_str: 100.0}
+                                
+                                expense_values[analytic_field_name] = analytic_dict
+                        else:
+                            self._log(f"Invalid line format in analytic distribution", "bot_logic")
+                    else:
+                        self._log(f"Empty analytic distribution list", "bot_logic")
+                except Exception as e:
+                    self._log(f"Error converting analytic distribution to dict format: {e}", "bot_logic")
+                    import traceback
+                    traceback.print_exc()
             # PER_DIEM specific custom fields (dates)
             if (expense_data.get('category') or '').lower() == 'per_diem':
                 pd_from = expense_data.get('per_diem_from')
@@ -816,9 +860,65 @@ class ReimbursementService:
 
         return True, "Valid"
 
-    def _make_odoo_request(self, model: str, method: str, params: Dict) -> Tuple[bool, Any]:
-        """Make authenticated request to Odoo using web session"""
+    def _make_odoo_request(self, model: str, method: str, params: Dict, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
+        """Make authenticated request to Odoo using web session or stateless request.
+        
+        Args:
+            model: Odoo model name
+            method: Method to call
+            params: Request parameters
+            odoo_session_data: Optional session data dict with session_id, user_id, username, password.
+                             If provided, uses stateless requests (preferred to avoid shared state issues).
+        
+        Returns:
+            Tuple[bool, Any]: (success, result_data)
+        """
         try:
+            # Use stateless requests if session data provided (preferred to avoid shared state issues)
+            if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id'):
+                try:
+                    result_dict = self.odoo_service.make_authenticated_request(
+                        model=model,
+                        method=method,
+                        args=params.get('args', []),
+                        kwargs=params.get('kwargs', {}),
+                        session_id=odoo_session_data['session_id'],
+                        user_id=odoo_session_data['user_id'],
+                        username=odoo_session_data.get('username'),
+                        password=odoo_session_data.get('password')
+                    )
+                    
+                    # Check if session was renewed
+                    renewed_session = result_dict.pop('_renewed_session', None) if isinstance(result_dict, dict) else None
+                    if renewed_session:
+                        # Update Flask session if renewed
+                        try:
+                            from flask import session as flask_session
+                            flask_session['odoo_session_id'] = renewed_session['session_id']
+                            flask_session['user_id'] = renewed_session['user_id']
+                            flask_session.modified = True
+                        except Exception:
+                            pass
+                    
+                    # Check for errors in result
+                    if 'error' in result_dict:
+                        error_data = result_dict.get('error', {})
+                        error_msg = error_data.get('message', 'Unknown error') if isinstance(error_data, dict) else str(error_data)
+                        error_details = error_data.get('data', {}) if isinstance(error_data, dict) else {}
+                        self._log(f"Odoo error details: {error_data}", "bot_logic")
+                        return False, f"Odoo error: {error_msg} - {error_details}"
+                    
+                    # Return success with result
+                    if 'result' in result_dict:
+                        return True, result_dict['result']
+                    else:
+                        return False, "No result in Odoo response"
+                        
+                except Exception as stateless_error:
+                    self._log(f"Stateless request failed, falling back to stateful: {stateless_error}", "bot_logic")
+                    # Fall through to stateful request below
+            
+            # Fallback to stateful request (using shared odoo_service session)
             # Ensure session is active before making request
             session_ok, session_msg = self.odoo_service.ensure_active_session()
             if not session_ok:
@@ -864,8 +964,16 @@ class ReimbursementService:
                         error_data = result.get('error', {})
                         error_msg = error_data.get('message', 'Unknown error')
                         error_details = error_data.get('data', {})
+                        error_debug = error_details.get('debug', '') if isinstance(error_details, dict) else ''
+                        error_name = error_data.get('name', '') if isinstance(error_data, dict) else ''
                         self._log(f"Odoo error details: {error_data}", "bot_logic")
-                        return False, f"Odoo error: {error_msg} - {error_details}"
+                        self._log(f"Odoo error name: {error_name}", "bot_logic")
+                        self._log(f"Odoo error debug: {error_debug}", "bot_logic")
+                        # Return more detailed error message
+                        full_error = f"Odoo error: {error_msg}"
+                        if error_debug:
+                            full_error += f"\n\nDebug: {error_debug[:500]}"
+                        return False, full_error
                 except Exception as e:
                     return False, f"JSON parsing error: {str(e)}"
             else:
@@ -900,8 +1008,17 @@ class ReimbursementService:
             if 'error' in result:
                 error_data = result.get('error', {})
                 error_msg = error_data.get('message', 'Unknown error') if isinstance(error_data, dict) else str(error_data)
+                error_debug = error_data.get('data', {}).get('debug', '') if isinstance(error_data, dict) and isinstance(error_data.get('data'), dict) else ''
+                error_name = error_data.get('name', '') if isinstance(error_data, dict) else ''
                 self._log(f"Odoo error: {error_msg}", "bot_logic")
-                return False, error_msg, renewed_session
+                self._log(f"Odoo error name: {error_name}", "bot_logic")
+                self._log(f"Odoo error debug: {error_debug}", "bot_logic")
+                self._log(f"Full Odoo error data: {error_data}", "bot_logic")
+                # Return more detailed error message
+                full_error = error_msg
+                if error_debug:
+                    full_error += f"\n\nDebug: {error_debug[:500]}"  # Limit debug message length
+                return False, full_error, renewed_session
 
             return True, result.get('result'), renewed_session
 
@@ -911,19 +1028,33 @@ class ReimbursementService:
 
     def handle_flow(self, message: str, thread_id: str, employee_data: Dict, odoo_session_data: Dict = None) -> Optional[Dict]:
         """
-        Handle reimbursement flow - detect intent and manage multi-step process
+        Handle reimbursement flow - detect intent and manage form-based process
         Returns: response dict or None if not a reimbursement request
         """
         try:
-            # Check for active reimbursement session first
-            active_session = self.session_manager.get_session(thread_id) if self.session_manager else None
-
-            if active_session and active_session.get('type') == 'reimbursement':
-                # Continue existing session
-                return self._continue_reimbursement_session(message, thread_id, active_session, employee_data, odoo_session_data)
-
+            # Check for form submission messages first
+            if message and message.startswith('submit_reimbursement_request:'):
+                return self._handle_reimbursement_form_submission(message, thread_id, employee_data, odoo_session_data)
+            
+            # Check for confirmation
+            if message and message == 'reimbursement_confirm':
+                return self._handle_reimbursement_confirmation(thread_id, employee_data, odoo_session_data)
+            
+            # Check for cancellation
+            if message and message == 'reimbursement_cancel':
+                if self.session_manager:
+                    self.session_manager.clear_session(thread_id)
+                return {
+                    'message': 'Reimbursement request cancelled.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
             # Detect new reimbursement intent first
             is_reimbursement, confidence, extracted_data = self.detect_reimbursement_intent(message)
+
+            # Get active session to check for conflicts with other flows
+            active_session = self.session_manager.get_session(thread_id) if self.session_manager else None
 
             # CRITICAL: Block if another flow is active AND user is trying to start reimbursement
             # This prevents reimbursement from interrupting active timeoff/overtime flows
@@ -949,7 +1080,7 @@ class ReimbursementService:
                     }
 
                 # Start new reimbursement session
-                return self._start_reimbursement_session(message, thread_id, extracted_data, employee_data)
+                return self._start_reimbursement_session(message, thread_id, extracted_data, employee_data, odoo_session_data)
 
             return None
 
@@ -959,8 +1090,98 @@ class ReimbursementService:
             traceback.print_exc()
             return None
 
-    def _start_reimbursement_session(self, message: str, thread_id: str, extracted_data: Dict, employee_data: Dict) -> Dict:
-        """Start a new reimbursement request session"""
+    def _get_fresh_odoo_session_data(self, odoo_session_data: Dict = None) -> Dict:
+        """Get fresh Odoo session data with refresh token handling - same approach as timeoff's get_current_odoo_session()
+        
+        Args:
+            odoo_session_data: Optional existing session data to update
+            
+        Returns:
+            Dict with session_id, user_id, username, password (or None if not authenticated)
+        """
+        try:
+            from flask import g, session as flask_session, request
+            
+            # First try to get from Flask's g object (set by chat endpoint) - same as timeoff
+            session_data = getattr(g, 'odoo_session_data', None)
+            
+            # If not available, try to get from Flask session directly
+            if not session_data:
+                if flask_session.get('authenticated'):
+                    session_data = {
+                        'session_id': flask_session.get('odoo_session_id'),
+                        'user_id': flask_session.get('user_id'),
+                        'username': flask_session.get('username'),
+                        'password': flask_session.get('password')
+                    }
+                    # Only return if we have required fields
+                    if session_data.get('session_id') and session_data.get('user_id'):
+                        # If password is missing, we'll handle refresh token below
+                        if session_data.get('password'):
+                            return session_data
+                    else:
+                        session_data = None
+            
+            # Use provided session_data if available and has password
+            if odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id') and odoo_session_data.get('password'):
+                return odoo_session_data
+            
+            # If we have session_id and user_id but missing password, try to get from refresh token
+            # Same logic as timeoff's get_current_odoo_session()
+            if session_data and session_data.get('session_id') and session_data.get('user_id') and not session_data.get('password'):
+                try:
+                    # Try to get refresh token from cookies or Flask session
+                    refresh_token = None
+                    
+                    # Check cookies first
+                    if hasattr(request, 'cookies'):
+                        refresh_token = request.cookies.get('nasma_refresh_token')
+                    
+                    # If not in cookies, try to get from Flask session
+                    if not refresh_token:
+                        refresh_token = flask_session.get('refresh_token')
+                    
+                    if refresh_token:
+                        # Get auth_token_service from self (set via set_services) or create new instance
+                        # Same approach as timeoff
+                        auth_token_service = self.auth_token_service
+                        if not auth_token_service:
+                            # Try importing directly if not available
+                            try:
+                                from .auth_token_service import AuthTokenService
+                                from ..config.settings import Config
+                                import os
+                                auth_token_service = AuthTokenService(
+                                    supabase_url=Config.SUPABASE_URL,
+                                    supabase_key=Config.SUPABASE_SERVICE_ROLE,
+                                    jwt_secret=os.getenv('JWT_SECRET_KEY') or getattr(Config, 'SUPABASE_JWT_SECRET', None)
+                                )
+                            except Exception:
+                                pass
+                        
+                        if auth_token_service:
+                            # Verify refresh token and get decrypted password
+                            result = auth_token_service.verify_refresh_token(refresh_token)
+                            if result:
+                                user_id, username, password = result
+                                # Update session_data with password
+                                session_data['password'] = password
+                                session_data['username'] = username
+                                self._log(f"Retrieved password from refresh token for user_id: {user_id}", "bot_logic")
+                                return session_data
+                except Exception as e:
+                    self._log(f"Failed to retrieve password from refresh token: {str(e)}", "bot_logic")
+            
+            # Return session_data if we have it, otherwise return provided odoo_session_data or None
+            return session_data if session_data else odoo_session_data
+            
+        except Exception as e:
+            self._log(f"Error getting fresh Odoo session data: {str(e)}", "bot_logic")
+            # Return provided session_data as fallback
+            return odoo_session_data
+
+    def _start_reimbursement_session(self, message: str, thread_id: str, extracted_data: Dict, employee_data: Dict, odoo_session_data: Dict = None) -> Dict:
+        """Start a new reimbursement request session - returns form widget"""
         try:
             # Validate thread_id
             if not thread_id:
@@ -968,6 +1189,14 @@ class ReimbursementService:
                 thread_id = f"reimbursement_{int(time.time())}"
 
             self._log(f"Starting reimbursement session with thread_id: {thread_id}", "bot_logic")
+
+            # Validate employee data
+            if not employee_data or not isinstance(employee_data, dict) or not employee_data.get('id'):
+                return {
+                    'message': "I'd like to help with your reimbursement request, but I need to verify your employee information first. Please try logging out and logging back in, or contact HR for assistance.",
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
 
             # Clear any existing session first to prevent conflicts
             if self.session_manager:
@@ -977,23 +1206,41 @@ class ReimbursementService:
             session_data = {
                 'extracted_data': extracted_data,
                 'employee_data': employee_data,
-                'step': 'category',
+                'step': 'form',
                 'expense_data': {}
             }
 
             if self.session_manager:
                 session = self.session_manager.start_session(thread_id, 'reimbursement', session_data)
 
-            # Present category options
-            categories = self.get_expense_categories()
+            # Build form data
+            employee_id = employee_data.get('id')
+            ok, form_data = self.build_reimbursement_request_form_data(employee_id, odoo_session_data)
+            
+            if not ok:
+                return {
+                    'message': "I encountered an error while loading the reimbursement form. Please try again or contact HR for assistance.",
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
 
-            response_text = "I'll help you create a reimbursement request! Please select the expense category:"
+            response_text = "I'll help you create a reimbursement request! Please fill in the details below:"
 
             return {
                 'message': response_text,
                 'thread_id': thread_id,
-                'buttons': categories,
-                'source': 'reimbursement_service'
+                'source': 'reimbursement_service',
+                'widgets': {
+                    'reimbursement_request_form': True,
+                    'category_options': form_data.get('category_options', []),
+                    'currency_options': form_data.get('currency_options', []),
+                    'destination_options': form_data.get('destination_options', []),
+                    'project_options': form_data.get('project_options', []),
+                    'market_options': form_data.get('market_options', []),
+                    'pool_options': form_data.get('pool_options', []),
+                    'default_currency': form_data.get('default_currency'),
+                    'context_key': 'submit_reimbursement_request'
+                }
             }
 
         except Exception as e:
@@ -1006,993 +1253,561 @@ class ReimbursementService:
                 'source': 'reimbursement_service'
             }
 
-    def _continue_reimbursement_session(self, message: str, thread_id: str, active_session: Dict, employee_data: Dict, odoo_session_data: Dict = None) -> Dict:
-        """Continue an existing reimbursement session"""
+    def build_reimbursement_request_form_data(self, employee_id: int, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
+        """Build form widget data for reimbursement request.
+        
+        Returns widget data with category options, currency options, destination options, and analytic account options.
+        Similar structure to build_timeoff_request_form_data for consistency.
+        """
         try:
-            # Check for exit/cancel commands FIRST before any step logic (with typo tolerance)
-            def _is_cancel_intent(txt: str) -> bool:
-                try:
-                    import difflib
-                    txt = (txt or '').strip().lower()
-                    hard = {'cancel','exit','stop','quit','nevermind','no thanks','end','abort','undo','no','n'}
-                    if txt in hard:
-                        return True
-                    for token in ['cancel','stop','exit','quit','abort','end','undo']:
-                        if difflib.SequenceMatcher(a=txt, b=token).ratio() >= 0.8:
-                            return True
-                    return False
-                except Exception:
-                    return txt in {'cancel','exit','stop','quit','nevermind','no thanks','end','abort','undo','no','n'}
-            message_lower = (message or '').lower().strip()
-            if _is_cancel_intent(message_lower):
-                self._log(f"User requested to exit reimbursement flow with: '{message_lower}'", "bot_logic")
-                if self.session_manager:
-                    try:
-                        self.session_manager.cancel_session(thread_id, f"User exited reimbursement: {message_lower}")
-                    finally:
-                        self.session_manager.clear_session(thread_id)
-                return {
-                    'message': 'request cancelled, can i help you with anything else',
-                    'thread_id': thread_id,
-                    'source': 'reimbursement_service'
-                }
-
-            session_data = active_session.get('data', {})
-            current_step = session_data.get('step', 'category')
-            expense_data = session_data.get('expense_data', {})
-            # Prefer current request employee_data, fall back to session-stored copy
-            effective_employee = employee_data if (employee_data and isinstance(employee_data, dict) and employee_data.get('id')) else session_data.get('employee_data')
-
-            self._log(f"Continuing reimbursement session at step: {current_step}, message: '{message}'", "bot_logic")
-
-            if current_step == 'category':
-                # Handle category selection
-                normalized = message.strip().lower()
-                selected_category = None
-                if normalized in ['miscellaneous', 'misc', 'general', 'other']:
-                    selected_category = 'miscellaneous'
-                elif normalized in ['per_diem', 'per diem', 'perdiem', 'daily allowance', 'daily_allowance']:
-                    selected_category = 'per_diem'
-                elif normalized in [
-                    'travel_accommodation', 'travel & accommodation', 'travel accommodation', 'trans & acc',
-                    'travel', 'accommodation', 'hotel', 'flight', 'transport', 'transportation'
-                ]:
-                    selected_category = 'travel_accommodation'
-
-                if selected_category:
-                    expense_data['category'] = selected_category
-                    session_data['expense_data'] = expense_data
-                    # Branch PER_DIEM into its dedicated flow
-                    if selected_category == 'per_diem':
-                        session_data['step'] = 'per_diem_dates'
-                        if self.session_manager:
-                            self.session_manager.update_session(thread_id, session_data)
-                        return {
-                            'message': 'Please select your Per Diem date range:',
-                            'thread_id': thread_id,
-                            'widgets': {
-                                'date_range_picker': True,
-                                'context_key': 'per_diem_date_range'
-                            },
-                            'source': 'reimbursement_service'
-                        }
-                    # Branch TRANS & ACC into amount entry directly
-                    if selected_category == 'travel_accommodation':
-                        session_data['step'] = 'ta_amount'
-                        if self.session_manager:
-                            self.session_manager.update_session(thread_id, session_data)
-                        
-                        # Fetch currency options
-                        currency_options, currency_error = self._get_currency_options()
-                        if currency_error:
-                            self._log(f"Error fetching currencies: {currency_error}", "bot_logic")
-                            currency_options = []
-                        
-                        # Determine default currency based on company
-                        default_currency_code = self._get_default_currency_for_company(employee_data)
-                        
-                        return {
-                            'message': "Enter payment amount (use the same currency you paid in)",
-                            'thread_id': thread_id,
-                            'widgets': {
-                                'reimbursement_amount_form': True,
-                                'currency_options': currency_options,
-                                'default_currency': default_currency_code,
-                                'context_key': 'reimbursement_amount_currency'
-                            },
-                            'source': 'reimbursement_service'
-                        }
-                    # For MISCELLANEOUS, skip early description/link and go to amount
-                    if selected_category == 'miscellaneous':
-                        session_data['step'] = 'amount'
-                        if self.session_manager:
-                            self.session_manager.update_session(thread_id, session_data)
-                        
-                        # Fetch currency options
-                        currency_options, currency_error = self._get_currency_options()
-                        if currency_error:
-                            self._log(f"Error fetching currencies: {currency_error}", "bot_logic")
-                            currency_options = []
-                        
-                        # Determine default currency based on company
-                        default_currency_code = self._get_default_currency_for_company(employee_data)
-                        
-                        return {
-                            'message': "Enter payment amount (use the same currency you paid in)",
-                            'thread_id': thread_id,
-                            'widgets': {
-                                'reimbursement_amount_form': True,
-                                'currency_options': currency_options,
-                                'default_currency': default_currency_code,
-                                'context_key': 'reimbursement_amount_currency'
-                            },
-                            'source': 'reimbursement_service'
-                        }
-                    # Default flow for other categories
-                    session_data['step'] = 'description'
-
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-
-                    return {
-                        'message': "Great! Now please provide a description of the expense:",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                else:
-                    return {
-                        'message': "Please select a valid category from the options above.",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-
-            # PER_DIEM flow: collect date range and destination
-            elif current_step == 'per_diem_dates':
-                raw = (message or '').strip()
-                # Accept widget structured message
-                if raw.startswith('per_diem_date_range='):
-                    raw = raw.split('=', 1)[1].strip()
-                # Expect "DD/MM/YYYY to DD/MM/YYYY"
-                parts = [p.strip() for p in raw.split(' to ') if p.strip()]
-                if len(parts) != 2:
-                    # Try fallback split by dash or other separators
-                    import re as _re
-                    mparts = _re.split(r"\s*(?:-|to|until|till|through|\u2013|\u2014)\s*", raw)
-                    parts = [p.strip() for p in mparts if p.strip()]
-                if len(parts) != 2:
-                    return {
-                        'message': 'Please select a full date range using the calendar.',
-                        'thread_id': thread_id,
-                        'widgets': {
-                            'date_range_picker': True,
-                            'context_key': 'per_diem_date_range'
-                        },
-                        'source': 'reimbursement_service'
-                    }
-                start_date, end_date = parts[0], parts[1]
-                # Basic validation of DD/MM/YYYY
-                try:
-                    from datetime import datetime as _dt
-                    _dt.strptime(start_date, '%d/%m/%Y')
-                    _dt.strptime(end_date, '%d/%m/%Y')
-                except Exception:
-                    return {
-                        'message': 'Invalid date format. Please pick dates from the calendar above.',
-                        'thread_id': thread_id,
-                        'widgets': {
-                            'date_range_picker': True,
-                            'context_key': 'per_diem_date_range'
-                        },
-                        'source': 'reimbursement_service'
-                    }
-                expense_data['per_diem_from'] = start_date
-                expense_data['per_diem_to'] = end_date
-                session_data['expense_data'] = expense_data
-                # Next: destination dropdown
-                # Fetch destination options from res.country.state
-                options, error = self._get_destination_options()
-                if error:
-                    # Fallback to manual entry
-                    session_data['step'] = 'per_diem_destination_text'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return {
-                        'message': "Please type your Destination (state/region name):",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                session_data['step'] = 'per_diem_destination_select'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return {
-                    'message': 'Select your Destination:',
-                    'thread_id': thread_id,
-                    'widgets': {
-                        'select_dropdown': True,
-                        'options': options,
-                        'context_key': 'per_diem_destination',
-                        'placeholder': 'Choose destination state'
-                    },
-                    'source': 'reimbursement_service'
-                }
-
-            elif current_step in ['per_diem_destination_select', 'per_diem_destination_text']:
-                # Handle dropdown (structured) or text destination
-                raw = (message or '').strip()
-                if raw.startswith('per_diem_destination='):
-                    val = raw.split('=', 1)[1].strip()
-                    try:
-                        dest_id = int(val)
-                    except Exception:
-                        dest_id = None
-                    if not dest_id:
-                        return {
-                            'message': 'Invalid selection. Please choose a destination again.',
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                    # Resolve name for confirmation
-                    name = self._resolve_state_name(dest_id)
-                    expense_data['per_diem_destination_id'] = dest_id
-                    expense_data['per_diem_destination_name'] = name or f"ID {dest_id}"
-                else:
-                    # Text entry fallback
-                    if not raw:
-                        return {
-                            'message': 'Please provide a destination name.',
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                    expense_data['per_diem_destination_name'] = raw
-
-                # After destination, offer supporting additions before confirmation
-                session_data['expense_data'] = expense_data
-                session_data['step'] = 'per_diem_supporting_additions'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
-
-            elif current_step == 'ta_amount':
-                # Handle amount input from widget or chat for Travel & Accommodation
-                try:
-                    # Check if input is from widget format: "reimbursement_amount_currency=AMOUNT|CURRENCY_ID"
-                    amount_value = None
-                    currency_id = None
-                    
-                    if message.strip().startswith('reimbursement_amount_currency='):
-                        # Widget format: "reimbursement_amount_currency=50.00|123"
-                        widget_data = message.strip().split('=', 1)[1].strip()
-                        parts = widget_data.split('|')
-                        if len(parts) >= 2:
-                            amount_value = parts[0].strip()
-                            currency_id = parts[1].strip()
-                        elif len(parts) == 1:
-                            amount_value = parts[0].strip()
-                    else:
-                        # Chat input: extract amount only
-                        amount_value = self._extract_amount((message or '').lower())
-                    
-                    # Extract amount
-                    if amount_value:
-                        if isinstance(amount_value, str):
-                            extracted = self._extract_amount(amount_value.lower())
-                        else:
-                            extracted = amount_value
-                    else:
-                        extracted = self._extract_amount((message or '').lower())
-                    
-                    if extracted is None or extracted <= 0:
-                        return {
-                            'message': "Please enter a valid amount (numbers only, e.g., 150.00).",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                    
-                    expense_data['amount'] = float(extracted)
-                    
-                    # Store currency_id if provided
-                    if currency_id:
-                        try:
-                            expense_data['currency_id'] = int(currency_id)
-                        except (ValueError, TypeError):
-                            self._log(f"Invalid currency_id: {currency_id}", "bot_logic")
-                    
-                    # For TRANS & ACC, go straight to link step (use today's date by default)
-                    from datetime import datetime as _dt
-                    expense_data['date'] = _dt.now().strftime('%d/%m/%Y')
-                    session_data['expense_data'] = expense_data
-                    # After amount, go to link step
-                    session_data['step'] = 'ta_link'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return {
-                        'message': "Please provide a link to the receipt or supporting document:",
-                        'thread_id': thread_id,
-                        'widgets': {
-                            'reimbursement_link_form': True,
-                            'context_key': 'reimbursement_link'
-                        },
-                        'source': 'reimbursement_service'
-                    }
-                except Exception as e:
-                    self._log(f"Error processing amount: {e}", "bot_logic")
-                    return {
-                        'message': "Please enter a valid amount (numbers only, e.g., 150.00).",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-
-            elif current_step == 'description':
-                # Handle description input
-                if message.strip():
-                    expense_data['description'] = message.strip()
-                    session_data['expense_data'] = expense_data
-                    session_data['step'] = 'attached_link'
-
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-
-                    return {
-                        'message': "Please provide a link to the receipt or supporting document (or click 'Skip' if you don't have one):",
-                        'thread_id': thread_id,
-                        'buttons': [
-                            {'text': 'Skip', 'value': 'skip_link', 'type': 'action_reimbursement'}
-                        ],
-                        'source': 'reimbursement_service'
-                    }
-                else:
-                    return {
-                        'message': "Please provide a description for your expense.",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-
-            elif current_step == 'attached_link':
-                # Handle link input or skip
-                if message.lower() == 'skip_link' or 'skip' in message.lower():
-                    expense_data['attached_link'] = ''
-                else:
-                    # Basic URL validation
-                    if message.strip().startswith(('http://', 'https://')):
-                        expense_data['attached_link'] = message.strip()
-                    else:
-                        return {
-                            'message': "Please provide a valid URL starting with http:// or https://, or click 'Skip'.",
-                            'thread_id': thread_id,
-                            'buttons': [
-                                {'text': 'Skip', 'value': 'skip_link', 'type': 'action_reimbursement'}
-                            ],
-                            'source': 'reimbursement_service'
-                        }
-
-                session_data['expense_data'] = expense_data
-                session_data['step'] = 'amount'
-
-                if hasattr(self, 'session_manager'):
-                    self.session_manager.update_session(thread_id, session_data)
-
-                # Fetch currency options
-                currency_options, currency_error = self._get_currency_options()
-                if currency_error:
-                    self._log(f"Error fetching currencies: {currency_error}", "bot_logic")
-                    currency_options = []
-
-                # Determine default currency based on company
-                default_currency_code = self._get_default_currency_for_company(employee_data)
-
-                return {
-                    'message': "Enter payment amount (use the same currency you paid in)",
-                    'thread_id': thread_id,
-                    'widgets': {
-                        'reimbursement_amount_form': True,
-                        'currency_options': currency_options,
-                        'default_currency': default_currency_code,
-                        'context_key': 'reimbursement_amount_currency'
-                    },
-                    'source': 'reimbursement_service'
-                }
-
-            elif current_step == 'amount':
-                # Handle amount input from widget or chat
-                try:
-                    # Check if input is from widget format: "reimbursement_amount_currency=AMOUNT|CURRENCY_ID"
-                    amount_value = None
-                    currency_id = None
-                    
-                    if message.strip().startswith('reimbursement_amount_currency='):
-                        # Widget format: "reimbursement_amount_currency=50.00|123"
-                        widget_data = message.strip().split('=', 1)[1].strip()
-                        parts = widget_data.split('|')
-                        if len(parts) >= 2:
-                            amount_value = parts[0].strip()
-                            currency_id = parts[1].strip()
-                        elif len(parts) == 1:
-                            amount_value = parts[0].strip()
-                    else:
-                        # Chat input: extract amount only
-                        amount_value = self._extract_amount((message or '').lower())
-                    
-                    # Extract amount
-                    if amount_value:
-                        if isinstance(amount_value, str):
-                            extracted = self._extract_amount(amount_value.lower())
-                        else:
-                            extracted = amount_value
-                    else:
-                        extracted = self._extract_amount((message or '').lower())
-                    
-                    if extracted is None or extracted <= 0:
-                        return {
-                            'message': "Please enter a valid amount (numbers only, e.g., 50.00).",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-
-                    expense_data['amount'] = float(extracted)
-                    
-                    # Store currency_id if provided
-                    if currency_id:
-                        try:
-                            expense_data['currency_id'] = int(currency_id)
-                        except (ValueError, TypeError):
-                            self._log(f"Invalid currency_id: {currency_id}", "bot_logic")
-                    
-                    session_data['expense_data'] = expense_data
-                    session_data['step'] = 'date'
-
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-
-                    return {
-                        'message': "Please select the expense date:",
-                        'thread_id': thread_id,
-                        'widgets': {
-                            'single_date_picker': True,
-                            'context_key': 'reimbursement_expense_date'
-                        },
-                        'source': 'reimbursement_service'
-                    }
-                except Exception as e:
-                    self._log(f"Error processing amount: {e}", "bot_logic")
-                    return {
-                        'message': "Please enter a valid amount (numbers only, e.g., 50.00).",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-
-            elif current_step == 'date':
-                # Handle date input from calendar widget or manual input
-                date_str = message.strip()
-                self._log(f"Date step - received message: '{date_str}'", "bot_logic")
-
-                # Handle calendar widget input format: "reimbursement_expense_date=DD/MM/YYYY to DD/MM/YYYY"
-                if date_str.startswith('reimbursement_expense_date='):
-                    date_str = date_str.split('=', 1)[1].strip()
-                    self._log(f"Extracted date from widget: '{date_str}'", "bot_logic")
-
-                # Extract the first date from "DD/MM/YYYY to DD/MM/YYYY" format (for both widget and direct input)
-                if ' to ' in date_str:
-                    date_str = date_str.split(' to ')[0].strip()
-                    self._log(f"Extracted first date: '{date_str}'", "bot_logic")
-
-                try:
-                    # Parse DD/MM/YYYY format (use local alias to avoid shadowing module-level datetime)
-                    from datetime import datetime as _dt
-                    parsed_date = _dt.strptime(date_str, '%d/%m/%Y')
-                    self._log(f"Successfully parsed date: {parsed_date}", "bot_logic")
-                    expense_data['date'] = date_str
-                    session_data['expense_data'] = expense_data
-                    # If Miscellaneous, show Supporting Additions step before confirmation
-                    if (expense_data.get('category') or '').lower() == 'miscellaneous':
-                        session_data['step'] = 'supporting_additions'
-                        if self.session_manager:
-                            self.session_manager.update_session(thread_id, session_data)
-                        return self._show_supporting_additions(thread_id)
-                    # Otherwise proceed to confirmation
-                    session_data['step'] = 'confirmation'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return self._show_confirmation(expense_data, thread_id)
-
-                except ValueError as e:
-                    self._log(f"Date parsing error: {e}, date_str: '{date_str}'", "bot_logic")
-                    # Try to provide more helpful error message
-                    if not date_str:
-                        error_msg = "Please select a date using the calendar widget above."
-                    else:
-                        error_msg = f"Invalid date format: '{date_str}'. Please select a valid date using the calendar widget above."
-
-                    return {
-                        'message': error_msg,
-                        'thread_id': thread_id,
-                        'widgets': {
-                            'single_date_picker': True,
-                            'context_key': 'reimbursement_expense_date'
-                        },
-                        'source': 'reimbursement_service'
-                    }
-
-            elif current_step == 'confirmation':
-                # Handle confirmation
-                if message.lower() in ['yes', 'confirm', 'submit', 'y', 'confirm_submit']:
-                    # Create expense record
-                    success, result, renewed_session = self.create_expense_record(effective_employee, expense_data, odoo_session_data)
-                    
-                    # Update Flask session if session was renewed
-                    if renewed_session:
-                        try:
-                            from flask import session as flask_session
-                            flask_session['odoo_session_id'] = renewed_session['session_id']
-                            flask_session['user_id'] = renewed_session['user_id']
-                            flask_session.modified = True
-                        except Exception:
-                            pass
-
-                    # Clear session
-                    if self.session_manager:
-                        self.session_manager.clear_session(thread_id)
-
-                    if success:
-                        result_payload = result if isinstance(result, dict) else {'message': result}
-                        self._log_metric(thread_id, expense_data, result_payload, effective_employee)
-                        return {
-                            'message': f"✅ Your reimbursement request has been submitted successfully! Expense ID: {result.get('id', 'N/A')}",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                    else:
-                        return {
-                            'message': f"❌ There was an error submitting your reimbursement request: {result}",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                elif message.lower() in ['no', 'cancel', 'n', 'cancel_submit']:
-                    # Clear session
-                    if self.session_manager:
-                        self.session_manager.clear_session(thread_id)
-
-                    return {
-                        'message': "Reimbursement request cancelled. You can start a new request anytime.",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                else:
-                    return {
-                        'message': "Please confirm by clicking 'Yes' or 'No' below.",
-                        'thread_id': thread_id,
-                        'buttons': [
-                            {'text': 'Yes', 'value': 'confirm_submit', 'type': 'action_reimbursement'},
-                            {'text': 'No', 'value': 'cancel_submit', 'type': 'action_reimbursement'}
-                        ],
-                        'source': 'reimbursement_service'
-                    }
-
-            elif current_step == 'supporting_additions':
-                # Offer additions: descriptions, links, or next to confirmation
-                normalized = (message or '').strip().lower()
-                if normalized in ['descriptions', 'description', 'add_description', 'support_add_desc']:
-                    session_data['step'] = 'supporting_additions_description'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return {
-                        'message': "Please type a description to add:",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                if normalized in ['links', 'link', 'add_link', 'support_add_link']:
-                    session_data['step'] = 'supporting_additions_link'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return {
-                        'message': "Please paste a link (receipt or supporting doc).",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                if normalized in ['next', 'continue', 'proceed', 'support_next']:
-                    session_data['step'] = 'confirmation'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return self._show_confirmation(expense_data, thread_id)
-                # Re-show additions menu on unrecognized input
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
-
-            # PER_DIEM: supporting additions after destination selection
-            elif current_step == 'per_diem_supporting_additions':
-                normalized = (message or '').strip().lower()
-                if normalized in ['descriptions', 'description', 'add_description', 'support_add_desc']:
-                    session_data['step'] = 'per_diem_supporting_additions_description'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return {
-                        'message': "Please type a description to add:",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                if normalized in ['links', 'link', 'add_link', 'support_add_link']:
-                    session_data['step'] = 'per_diem_supporting_additions_link'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return {
-                        'message': "Please paste a link (receipt or supporting doc).",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                if normalized in ['next', 'continue', 'proceed', 'support_next']:
-                    session_data['step'] = 'per_diem_confirmation'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return self._show_per_diem_confirmation(expense_data, thread_id)
-                # Re-show additions menu on unrecognized input
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
-
-            elif current_step == 'per_diem_supporting_additions_description':
-                # Save description and return to additions menu
-                if message and message.strip():
-                    expense_data['description'] = message.strip()
-                    session_data['expense_data'] = expense_data
-                session_data['step'] = 'per_diem_supporting_additions'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
-
-            elif current_step == 'per_diem_supporting_additions_link':
-                # Save valid link and return to additions menu
-                raw = (message or '').strip()
-                if raw and raw.lower() not in ['skip', 'none']:
-                    if raw.startswith(('http://', 'https://')):
-                        expense_data['attached_link'] = raw
-                        session_data['expense_data'] = expense_data
-                    else:
-                        # Ask again if invalid URL
-                        return {
-                            'message': "Please provide a valid URL starting with http:// or https://, or type 'skip' to skip.",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                session_data['step'] = 'per_diem_supporting_additions'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
-
-            elif current_step == 'supporting_additions_description':
-                # Save description and return to additions menu
-                if message and message.strip():
-                    expense_data['description'] = message.strip()
-                    session_data['expense_data'] = expense_data
-                session_data['step'] = 'supporting_additions'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
-
-            elif current_step == 'supporting_additions_link':
-                # Save valid link and return to additions menu
-                raw = (message or '').strip()
-                if raw and raw.lower() not in ['skip', 'none']:
-                    if raw.startswith(('http://', 'https://')):
-                        expense_data['attached_link'] = raw
-                        session_data['expense_data'] = expense_data
-                    else:
-                        # Ask again if invalid URL
-                        return {
-                            'message': "Please provide a valid URL starting with http:// or https://, or type 'skip' to skip.",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                session_data['step'] = 'supporting_additions'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id)
-
-            elif current_step == 'ta_confirmation':
-                if message.lower() in ['yes', 'confirm', 'submit', 'y', 'confirm_submit']:
-                    # Create expense record for TRANS & ACC
-                    success, result, renewed_session = self.create_expense_record(effective_employee, expense_data, odoo_session_data)
-                    
-                    # Update Flask session if session was renewed
-                    if renewed_session:
-                        try:
-                            from flask import session as flask_session
-                            flask_session['odoo_session_id'] = renewed_session['session_id']
-                            flask_session['user_id'] = renewed_session['user_id']
-                            flask_session.modified = True
-                        except Exception:
-                            pass
-                    
-                    if self.session_manager:
-                        self.session_manager.clear_session(thread_id)
-                    if success:
-                        result_payload = result if isinstance(result, dict) else {'message': result}
-                        self._log_metric(thread_id, expense_data, result_payload, effective_employee)
-                        return {
-                            'message': f"✅ Your Travel & Accommodation request has been submitted! Expense ID: {result.get('id', 'N/A')}",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                    else:
-                        return {
-                            'message': f"❌ There was an error submitting your request: {result}",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                elif message.lower() in ['no', 'cancel', 'n', 'cancel_submit']:
-                    if self.session_manager:
-                        self.session_manager.clear_session(thread_id)
-                    return {
-                        'message': 'Travel & Accommodation request cancelled.',
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                else:
-                    return self._show_ta_confirmation(expense_data, thread_id)
-
-            elif current_step == 'ta_link':
-                # Handle link input from widget or chat for Travel & Accommodation
-                raw = (message or '').strip()
+            # Fetch currency, destination, and analytic account options in parallel for better performance
+            import concurrent.futures
+            
+            def fetch_currency_options():
+                """Fetch currency options from Odoo"""
+                return self._get_currency_options(odoo_session_data)
+            
+            def fetch_destination_options():
+                """Fetch destination options from Odoo"""
+                return self._get_destination_options(odoo_session_data)
+            
+            def fetch_analytic_accounts():
+                """Fetch analytic account options from Odoo, separated by plan"""
+                return self._get_analytic_account_options_by_plan(odoo_session_data)
+            
+            # Execute API calls in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                currency_future = executor.submit(fetch_currency_options)
+                destination_future = executor.submit(fetch_destination_options)
+                analytic_future = executor.submit(fetch_analytic_accounts)
                 
-                # Check if input is from widget format: "reimbursement_link=URL"
-                if raw.startswith('reimbursement_link='):
-                    raw = raw.split('=', 1)[1].strip()
-                
-                if raw and raw.lower() not in ['skip', 'none']:
-                    if raw.startswith(('http://', 'https://')):
-                        expense_data['attached_link'] = raw
-                        session_data['expense_data'] = expense_data
-                    else:
-                        # Ask again if invalid URL
-                        return {
-                            'message': "Please provide a valid URL starting with http:// or https://:",
-                            'thread_id': thread_id,
-                            'widgets': {
-                                'reimbursement_link_form': True,
-                                'context_key': 'reimbursement_link'
-                            },
-                            'source': 'reimbursement_service'
-                        }
-                # After link, go to supporting additions (without Links button)
-                session_data['step'] = 'ta_supporting_additions'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id, category='travel_accommodation')
-
-            # TRANS & ACC: supporting additions after link
-            elif current_step == 'ta_supporting_additions':
-                normalized = (message or '').strip().lower()
-                if normalized in ['descriptions', 'description', 'add_description', 'support_add_desc']:
-                    session_data['step'] = 'ta_supporting_additions_description'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return {
-                        'message': "Please type a description to add:",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                if normalized in ['links', 'link', 'add_link', 'support_add_link']:
-                    session_data['step'] = 'ta_supporting_additions_link'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return {
-                        'message': "Please paste a link (receipt or supporting doc).",
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                if normalized in ['next', 'continue', 'proceed', 'support_next']:
-                    session_data['step'] = 'ta_confirmation'
-                    if self.session_manager:
-                        self.session_manager.update_session(thread_id, session_data)
-                    return self._show_ta_confirmation(expense_data, thread_id)
-                # Re-show additions menu on unrecognized input
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id, category='travel_accommodation')
-
-            elif current_step == 'ta_supporting_additions_description':
-                # Save description and return to additions menu
-                if message and message.strip():
-                    expense_data['description'] = message.strip()
-                    session_data['expense_data'] = expense_data
-                session_data['step'] = 'ta_supporting_additions'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id, category='travel_accommodation')
-
-            elif current_step == 'ta_supporting_additions_link':
-                # Save valid link and return to additions menu
-                raw = (message or '').strip()
-                if raw and raw.lower() not in ['skip', 'none']:
-                    if raw.startswith(('http://', 'https://')):
-                        expense_data['attached_link'] = raw
-                        session_data['expense_data'] = expense_data
-                    else:
-                        # Ask again if invalid URL
-                        return {
-                            'message': "Please provide a valid URL starting with http:// or https://, or type 'skip' to skip.",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                session_data['step'] = 'ta_supporting_additions'
-                if self.session_manager:
-                    self.session_manager.update_session(thread_id, session_data)
-                return self._show_supporting_additions(thread_id, category='travel_accommodation')
-
-            elif current_step == 'per_diem_confirmation':
-                # Submit PER_DIEM with collected fields
-                if message.lower() in ['yes', 'confirm', 'submit', 'y', 'confirm_submit']:
-                    success, result, renewed_session = self.create_expense_record(effective_employee, expense_data, odoo_session_data)
-                    
-                    # Update Flask session if session was renewed
-                    if renewed_session:
-                        try:
-                            from flask import session as flask_session
-                            flask_session['odoo_session_id'] = renewed_session['session_id']
-                            flask_session['user_id'] = renewed_session['user_id']
-                            flask_session.modified = True
-                        except Exception:
-                            pass
-                    
-                    if self.session_manager:
-                        self.session_manager.clear_session(thread_id)
-                    if success:
-                        result_payload = result if isinstance(result, dict) else {'message': result}
-                        self._log_metric(thread_id, expense_data, result_payload, effective_employee)
-                        return {
-                            'message': f"✅ Your [PER_DIEM] request has been submitted! Expense ID: {result.get('id', 'N/A')}",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                    else:
-                        return {
-                            'message': f"❌ There was an error submitting your request: {result}",
-                            'thread_id': thread_id,
-                            'source': 'reimbursement_service'
-                        }
-                elif message.lower() in ['no', 'cancel', 'n', 'cancel_submit']:
-                    if self.session_manager:
-                        self.session_manager.clear_session(thread_id)
-                    return {
-                        'message': 'Per Diem request cancelled.',
-                        'thread_id': thread_id,
-                        'source': 'reimbursement_service'
-                    }
-                else:
-                    return self._show_per_diem_confirmation(expense_data, thread_id)
-
-            return {
-                'message': "I'm not sure how to handle that. Please try again or start a new reimbursement request.",
-                'thread_id': thread_id,
-                'source': 'reimbursement_service'
+                # Get results
+                currency_options, currency_error = currency_future.result()
+                destination_options, destination_error = destination_future.result()
+                analytic_options = analytic_future.result()  # Returns dict directly, not tuple
+            
+            # Handle errors gracefully
+            if currency_error:
+                self._log(f"Error fetching currency options: {currency_error}", "bot_logic")
+                currency_options = []
+            
+            if destination_error:
+                self._log(f"Error fetching destination options: {destination_error}", "bot_logic")
+                destination_options = []
+            
+            # analytic_options is a dict with 'project', 'market', 'pool' keys
+            if not isinstance(analytic_options, dict):
+                self._log(f"Error fetching analytic account options: Invalid format", "bot_logic")
+                analytic_options = {'project': [], 'market': [], 'pool': []}
+            
+            # Get default currency based on company
+            default_currency_code = self._get_default_currency_for_company(
+                {'id': employee_id} if employee_id else {}
+            )
+            
+            # Build category options
+            category_options = [
+                {'value': 'miscellaneous', 'label': 'Miscellaneous'},
+                {'value': 'per_diem', 'label': 'Per Diem'},
+                {'value': 'travel_accommodation', 'label': 'Travel & Accommodation'}
+            ]
+            
+            # Separate analytic options by plan (Project, Market, Pool)
+            project_options = analytic_options.get('project', [])
+            market_options = analytic_options.get('market', [])
+            pool_options = analytic_options.get('pool', [])
+            
+            return True, {
+                'category_options': category_options,
+                'currency_options': currency_options,
+                'destination_options': destination_options,
+                'project_options': project_options,
+                'market_options': market_options,
+                'pool_options': pool_options,
+                'default_currency': default_currency_code
             }
-
+            
         except Exception as e:
-            self._log(f"Error continuing reimbursement session: {e}", "general")
+            self._log(f"Error building reimbursement request form: {str(e)}", "general")
+            import traceback
+            traceback.print_exc()
+            return False, f"Error building form: {str(e)}"
+
+    def build_reimbursement_request_form_data(self, employee_id: int, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
+        """Build form widget data for reimbursement request.
+        
+        Returns widget data with category options, currency options, destination options, and analytic account options.
+        Similar structure to build_timeoff_request_form_data for consistency.
+        """
+        try:
+            # Fetch currency, destination, and analytic account options in parallel for better performance
+            import concurrent.futures
+            
+            def fetch_currency_options():
+                """Fetch currency options from Odoo"""
+                return self._get_currency_options(odoo_session_data)
+            
+            def fetch_destination_options():
+                """Fetch destination options from Odoo"""
+                return self._get_destination_options(odoo_session_data)
+            
+            def fetch_analytic_accounts():
+                """Fetch analytic account options from Odoo, separated by plan"""
+                return self._get_analytic_account_options_by_plan(odoo_session_data)
+            
+            # Execute API calls in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                currency_future = executor.submit(fetch_currency_options)
+                destination_future = executor.submit(fetch_destination_options)
+                analytic_future = executor.submit(fetch_analytic_accounts)
+                
+                # Get results
+                currency_options, currency_error = currency_future.result()
+                destination_options, destination_error = destination_future.result()
+                analytic_options = analytic_future.result()  # Returns dict directly, not tuple
+            
+            # Handle errors gracefully
+            if currency_error:
+                self._log(f"Error fetching currency options: {currency_error}", "bot_logic")
+                currency_options = []
+            
+            if destination_error:
+                self._log(f"Error fetching destination options: {destination_error}", "bot_logic")
+                destination_options = []
+            
+            # analytic_options is a dict with 'project', 'market', 'pool' keys
+            if not isinstance(analytic_options, dict):
+                self._log(f"Error fetching analytic account options: Invalid format", "bot_logic")
+                analytic_options = {'project': [], 'market': [], 'pool': []}
+            
+            # Get default currency based on company
+            default_currency_code = self._get_default_currency_for_company(
+                {'id': employee_id} if employee_id else {}
+            )
+            
+            # Build category options
+            category_options = [
+                {'value': 'miscellaneous', 'label': 'Miscellaneous'},
+                {'value': 'per_diem', 'label': 'Per Diem'},
+                {'value': 'travel_accommodation', 'label': 'Travel & Accommodation'}
+            ]
+            
+            # Separate analytic options by plan (Project, Market, Pool)
+            project_options = analytic_options.get('project', [])
+            market_options = analytic_options.get('market', [])
+            pool_options = analytic_options.get('pool', [])
+            
+            return True, {
+                'category_options': category_options,
+                'currency_options': currency_options,
+                'destination_options': destination_options,
+                'project_options': project_options,
+                'market_options': market_options,
+                'pool_options': pool_options,
+                'default_currency': default_currency_code
+            }
+            
+        except Exception as e:
+            self._log(f"Error building reimbursement request form: {str(e)}", "general")
+            import traceback
+            traceback.print_exc()
+            return False, f"Error building form: {str(e)}"
+
+    def _handle_reimbursement_form_submission(self, message: str, thread_id: str, employee_data: Dict, odoo_session_data: Dict = None) -> Dict:
+        """Handle reimbursement form submission - parse form data and show confirmation"""
+        try:
+            # Format: submit_reimbursement_request:CATEGORY|AMOUNT|CURRENCY_ID|DATE|DESTINATION_ID|LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
+            # ANALYTIC_DISTRIBUTION format: JSON string like '[{"account_id": 123, "percentage": 50}, {"account_id": 456, "percentage": 50}]'
+            # For Per Diem: submit_reimbursement_request:per_diem|||DD/MM/YYYY to DD/MM/YYYY|DESTINATION_ID|LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
+            # For Miscellaneous: submit_reimbursement_request:miscellaneous|AMOUNT|CURRENCY_ID|DD/MM/YYYY||LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
+            # For Travel & Accommodation: submit_reimbursement_request:travel_accommodation|AMOUNT|CURRENCY_ID|||LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
+            
+            parts = message.split(':', 1)
+            if len(parts) < 2:
+                return {
+                    'message': 'Invalid form submission format.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            data_parts = parts[1].split('|')
+            if len(data_parts) < 7:
+                return {
+                    'message': 'Invalid form data format.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            category = data_parts[0].strip()
+            amount_str = data_parts[1].strip()
+            currency_id_str = data_parts[2].strip()
+            date_str = data_parts[3].strip()
+            destination_id_str = data_parts[4].strip()
+            link = data_parts[5].strip()
+            description = data_parts[6].strip() if len(data_parts) > 6 else ''
+            analytic_distribution_str = data_parts[7].strip() if len(data_parts) > 7 else ''
+            
+            # Validate category
+            if category not in ['miscellaneous', 'per_diem', 'travel_accommodation']:
+                return {
+                    'message': 'Invalid category selected.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            # Parse and validate analytic distribution if provided
+            analytic_distribution = None
+            if analytic_distribution_str:
+                try:
+                    import json
+                    import urllib.parse
+                    # URL decode if needed
+                    decoded = urllib.parse.unquote(analytic_distribution_str)
+                    analytic_distribution = json.loads(decoded)
+                    # Validate it's a list
+                    if not isinstance(analytic_distribution, list) or len(analytic_distribution) == 0:
+                        return {
+                            'message': 'Invalid analytic distribution format. Must be a non-empty array.',
+                            'thread_id': thread_id,
+                            'source': 'reimbursement_service'
+                        }
+                    # Validate each line has project_id, market_id, pool_id
+                    for idx, item in enumerate(analytic_distribution):
+                        if not isinstance(item, dict):
+                            return {
+                                'message': f'Invalid analytic distribution entry at line {idx + 1}.',
+                                'thread_id': thread_id,
+                                'source': 'reimbursement_service'
+                            }
+                        if not item.get('project_id') or not item.get('market_id') or not item.get('pool_id'):
+                            return {
+                                'message': f'Line {idx + 1} must have project_id, market_id, and pool_id.',
+                                'thread_id': thread_id,
+                                'source': 'reimbursement_service'
+                            }
+                except json.JSONDecodeError as e:
+                    return {
+                        'message': 'Invalid analytic distribution JSON format.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service'
+                    }
+                except Exception as e:
+                    self._log(f"Error parsing analytic distribution: {e}", "bot_logic")
+                    return {
+                        'message': 'Error parsing analytic distribution. Please try again.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service'
+                    }
+            else:
+                # Analytic distribution is required
+                return {
+                    'message': 'Please fill in Analytic Distribution (Project, Market, and Pool). It is required for all reimbursement requests.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            # Build expense data based on category
+            expense_data = {'category': category}
+            if analytic_distribution:
+                expense_data['analytic_distribution'] = analytic_distribution
+            
+            if category == 'miscellaneous':
+                # Validate required fields
+                if not amount_str or not currency_id_str or not date_str:
+                    return {
+                        'message': 'Please fill in all required fields: Amount, Currency, and Expense Date.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service'
+                    }
+                try:
+                    amount = float(amount_str)
+                    if amount <= 0:
+                        return {
+                            'message': 'Amount must be greater than 0.',
+                            'thread_id': thread_id,
+                            'source': 'reimbursement_service'
+                        }
+                    expense_data['amount'] = amount
+                    expense_data['currency_id'] = int(currency_id_str)
+                    expense_data['date'] = date_str
+                    if link:
+                        expense_data['attached_link'] = link
+                    if description:
+                        expense_data['description'] = description
+                except ValueError:
+                    return {
+                        'message': 'Invalid amount format.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service'
+                    }
+            
+            elif category == 'per_diem':
+                # Validate required fields
+                if not date_str or not destination_id_str:
+                    return {
+                        'message': 'Please fill in all required fields: Date Range and Destination.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service'
+                    }
+                # Parse date range (format: "DD/MM/YYYY to DD/MM/YYYY")
+                date_parts = date_str.split(' to ')
+                if len(date_parts) != 2:
+                    return {
+                        'message': 'Invalid date range format. Please select a date range.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service'
+                    }
+                expense_data['per_diem_from'] = date_parts[0].strip()
+                expense_data['per_diem_to'] = date_parts[1].strip()
+                expense_data['per_diem_destination_id'] = int(destination_id_str)
+                if link:
+                    expense_data['attached_link'] = link
+                if description:
+                    expense_data['description'] = description
+            
+            elif category == 'travel_accommodation':
+                # Validate required fields
+                if not amount_str or not currency_id_str or not link:
+                    return {
+                        'message': 'Please fill in all required fields: Amount, Currency, and Link.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service'
+                    }
+                try:
+                    amount = float(amount_str)
+                    if amount <= 0:
+                        return {
+                            'message': 'Amount must be greater than 0.',
+                            'thread_id': thread_id,
+                            'source': 'reimbursement_service'
+                        }
+                    expense_data['amount'] = amount
+                    expense_data['currency_id'] = int(currency_id_str)
+                    expense_data['attached_link'] = link
+                    if description:
+                        expense_data['description'] = description
+                except ValueError:
+                    return {
+                        'message': 'Invalid amount format.',
+                        'thread_id': thread_id,
+                        'source': 'reimbursement_service'
+                    }
+            
+            # Store expense data in session for confirmation
+            if self.session_manager:
+                # Get existing session data to preserve it
+                existing_session = self.session_manager.get_session(thread_id)
+                existing_data = existing_session.get('data', {}) if existing_session else {}
+                
+                # Merge expense data into existing session data
+                updated_data = {
+                    **existing_data,
+                    'expense_data': expense_data,
+                    'employee_data': employee_data,
+                    'step': 'confirmation'
+                }
+                
+                # Update session with nested data structure
+                self.session_manager.update_session(thread_id, {'data': updated_data})
+            
+            # Build confirmation message
+            return self._build_reimbursement_confirmation_message(expense_data, thread_id, employee_data, odoo_session_data)
+            
+        except Exception as e:
+            self._log(f"Error handling reimbursement form submission: {e}", "general")
             import traceback
             traceback.print_exc()
             return {
-                'message': "I encountered an error processing your request. Please try again or contact HR for assistance.",
+                'message': 'An error occurred processing your form submission. Please try again.',
                 'thread_id': thread_id,
                 'source': 'reimbursement_service'
             }
 
-    def _show_confirmation(self, expense_data: Dict, thread_id: str) -> Dict:
-        """Show confirmation summary before submission"""
+    def _build_reimbursement_confirmation_message(self, expense_data: Dict, thread_id: str, employee_data: Dict, odoo_session_data: Dict = None) -> Dict:
+        """Build confirmation message for reimbursement request"""
         try:
-            category_display = self.expense_categories.get(expense_data.get('category', ''), 'Unknown')
-            amount = expense_data.get('amount', 0)
-            date = expense_data.get('date', '')
-            description = expense_data.get('description', '')
-            # Ensure Miscellaneous shows a sensible default if user didn't add one
-            try:
-                cat_key = (expense_data.get('category') or '').lower()
-                if (not description) and cat_key == 'miscellaneous':
-                    description = '[EXP_GEN] Miscellaneous'
-            except Exception:
-                pass
-            link = expense_data.get('attached_link', '')
+            category = expense_data.get('category', '')
+            category_display = self.expense_categories.get(category, category)
             
-            # Get currency name if currency_id is provided
-            currency_name = ''
-            currency_id = expense_data.get('currency_id')
-            if currency_id:
-                currency_name = self._resolve_currency_name(currency_id) or ''
+            confirmation_lines = [f"Almost there! Let's review your reimbursement request:\n"]
+            confirmation_lines.append(f"📂 **Category:** {category_display}\n")
             
-            # Format amount with currency
-            if currency_name:
-                amount_display = f"{amount:.2f} {currency_name}"
-            else:
-                amount_display = f"${amount:.2f}"
-
-            confirmation_text = f"""Almost there! Let's review your reimbursement request:
-
-📂 **Category:** {category_display}
-📝 **Description:** {description}
-💰 **Amount:** {amount_display}
-📅 **Date:** {date}
-🔗 **Receipt Link:** {link if link else 'None'}
-
-Do you want to submit this request? Reply or click 'Yes' to confirm or 'No' to cancel."""
-
+            if category == 'miscellaneous':
+                amount = expense_data.get('amount', 0)
+                currency_id = expense_data.get('currency_id')
+                currency_name = ''
+                if currency_id:
+                    currency_name = self._resolve_currency_name(currency_id, odoo_session_data) or ''
+                amount_display = f"{amount:.2f} {currency_name}" if currency_name else f"${amount:.2f}"
+                confirmation_lines.append(f"💰 **Amount:** {amount_display}\n")
+                confirmation_lines.append(f"📅 **Expense Date:** {expense_data.get('date', 'N/A')}\n")
+                if expense_data.get('attached_link'):
+                    confirmation_lines.append(f"🔗 **Link:** {expense_data.get('attached_link')}\n")
+                if expense_data.get('description'):
+                    confirmation_lines.append(f"📝 **Description:** {expense_data.get('description')}\n")
+            
+            elif category == 'per_diem':
+                confirmation_lines.append(f"📅 **Date Range:** {expense_data.get('per_diem_from', 'N/A')} to {expense_data.get('per_diem_to', 'N/A')}\n")
+                destination_id = expense_data.get('per_diem_destination_id')
+                destination_name = ''
+                if destination_id:
+                    destination_name = self._resolve_state_name(destination_id, odoo_session_data) or f"Destination ID: {destination_id}"
+                confirmation_lines.append(f"🗺️ **Destination:** {destination_name}\n")
+                if expense_data.get('attached_link'):
+                    confirmation_lines.append(f"🔗 **Link:** {expense_data.get('attached_link')}\n")
+                if expense_data.get('description'):
+                    confirmation_lines.append(f"📝 **Description:** {expense_data.get('description')}\n")
+            
+            elif category == 'travel_accommodation':
+                amount = expense_data.get('amount', 0)
+                currency_id = expense_data.get('currency_id')
+                currency_name = ''
+                if currency_id:
+                    currency_name = self._resolve_currency_name(currency_id, odoo_session_data) or ''
+                amount_display = f"{amount:.2f} {currency_name}" if currency_name else f"${amount:.2f}"
+                confirmation_lines.append(f"💰 **Amount:** {amount_display}\n")
+                confirmation_lines.append(f"🔗 **Link:** {expense_data.get('attached_link', 'N/A')}\n")
+                if expense_data.get('description'):
+                    confirmation_lines.append(f"📝 **Description:** {expense_data.get('description')}\n")
+            
+            # Add analytic distribution to confirmation
+            analytic_distribution = expense_data.get('analytic_distribution')
+            if analytic_distribution and isinstance(analytic_distribution, list):
+                confirmation_lines.append(f"📊 **Analytic Distribution:**\n")
+                for idx, item in enumerate(analytic_distribution):
+                    project_id = item.get('project_id')
+                    market_id = item.get('market_id')
+                    pool_id = item.get('pool_id')
+                    
+                    # Resolve account names
+                    def resolve_account_name(account_id):
+                        if not account_id or not odoo_session_data:
+                            return f"Account ID: {account_id}"
+                        try:
+                            params = {
+                                'args': [[account_id]],
+                                'kwargs': {'fields': ['name']}
+                            }
+                            success, result = self._make_odoo_request('account.analytic.account', 'read', params, odoo_session_data)
+                            if success and result:
+                                rec = result[0] if isinstance(result, list) else result
+                                return rec.get('name', f"Account ID: {account_id}")
+                        except Exception:
+                            pass
+                        return f"Account ID: {account_id}"
+                    
+                    project_name = resolve_account_name(project_id)
+                    market_name = resolve_account_name(market_id)
+                    pool_name = resolve_account_name(pool_id)
+                    
+                    if len(analytic_distribution) > 1:
+                        confirmation_lines.append(f"   **Line {idx + 1}:**\n")
+                    confirmation_lines.append(f"   • Project: {project_name}\n")
+                    confirmation_lines.append(f"   • Market: {market_name}\n")
+                    confirmation_lines.append(f"   • Pool: {pool_name}\n")
+            
+            confirmation_lines.append("\nDo you want to submit this request? Reply or click 'Yes' to confirm or 'No' to cancel.")
+            
             return {
-                'message': confirmation_text,
+                'message': ''.join(confirmation_lines),
                 'thread_id': thread_id,
                 'buttons': [
-                    {'text': 'Yes', 'value': 'confirm_submit', 'type': 'action_reimbursement'},
-                    {'text': 'No', 'value': 'cancel_submit', 'type': 'action_reimbursement'}
+                    {'text': 'Yes', 'value': 'reimbursement_confirm', 'type': 'action_reimbursement'},
+                    {'text': 'No', 'value': 'reimbursement_cancel', 'type': 'action_reimbursement'}
                 ],
+                'widgets': {
+                    'reimbursement_confirmation_data': expense_data
+                },
                 'source': 'reimbursement_service'
             }
-
+            
         except Exception as e:
-            self._log(f"Error showing confirmation: {e}", "general")
+            self._log(f"Error building confirmation message: {e}", "general")
             return {
-                'message': "Please confirm by typing 'Yes' to submit or 'No' to cancel.",
+                'message': 'Please confirm by typing "Yes" to submit or "No" to cancel.',
                 'thread_id': thread_id,
+                'buttons': [
+                    {'text': 'Yes', 'value': 'reimbursement_confirm', 'type': 'action_reimbursement'},
+                    {'text': 'No', 'value': 'reimbursement_cancel', 'type': 'action_reimbursement'}
+                ],
                 'source': 'reimbursement_service'
             }
 
-    def _show_supporting_additions(self, thread_id: str, category: str = None) -> Dict:
-        """Show the supporting additions bubble with Descriptions, Links, Next.
-        For Travel & Accommodation category, Links button is hidden."""
-        buttons = [
-            {'text': 'Descriptions', 'value': 'support_add_desc', 'type': 'action_reimbursement'},
-            {'text': 'Next', 'value': 'support_next', 'type': 'action_reimbursement'}
-        ]
-        
-        # Only show Links button if not Travel & Accommodation
-        if category != 'travel_accommodation':
-            buttons.insert(1, {'text': 'Links', 'value': 'support_add_link', 'type': 'action_reimbursement'})
-        
-        return {
-            'message': "Would you like to add any supporting additions?",
-            'thread_id': thread_id,
-            'buttons': buttons,
-            'source': 'reimbursement_service'
-        }
-
-    def _show_per_diem_confirmation(self, expense_data: Dict, thread_id: str) -> Dict:
-        """Confirmation bubble specific to PER_DIEM flow"""
+    def _handle_reimbursement_confirmation(self, thread_id: str, employee_data: Dict, odoo_session_data: Dict = None) -> Dict:
+        """Handle reimbursement confirmation - submit the request to Odoo with refresh token approach"""
         try:
-            category_display = self.expense_categories.get(expense_data.get('category', ''), '[PER_DIEM] Per Diem')
-            from_date = expense_data.get('per_diem_from', '-')
-            to_date = expense_data.get('per_diem_to', '-')
-            dest_name = expense_data.get('per_diem_destination_name', '-')
-            # Include optional description and link (default description if missing)
-            description = expense_data.get('description', '') if isinstance(expense_data.get('description'), str) else ''
-            description = description.strip() if description else ''
-            if not description:
-                description = '[PER_DIEM] Per Diem flow'
-            link = expense_data.get('attached_link', '')
-
-            msg = f"""Great! Here's a summary of your Per Diem request:
-
-📂 **Category:** {category_display}
-📝 **Description:** {description}
-📅 **From:** {from_date}
-📅 **To:** {to_date}
-🗺️ **Destination:** {dest_name}
-🔗 **Receipt Link:** {link if link else 'None'}
-
-Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to cancel"""
-
+            # Get expense data from session
+            active_session = self.session_manager.get_session(thread_id) if self.session_manager else None
+            if not active_session or active_session.get('type') != 'reimbursement':
+                return {
+                    'message': 'No active reimbursement session found. Please start a new request.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            session_data = active_session.get('data', {})
+            expense_data = session_data.get('expense_data', {})
+            
+            if not expense_data:
+                return {
+                    'message': 'Expense data not found. Please start a new request.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            # Validate employee data
+            if not employee_data or not isinstance(employee_data, dict) or not employee_data.get('id'):
+                return {
+                    'message': 'Employee data not found. Please refresh the page and try again.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            # Always get fresh Odoo session data (with refresh token if needed) - same approach as timeoff
+            # This ensures we have valid credentials even if session expired
+            odoo_session_data = self._get_fresh_odoo_session_data(odoo_session_data)
+            
+            # Create expense record
+            success, result, renewed_session = self.create_expense_record(employee_data, expense_data, odoo_session_data)
+            
+            # Update Flask session if session was renewed
+            if renewed_session:
+                try:
+                    from flask import session as flask_session
+                    flask_session['odoo_session_id'] = renewed_session['session_id']
+                    flask_session['user_id'] = renewed_session['user_id']
+                    flask_session.modified = True
+                except Exception:
+                    pass
+            
+            # Clear session
+            if self.session_manager:
+                self.session_manager.clear_session(thread_id)
+            
+            if success:
+                expense_id = result.get('id') if isinstance(result, dict) else result
+                self._log_metric(thread_id, expense_data, result if isinstance(result, dict) else {'id': expense_id}, employee_data)
+                return {
+                    'message': f"✅ Your reimbursement request has been submitted successfully! Expense ID: {expense_id}",
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            else:
+                return {
+                    'message': f"❌ There was an error submitting your reimbursement request: {result}",
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+                
+        except Exception as e:
+            self._log(f"Error handling reimbursement confirmation: {e}", "general")
+            import traceback
+            traceback.print_exc()
+            if self.session_manager:
+                self.session_manager.clear_session(thread_id)
             return {
-                'message': msg,
+                'message': 'An error occurred while submitting your request. Please try again.',
                 'thread_id': thread_id,
-                'buttons': [
-                    {'text': 'Yes', 'value': 'confirm_submit', 'type': 'action_reimbursement'},
-                    {'text': 'No', 'value': 'cancel_submit', 'type': 'action_reimbursement'}
-                ],
-                'source': 'reimbursement_service'
-            }
-        except Exception:
-            return {
-                'message': "Confirm submission?",
-                'thread_id': thread_id,
-                'buttons': [
-                    {'text': 'Yes', 'value': 'confirm_submit', 'type': 'action_reimbursement'},
-                    {'text': 'No', 'value': 'cancel_submit', 'type': 'action_reimbursement'}
-                ],
                 'source': 'reimbursement_service'
             }
 
@@ -2033,7 +1848,7 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
             self._log(f"Error determining default currency: {e}", "bot_logic")
             return None
 
-    def _get_currency_options(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    def _get_currency_options(self, odoo_session_data: Dict = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Fetch currency options from res.currency for dropdown.
         Returns (options, error_message) where options is a list of {label, value}.
         """
@@ -2046,7 +1861,7 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
                     'order': 'name asc'
                 }
             }
-            success, result = self._make_odoo_request('res.currency', 'search_read', params)
+            success, result = self._make_odoo_request('res.currency', 'search_read', params, odoo_session_data)
             if not success:
                 return [], str(result)
             options = [{'label': r.get('name') or f"Currency {r.get('id')}", 'value': r.get('id')} for r in (result or [])]
@@ -2054,14 +1869,14 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
         except Exception as e:
             return [], str(e)
 
-    def _resolve_currency_name(self, currency_id: int) -> Optional[str]:
+    def _resolve_currency_name(self, currency_id: int, odoo_session_data: Dict = None) -> Optional[str]:
         """Resolve currency name from currency_id"""
         try:
             params = {
                 'args': [[currency_id]],
                 'kwargs': {'fields': ['name']}
             }
-            success, result = self._make_odoo_request('res.currency', 'read', params)
+            success, result = self._make_odoo_request('res.currency', 'read', params, odoo_session_data)
             if success and result:
                 rec = result[0] if isinstance(result, list) else result
                 return rec.get('name')
@@ -2069,7 +1884,7 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
         except Exception:
             return None
 
-    def _get_destination_options(self) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    def _get_destination_options(self, odoo_session_data: Dict = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Fetch destination options from res.country.state for dropdown.
         Returns (options, error_message) where options is a list of {label, value}.
         """
@@ -2082,7 +1897,7 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
                     'order': 'name asc'
                 }
             }
-            success, result = self._make_odoo_request('res.country.state', 'search_read', params)
+            success, result = self._make_odoo_request('res.country.state', 'search_read', params, odoo_session_data)
             if not success:
                 return [], str(result)
             options = [{'label': r.get('name') or f"State {r.get('id')}", 'value': r.get('id')} for r in (result or [])]
@@ -2090,13 +1905,13 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
         except Exception as e:
             return [], str(e)
 
-    def _resolve_state_name(self, state_id: int) -> Optional[str]:
+    def _resolve_state_name(self, state_id: int, odoo_session_data: Dict = None) -> Optional[str]:
         try:
             params = {
                 'args': [[state_id]],
                 'kwargs': {'fields': ['name']}
             }
-            success, result = self._make_odoo_request('res.country.state', 'read', params)
+            success, result = self._make_odoo_request('res.country.state', 'read', params, odoo_session_data)
             if success and result:
                 rec = result[0] if isinstance(result, list) else result
                 return rec.get('name')
@@ -2104,46 +1919,63 @@ Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to c
         except Exception:
             return None
 
-    def _show_ta_confirmation(self, expense_data: Dict, thread_id: str) -> Dict:
-        """Confirmation summary for Travel & Accommodation flow"""
-        category_display = self.expense_categories.get(expense_data.get('category', ''), '[TRANS & ACC] Travel & Accommodation')
-        amount = expense_data.get('amount', 0)
-        date = expense_data.get('date', datetime.now().strftime('%d/%m/%Y'))
-        # Default description when none provided
-        raw_desc = expense_data.get('description', '')
-        description = raw_desc.strip() if isinstance(raw_desc, str) else ''
-        if not description:
-            description = '[TRANS & ACC] Travel & Accommodation'
-        link = expense_data.get('attached_link', '')
-        
-        # Get currency name if currency_id is provided
-        currency_name = ''
-        currency_id = expense_data.get('currency_id')
-        if currency_id:
-            currency_name = self._resolve_currency_name(currency_id) or ''
-        
-        # Format amount with currency
-        if currency_name:
-            amount_display = f"{amount:.2f} {currency_name}"
-        else:
-            amount_display = f"${amount:.2f}"
+    def _get_analytic_account_options_by_plan(self, odoo_session_data: Dict = None) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch analytic account options from account.analytic.account, separated by plan.
+        Returns dict with 'project', 'market', 'pool' keys, each containing a list of {label, value}.
+        """
+        try:
+            # First, resolve plan names to IDs
+            plan_names = {
+                'project': 'Projects [Archive]',
+                'market': 'Market',
+                'pool': 'Pool'
+            }
+            
+            plan_ids = {}
+            for key, plan_name in plan_names.items():
+                params = {
+                    'args': [[('name', '=', plan_name)]],
+                    'kwargs': {
+                        'fields': ['id', 'name'],
+                        'limit': 1
+                    }
+                }
+                success, result = self._make_odoo_request('account.analytic.plan', 'search_read', params, odoo_session_data)
+                if success and result and len(result) > 0:
+                    plan_ids[key] = result[0].get('id')
+                else:
+                    self._log(f"Could not find plan '{plan_name}'", "bot_logic")
+                    plan_ids[key] = None
+            
+            # Fetch accounts for each plan
+            result_dict = {'project': [], 'market': [], 'pool': []}
+            
+            for key, plan_id in plan_ids.items():
+                if not plan_id:
+                    continue
+                
+                params = {
+                    'args': [[('plan_id', '=', plan_id)]],
+                    'kwargs': {
+                        'fields': ['id', 'name'],
+                        'limit': 2000,
+                        'order': 'name asc'
+                    }
+                }
+                success, accounts = self._make_odoo_request('account.analytic.account', 'search_read', params, odoo_session_data)
+                if success and accounts:
+                    result_dict[key] = [
+                        {'label': r.get('name') or f"Analytic Account {r.get('id')}", 'value': r.get('id')} 
+                        for r in accounts
+                    ]
+                else:
+                    self._log(f"Error fetching accounts for plan '{key}': {accounts if not success else 'No accounts found'}", "bot_logic")
+            
+            return result_dict
+            
+        except Exception as e:
+            self._log(f"Error fetching analytic account options by plan: {e}", "bot_logic")
+            import traceback
+            traceback.print_exc()
+            return {'project': [], 'market': [], 'pool': []}
 
-        msg = f"""Great! Here's a summary of your Travel & Accommodation request:
-
-📂 **Category:** {category_display}
-📝 **Description:** {description}
-💰 **Amount:** {amount_display}
-📅 **Date:** {date}
-🔗 **Receipt Link:** {link if link else 'None'}
-
-Do you want to submit this request? Reply or click 'yes' to confirm or 'no' to cancel"""
-
-        return {
-            'message': msg,
-            'thread_id': thread_id,
-            'buttons': [
-                {'text': 'Yes', 'value': 'confirm_submit', 'type': 'action_reimbursement'},
-                {'text': 'No', 'value': 'cancel_submit', 'type': 'action_reimbursement'}
-            ],
-            'source': 'reimbursement_service'
-        }

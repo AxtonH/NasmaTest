@@ -240,7 +240,7 @@ def create_app():
         from .services.reimbursement_service import ReimbursementService
     except Exception:
         from services.reimbursement_service import ReimbursementService
-    reimbursement_service = ReimbursementService(odoo_service, employee_service, metrics_service=metrics_service)
+    reimbursement_service = ReimbursementService(odoo_service, employee_service, metrics_service=metrics_service, auth_token_service=auth_token_service)
     reimbursement_service.session_manager = session_manager
     
     # Initialize leave balance service
@@ -3767,7 +3767,9 @@ def create_app():
                                     })
                     elif intent == 'reimbursement_request' and confidence >= 0.5:
                         # Handle reimbursement request through the reimbursement service
-                        reimb_resp = reimbursement_service.handle_flow(message, thread_id, employee_data or {})
+                        # Get Odoo session data to pass to reimbursement service for stateless requests
+                        odoo_session_data = get_odoo_session_data()
+                        reimb_resp = reimbursement_service.handle_flow(message, thread_id, employee_data or {}, odoo_session_data)
                         if reimb_resp:
                             resp_thread = reimb_resp.get('thread_id') or thread_id
                             assistant_text = reimb_resp.get('message', '')

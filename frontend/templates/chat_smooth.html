@@ -3776,6 +3776,368 @@
                             });
                         }
                     }, 0);
+                } else if (buttons && buttons.widgets && buttons.widgets.reimbursement_request_form) {
+                    // Reimbursement request form widget (all fields in one bubble)
+                    const wid = `rrf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
+                    const categoryId = `${wid}_category`;
+                    const amountId = `${wid}_amount`;
+                    const currencyId = `${wid}_currency`;
+                    const dateId = `${wid}_date`;
+                    const dateFromId = `${wid}_date_from`;
+                    const dateToId = `${wid}_date_to`;
+                    const destinationId = `${wid}_destination`;
+                    const linkId = `${wid}_link`;
+                    const descriptionId = `${wid}_description`;
+                    const submitId = `${wid}_submit`;
+                    
+                    const categoryOptions = Array.isArray(buttons.widgets.category_options) ? buttons.widgets.category_options : [];
+                    const currencyOptions = Array.isArray(buttons.widgets.currency_options) ? buttons.widgets.currency_options : [];
+                    const destinationOptions = Array.isArray(buttons.widgets.destination_options) ? buttons.widgets.destination_options : [];
+                    // Get separate options for Project, Market, Pool (filtered by plan)
+                    const projectOptions = Array.isArray(buttons.widgets.project_options) ? buttons.widgets.project_options : [];
+                    const marketOptions = Array.isArray(buttons.widgets.market_options) ? buttons.widgets.market_options : [];
+                    const poolOptions = Array.isArray(buttons.widgets.pool_options) ? buttons.widgets.pool_options : [];
+                    
+                    // Find default currency
+                    let defaultCurrencyValue = '';
+                    const defaultCurrencyCode = buttons.widgets.default_currency;
+                    if (defaultCurrencyCode) {
+                        const defaultOption = currencyOptions.find(o => o.label && o.label.toUpperCase() === defaultCurrencyCode.toUpperCase());
+                        if (defaultOption) {
+                            defaultCurrencyValue = defaultOption.value;
+                        }
+                    }
+                    
+                    const categoryOptsHtml = `<option value="" disabled selected>Select category</option>` +
+                        categoryOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+                    
+                    const currencyOptsHtml = [`<option value="" disabled ${!defaultCurrencyValue ? 'selected' : ''}>Select currency</option>`]
+                        .concat(currencyOptions.map(o => {
+                            const isSelected = defaultCurrencyValue && String(o.value) === String(defaultCurrencyValue) ? 'selected' : '';
+                            return `<option value="${escapeHtml(o.value)}" ${isSelected}>${escapeHtml(o.label)}</option>`;
+                        }))
+                        .join('');
+                    
+                    const destinationOptsHtml = `<option value="" disabled selected>Select destination</option>` +
+                        destinationOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+                    
+                    const projectOptsHtml = `<option value="" disabled selected>Select project</option>` +
+                        projectOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+                    
+                    const marketOptsHtml = `<option value="" disabled selected>Select market</option>` +
+                        marketOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+                    
+                    const poolOptsHtml = `<option value="" disabled selected>Select pool</option>` +
+                        poolOptions.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+                    
+                    widgetsHtml = `
+                        <div class="mt-3 flex flex-col items-start gap-3 px-4 py-3 w-full reimbursement-form-container" style="box-sizing: border-box; overflow: visible;">
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Category:</label>
+                                <select id="${categoryId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                    ${categoryOptsHtml}
+                                </select>
+                            </div>
+                            
+                            <!-- Analytic Distribution field (required for all categories) -->
+                            <div id="${wid}_analytic_distribution" class="flex flex-col gap-3 w-full" style="box-sizing: border-box;">
+                                <div class="flex items-start justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0 pt-2" style="width: 100px;">Analytic Distribution:</label>
+                                    <div class="flex-1 min-w-0 flex flex-col gap-3" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                        <!-- Single line with Project, Market, Pool -->
+                                        <div class="flex flex-col gap-2 p-3 border border-gray-300 rounded-lg bg-white">
+                                            <div class="flex gap-2 items-center">
+                                                <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Project:</label>
+                                                <select id="${wid}_analytic_project" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
+                                                    ${projectOptsHtml}
+                                                </select>
+                                            </div>
+                                            <div class="flex gap-2 items-center">
+                                                <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Market:</label>
+                                                <select id="${wid}_analytic_market" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
+                                                    ${marketOptsHtml}
+                                                </select>
+                                            </div>
+                                            <div class="flex gap-2 items-center">
+                                                <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Pool:</label>
+                                                <select id="${wid}_analytic_pool" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
+                                                    ${poolOptsHtml}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Miscellaneous fields -->
+                            <div id="${wid}_misc_fields" class="flex flex-col gap-3 w-full" style="display: none;">
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Amount:</label>
+                                    <div class="flex gap-2 flex-1 min-w-0">
+                                        <input type="number" id="${amountId}" step="0.01" min="0" placeholder="Amount" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;" />
+                                        <select id="${currencyId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" style="min-width: 90px;">
+                                            ${currencyOptsHtml}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Expense Date:</label>
+                                    <input type="text" id="${dateId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select date" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Link (optional):</label>
+                                    <input type="url" id="${linkId}" placeholder="https://example.com/receipt" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description (optional):</label>
+                                    <input type="text" id="${descriptionId}" placeholder="Description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                            </div>
+                            
+                            <!-- Per Diem fields -->
+                            <div id="${wid}_per_diem_fields" class="flex flex-col gap-3 w-full" style="display: none;">
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Date Range:</label>
+                                    <input type="text" id="${dateFromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select start date" style="box-sizing: border-box; max-width: calc(50% - 60px);" />
+                                    <span class="text-gray-500">to</span>
+                                    <input type="text" id="${dateToId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" placeholder="Select end date" style="box-sizing: border-box; max-width: calc(50% - 60px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Destination:</label>
+                                    <select id="${destinationId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);">
+                                        ${destinationOptsHtml}
+                                    </select>
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Link (optional):</label>
+                                    <input type="url" id="${linkId}_pd" placeholder="https://example.com/receipt" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description (optional):</label>
+                                    <input type="text" id="${descriptionId}_pd" placeholder="Description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                            </div>
+                            
+                            <!-- Travel & Accommodation fields -->
+                            <div id="${wid}_ta_fields" class="flex flex-col gap-3 w-full" style="display: none;">
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Amount:</label>
+                                    <div class="flex gap-2 flex-1 min-w-0">
+                                        <input type="number" id="${amountId}_ta" step="0.01" min="0" placeholder="Amount" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box;" />
+                                        <select id="${currencyId}_ta" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" style="min-width: 90px;">
+                                            ${currencyOptsHtml}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Link:</label>
+                                    <input type="url" id="${linkId}_ta" placeholder="https://example.com/receipt" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description (optional):</label>
+                                    <input type="text" id="${descriptionId}_ta" placeholder="Description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                                </div>
+                            </div>
+                            
+                            <button id="${submitId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient text-white transition-colors">Apply</button>
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        const categoryEl = document.getElementById(categoryId);
+                        const amountEl = document.getElementById(amountId);
+                        const currencyEl = document.getElementById(currencyId);
+                        const dateEl = document.getElementById(dateId);
+                        const dateFromEl = document.getElementById(dateFromId);
+                        const dateToEl = document.getElementById(dateToId);
+                        const destinationEl = document.getElementById(destinationId);
+                        const linkEl = document.getElementById(linkId);
+                        const descriptionEl = document.getElementById(descriptionId);
+                        const amountTaEl = document.getElementById(`${amountId}_ta`);
+                        const currencyTaEl = document.getElementById(`${currencyId}_ta`);
+                        const linkTaEl = document.getElementById(`${linkId}_ta`);
+                        const descriptionTaEl = document.getElementById(`${descriptionId}_ta`);
+                        const linkPdEl = document.getElementById(`${linkId}_pd`);
+                        const descriptionPdEl = document.getElementById(`${descriptionId}_pd`);
+                        const submitBtn = document.getElementById(submitId);
+                        
+                        const miscFields = document.getElementById(`${wid}_misc_fields`);
+                        const perDiemFields = document.getElementById(`${wid}_per_diem_fields`);
+                        const taFields = document.getElementById(`${wid}_ta_fields`);
+                        
+                        // Handle category change - show/hide relevant fields
+                        if (categoryEl) {
+                            categoryEl.addEventListener('change', () => {
+                                const category = categoryEl.value;
+                                // Hide all fields first
+                                if (miscFields) miscFields.style.display = 'none';
+                                if (perDiemFields) perDiemFields.style.display = 'none';
+                                if (taFields) taFields.style.display = 'none';
+                                
+                                // Show relevant fields based on category
+                                if (category === 'miscellaneous' && miscFields) {
+                                    miscFields.style.display = 'flex';
+                                } else if (category === 'per_diem' && perDiemFields) {
+                                    perDiemFields.style.display = 'flex';
+                                } else if (category === 'travel_accommodation' && taFields) {
+                                    taFields.style.display = 'flex';
+                                }
+                            });
+                        }
+                        
+                        // Initialize flatpickr for date inputs
+                        const initDatePicker = (el) => {
+                            if (el && window.flatpickr) {
+                                window.flatpickr(`#${el.id}`, {
+                                    dateFormat: 'd/m/Y',
+                                    static: false,
+                                    appendTo: document.body,
+                                    onChange: (selectedDates) => {
+                                        if (Array.isArray(selectedDates) && selectedDates.length > 0) {
+                                            const d = selectedDates[0];
+                                            const dd = String(d.getDate()).padStart(2,'0');
+                                            const mm = String(d.getMonth()+1).padStart(2,'0');
+                                            const yyyy = d.getFullYear();
+                                            el.value = `${dd}/${mm}/${yyyy}`;
+                                        }
+                                    },
+                                    onOpen: function() {
+                                        setTimeout(() => {
+                                            const cal = document.querySelector('.flatpickr-calendar');
+                                            if (cal) {
+                                                cal.style.zIndex = '2147483647';
+                                                cal.style.position = 'fixed';
+                                            }
+                                            const chatContainer = document.querySelector('#conversationState main');
+                                            if (chatContainer) {
+                                                chatContainer.scrollTo({
+                                                    top: chatContainer.scrollHeight,
+                                                    behavior: 'smooth'
+                                                });
+                                            }
+                                        }, 10);
+                                    }
+                                });
+                            }
+                        };
+                        
+                        // Initialize date pickers
+                        if (dateEl) initDatePicker(dateEl);
+                        if (dateFromEl) initDatePicker(dateFromEl);
+                        if (dateToEl) initDatePicker(dateToEl);
+                        
+                        // Analytic Distribution widget logic - get dropdowns
+                        const analyticProjectSelect = document.getElementById(`${wid}_analytic_project`);
+                        const analyticMarketSelect = document.getElementById(`${wid}_analytic_market`);
+                        const analyticPoolSelect = document.getElementById(`${wid}_analytic_pool`);
+                        
+                        // Handle form submission
+                        if (submitBtn) {
+                            submitBtn.addEventListener('click', () => {
+                                const category = categoryEl ? categoryEl.value : '';
+                                
+                                if (!category) {
+                                    alert('Please select a category.');
+                                    return;
+                                }
+                                
+                                let formData = {
+                                    category: category,
+                                    amount: '',
+                                    currency_id: '',
+                                    date: '',
+                                    date_from: '',
+                                    date_to: '',
+                                    destination_id: '',
+                                    link: '',
+                                    description: ''
+                                };
+                                
+                                if (category === 'miscellaneous') {
+                                    const amount = amountEl ? amountEl.value.trim() : '';
+                                    const currency = currencyEl ? currencyEl.value : '';
+                                    const date = dateEl ? dateEl.value.trim() : '';
+                                    const link = linkEl ? linkEl.value.trim() : '';
+                                    const desc = descriptionEl ? descriptionEl.value.trim() : '';
+                                    
+                                    if (!amount || !currency || !date) {
+                                        alert('Please fill in all required fields: Amount, Currency, and Expense Date.');
+                                        return;
+                                    }
+                                    
+                                    formData.amount = amount;
+                                    formData.currency_id = currency;
+                                    formData.date = date;
+                                    formData.link = link;
+                                    formData.description = desc;
+                                    
+                                } else if (category === 'per_diem') {
+                                    const dateFrom = dateFromEl ? dateFromEl.value.trim() : '';
+                                    const dateTo = dateToEl ? dateToEl.value.trim() : '';
+                                    const destination = destinationEl ? destinationEl.value : '';
+                                    const link = linkPdEl ? linkPdEl.value.trim() : '';
+                                    const desc = descriptionPdEl ? descriptionPdEl.value.trim() : '';
+                                    
+                                    if (!dateFrom || !dateTo || !destination) {
+                                        alert('Please fill in all required fields: Date Range and Destination.');
+                                        return;
+                                    }
+                                    
+                                    formData.date_from = dateFrom;
+                                    formData.date_to = dateTo;
+                                    formData.destination_id = destination;
+                                    formData.link = link;
+                                    formData.description = desc;
+                                    
+                                } else if (category === 'travel_accommodation') {
+                                    const amount = amountTaEl ? amountTaEl.value.trim() : '';
+                                    const currency = currencyTaEl ? currencyTaEl.value : '';
+                                    const link = linkTaEl ? linkTaEl.value.trim() : '';
+                                    const desc = descriptionTaEl ? descriptionTaEl.value.trim() : '';
+                                    
+                                    if (!amount || !currency || !link) {
+                                        alert('Please fill in all required fields: Amount, Currency, and Link.');
+                                        return;
+                                    }
+                                    
+                                    formData.amount = amount;
+                                    formData.currency_id = currency;
+                                    formData.link = link;
+                                    formData.description = desc;
+                                }
+                                
+                                // Validate analytic distribution
+                                const projectId = analyticProjectSelect ? analyticProjectSelect.value : '';
+                                const marketId = analyticMarketSelect ? analyticMarketSelect.value : '';
+                                const poolId = analyticPoolSelect ? analyticPoolSelect.value : '';
+                                
+                                if (!projectId || !marketId || !poolId) {
+                                    alert('Please select Project, Market, and Pool for Analytic Distribution.');
+                                    return;
+                                }
+                                
+                                // Format analytic distribution as JSON - single line with project, market, pool
+                                const analyticDistJson = JSON.stringify([{
+                                    project_id: parseInt(projectId),
+                                    market_id: parseInt(marketId),
+                                    pool_id: parseInt(poolId)
+                                }]);
+                                
+                                // Format: submit_reimbursement_request:CATEGORY|AMOUNT|CURRENCY_ID|DATE|DESTINATION_ID|LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
+                                const outgoing = `submit_reimbursement_request:${formData.category}|${formData.amount}|${formData.currency_id}|${formData.date || (formData.date_from && formData.date_to ? `${formData.date_from} to ${formData.date_to}` : '')}|${formData.destination_id}|${formData.link}|${formData.description}|${encodeURIComponent(analyticDistJson)}`;
+                                
+                                // Show user-friendly message in chat
+                                let userMsg = `Reimbursement Request: ${categoryOptions.find(o => o.value === category)?.label || category}`;
+                                if (formData.amount) userMsg += `, Amount: ${formData.amount}`;
+                                if (formData.date) userMsg += `, Date: ${formData.date}`;
+                                if (formData.date_from && formData.date_to) userMsg += `, Dates: ${formData.date_from} to ${formData.date_to}`;
+                                addMessageToChat(userMsg, true);
+                                conversationHistory.push({role: 'user', content: userMsg});
+                                
+                                // Send to backend
+                                sendToBackend(outgoing);
+                            });
+                        }
+                    }, 0);
                 } else if (buttons && buttons.widgets && buttons.widgets.reimbursement_amount_form) {
                     // Reimbursement amount form widget (amount input, currency dropdown, apply button)
                     const wid = `raf_${Date.now()}_${Math.floor(Math.random()*10000)}`;
