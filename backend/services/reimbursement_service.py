@@ -1857,7 +1857,7 @@ class ReimbursementService:
         try:
             # First, resolve plan names to IDs
             plan_names = {
-                'project': 'Projects [Archive]',
+                'project': 'Projects',  # Updated: Live database uses "Projects" not "Projects [Archive]"
                 'market': 'Market',
                 'pool': 'Pool'
             }
