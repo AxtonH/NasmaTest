@@ -542,8 +542,25 @@ class ReimbursementService:
             def _submit_expense(expense_id: int) -> Tuple[bool, str, Optional[Dict]]:
                 """Submit expense through the two-step process to reach 'Submitted' status."""
                 try:
+                    # DEBUG: Check initial expense state before submission
+                    self._log(f"[REIMBURSEMENT DEBUG] Starting submission for expense #{expense_id}", "bot_logic")
+                    params_check_initial = {
+                        'args': [[expense_id]],
+                        'kwargs': {'fields': ['state', 'name', 'employee_id', 'sheet_id']}
+                    }
+                    ok_check_initial, res_check_initial, renewed_check_initial = _make_request('hr.expense', 'read', params_check_initial)
+                    if renewed_check_initial:
+                        odoo_session_data.update(renewed_check_initial)
+                    if ok_check_initial and res_check_initial:
+                        expense_initial = res_check_initial[0] if isinstance(res_check_initial, list) else res_check_initial
+                        initial_state = expense_initial.get('state', 'unknown')
+                        initial_sheet_id = expense_initial.get('sheet_id')
+                        self._log(f"[REIMBURSEMENT DEBUG] Initial expense state: '{initial_state}', sheet_id: {initial_sheet_id}", "bot_logic")
+                    else:
+                        self._log(f"[REIMBURSEMENT DEBUG] Failed to read initial expense state: {res_check_initial}", "bot_logic")
+                    
                     # Step 1: Call action_submit_expenses on hr.expense to create report/sheet
-                    self._log(f"Step 1: Calling action_submit_expenses on expense #{expense_id}", "bot_logic")
+                    self._log(f"[REIMBURSEMENT DEBUG] Step 1: Calling action_submit_expenses on expense #{expense_id}", "bot_logic")
                     params_submit_expenses = {
                         'args': [[expense_id]],
                         'kwargs': {}
@@ -555,36 +572,67 @@ class ReimbursementService:
                         odoo_session_data.update(renewed_submit_expenses)
                     
                     if not ok_submit_expenses:
-                        self._log(f"action_submit_expenses failed: {res_submit_expenses}", "bot_logic")
+                        self._log(f"[REIMBURSEMENT DEBUG] ❌ action_submit_expenses FAILED for expense #{expense_id}: {res_submit_expenses}", "bot_logic")
+                        # Check expense state after failure
+                        params_check_fail = {
+                            'args': [[expense_id]],
+                            'kwargs': {'fields': ['state', 'sheet_id']}
+                        }
+                        ok_check_fail, res_check_fail, _ = _make_request('hr.expense', 'read', params_check_fail)
+                        if ok_check_fail and res_check_fail:
+                            expense_fail = res_check_fail[0] if isinstance(res_check_fail, list) else res_check_fail
+                            fail_state = expense_fail.get('state', 'unknown')
+                            self._log(f"[REIMBURSEMENT DEBUG] Expense state after action_submit_expenses failure: '{fail_state}'", "bot_logic")
                         return False, f"Failed to submit expenses: {res_submit_expenses}", renewed_submit_expenses
                     
-                    # Step 2: Read expense to get sheet_id
-                    self._log(f"Step 2: Reading expense #{expense_id} to get sheet_id", "bot_logic")
+                    self._log(f"[REIMBURSEMENT DEBUG] ✅ action_submit_expenses succeeded for expense #{expense_id}", "bot_logic")
+                    
+                    # Step 2: Read expense to get sheet_id and check state
+                    self._log(f"[REIMBURSEMENT DEBUG] Step 2: Reading expense #{expense_id} to get sheet_id and state", "bot_logic")
                     params_read = {
                         'args': [[expense_id]],
-                        'kwargs': {'fields': ['sheet_id']}
+                        'kwargs': {'fields': ['sheet_id', 'state', 'name']}
                     }
                     ok_read, res_read, renewed_read = _make_request('hr.expense', 'read', params_read)
                     if renewed_read:
                         odoo_session_data.update(renewed_read)
                     
                     if not ok_read or not res_read:
-                        self._log(f"Failed to read expense: {res_read}", "bot_logic")
+                        self._log(f"[REIMBURSEMENT DEBUG] ❌ Failed to read expense #{expense_id} after action_submit_expenses: {res_read}", "bot_logic")
                         return False, f"Failed to read expense: {res_read}", renewed_read
                     
-                    # Extract sheet_id from read result
+                    # Extract sheet_id and state from read result
                     expense_record = res_read[0] if isinstance(res_read, list) else res_read
                     sheet_id_val = expense_record.get('sheet_id')
+                    expense_state_after_submit = expense_record.get('state', 'unknown')
+                    
+                    self._log(f"[REIMBURSEMENT DEBUG] Expense state after action_submit_expenses: '{expense_state_after_submit}', sheet_id: {sheet_id_val}", "bot_logic")
                     
                     if not sheet_id_val:
-                        self._log(f"No sheet_id found for expense #{expense_id}", "bot_logic")
-                        return False, "No expense sheet found after submission", renewed_read
+                        self._log(f"[REIMBURSEMENT DEBUG] ❌ No sheet_id found for expense #{expense_id} after action_submit_expenses. State: '{expense_state_after_submit}'", "bot_logic")
+                        return False, f"No expense sheet found after submission. Expense state: '{expense_state_after_submit}'", renewed_read
                     
                     # sheet_id_val might be a list [id, name] or just an id
                     sheet_id = sheet_id_val[0] if isinstance(sheet_id_val, (list, tuple)) else sheet_id_val
+                    self._log(f"[REIMBURSEMENT DEBUG] Extracted sheet_id: {sheet_id}", "bot_logic")
+                    
+                    # DEBUG: Check sheet state before submitting
+                    params_check_sheet = {
+                        'args': [[sheet_id]],
+                        'kwargs': {'fields': ['state', 'name', 'expense_line_ids']}
+                    }
+                    ok_check_sheet, res_check_sheet, renewed_check_sheet = _make_request('hr.expense.sheet', 'read', params_check_sheet)
+                    if renewed_check_sheet:
+                        odoo_session_data.update(renewed_check_sheet)
+                    if ok_check_sheet and res_check_sheet:
+                        sheet_before = res_check_sheet[0] if isinstance(res_check_sheet, list) else res_check_sheet
+                        sheet_state_before = sheet_before.get('state', 'unknown')
+                        self._log(f"[REIMBURSEMENT DEBUG] Sheet #{sheet_id} state before action_submit_sheet: '{sheet_state_before}'", "bot_logic")
+                    else:
+                        self._log(f"[REIMBURSEMENT DEBUG] Failed to read sheet state before submission: {res_check_sheet}", "bot_logic")
                     
                     # Step 3: Call action_submit_sheet on hr.expense.sheet
-                    self._log(f"Step 3: Calling action_submit_sheet on sheet #{sheet_id}", "bot_logic")
+                    self._log(f"[REIMBURSEMENT DEBUG] Step 3: Calling action_submit_sheet on sheet #{sheet_id}", "bot_logic")
                     params_submit_sheet = {
                         'args': [[sheet_id]],
                         'kwargs': {}
@@ -596,14 +644,84 @@ class ReimbursementService:
                         odoo_session_data.update(renewed_submit_sheet)
                     
                     if not ok_submit_sheet:
-                        self._log(f"action_submit_sheet failed: {res_submit_sheet}", "bot_logic")
+                        self._log(f"[REIMBURSEMENT DEBUG] ❌ action_submit_sheet FAILED for sheet #{sheet_id}: {res_submit_sheet}", "bot_logic")
+                        # Check both sheet and expense states after failure
+                        params_check_sheet_fail = {
+                            'args': [[sheet_id]],
+                            'kwargs': {'fields': ['state']}
+                        }
+                        ok_sheet_fail, res_sheet_fail, _ = _make_request('hr.expense.sheet', 'read', params_check_sheet_fail)
+                        if ok_sheet_fail and res_sheet_fail:
+                            sheet_fail = res_sheet_fail[0] if isinstance(res_sheet_fail, list) else res_sheet_fail
+                            sheet_state_fail = sheet_fail.get('state', 'unknown')
+                            self._log(f"[REIMBURSEMENT DEBUG] Sheet state after action_submit_sheet failure: '{sheet_state_fail}'", "bot_logic")
+                        
+                        params_check_expense_fail = {
+                            'args': [[expense_id]],
+                            'kwargs': {'fields': ['state']}
+                        }
+                        ok_expense_fail, res_expense_fail, _ = _make_request('hr.expense', 'read', params_check_expense_fail)
+                        if ok_expense_fail and res_expense_fail:
+                            expense_fail = res_expense_fail[0] if isinstance(res_expense_fail, list) else res_expense_fail
+                            expense_state_fail = expense_fail.get('state', 'unknown')
+                            self._log(f"[REIMBURSEMENT DEBUG] Expense state after action_submit_sheet failure: '{expense_state_fail}'", "bot_logic")
+                        
                         return False, f"Failed to submit sheet: {res_submit_sheet}", renewed_submit_sheet
                     
-                    self._log(f"Successfully submitted expense #{expense_id} to 'Submitted' status", "bot_logic")
-                    return True, "Expense submitted successfully", renewed_submit_sheet
+                    self._log(f"[REIMBURSEMENT DEBUG] ✅ action_submit_sheet succeeded for sheet #{sheet_id}", "bot_logic")
+                    
+                    # DEBUG: Verify final states after submission
+                    params_check_final_expense = {
+                        'args': [[expense_id]],
+                        'kwargs': {'fields': ['state', 'sheet_id']}
+                    }
+                    ok_final_expense, res_final_expense, renewed_final_expense = _make_request('hr.expense', 'read', params_check_final_expense)
+                    if renewed_final_expense:
+                        odoo_session_data.update(renewed_final_expense)
+                    if ok_final_expense and res_final_expense:
+                        expense_final = res_final_expense[0] if isinstance(res_final_expense, list) else res_final_expense
+                        final_expense_state = expense_final.get('state', 'unknown')
+                        self._log(f"[REIMBURSEMENT DEBUG] Final expense #{expense_id} state: '{final_expense_state}'", "bot_logic")
+                        
+                        if final_expense_state not in ['submitted', 'approve']:
+                            self._log(f"[REIMBURSEMENT DEBUG] ⚠️ WARNING: Expense #{expense_id} is NOT in 'submitted' state. Current state: '{final_expense_state}'", "bot_logic")
+                    else:
+                        self._log(f"[REIMBURSEMENT DEBUG] Failed to verify final expense state: {res_final_expense}", "bot_logic")
+                    
+                    params_check_final_sheet = {
+                        'args': [[sheet_id]],
+                        'kwargs': {'fields': ['state']}
+                    }
+                    ok_final_sheet, res_final_sheet, renewed_final_sheet = _make_request('hr.expense.sheet', 'read', params_check_final_sheet)
+                    if renewed_final_sheet:
+                        odoo_session_data.update(renewed_final_sheet)
+                    if ok_final_sheet and res_final_sheet:
+                        sheet_final = res_final_sheet[0] if isinstance(res_final_sheet, list) else res_final_sheet
+                        final_sheet_state = sheet_final.get('state', 'unknown')
+                        self._log(f"[REIMBURSEMENT DEBUG] Final sheet #{sheet_id} state: '{final_sheet_state}'", "bot_logic")
+                        
+                        if final_sheet_state not in ['submit', 'approve']:
+                            self._log(f"[REIMBURSEMENT DEBUG] ⚠️ WARNING: Sheet #{sheet_id} is NOT in 'submit' state. Current state: '{final_sheet_state}'", "bot_logic")
+                    else:
+                        self._log(f"[REIMBURSEMENT DEBUG] Failed to verify final sheet state: {res_final_sheet}", "bot_logic")
+                    
+                    # Determine success based on final state
+                    if ok_final_expense and res_final_expense:
+                        expense_final = res_final_expense[0] if isinstance(res_final_expense, list) else res_final_expense
+                        final_expense_state = expense_final.get('state', 'unknown')
+                        if final_expense_state in ['submitted', 'approve']:
+                            self._log(f"[REIMBURSEMENT DEBUG] ✅ SUCCESS: Expense #{expense_id} successfully moved to '{final_expense_state}' state", "bot_logic")
+                            return True, f"Expense submitted successfully (state: {final_expense_state})", renewed_submit_sheet
+                        else:
+                            self._log(f"[REIMBURSEMENT DEBUG] ⚠️ PARTIAL SUCCESS: Expense #{expense_id} created but state is '{final_expense_state}' (expected 'submitted')", "bot_logic")
+                            return True, f"Expense created but may require manual submission. Current state: {final_expense_state}", renewed_submit_sheet
+                    else:
+                        # If we can't verify state, assume success if action_submit_sheet succeeded
+                        self._log(f"[REIMBURSEMENT DEBUG] ⚠️ Could not verify final state, but action_submit_sheet succeeded", "bot_logic")
+                        return True, "Expense submitted successfully", renewed_submit_sheet
                     
                 except Exception as e:
-                    self._log(f"Error submitting expense: {e}", "general")
+                    self._log(f"[REIMBURSEMENT DEBUG] ❌ EXCEPTION submitting expense #{expense_id}: {e}", "general")
                     import traceback
                     traceback.print_exc()
                     return False, f"Error submitting expense: {str(e)}", None
@@ -619,12 +737,28 @@ class ReimbursementService:
                         odoo_session_data.update(renewed_sc)  # Update session for subsequent requests
                     if ok_sc:
                         expense_id = res_sc
+                        self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM expense created with ID: {expense_id}", "bot_logic")
+                        # DEBUG: Check expense state immediately after creation
+                        try:
+                            params_check_created = {
+                                'args': [[expense_id]],
+                                'kwargs': {'fields': ['state', 'name', 'employee_id']}
+                            }
+                            ok_check_created, res_check_created, renewed_check_created = _make_request('hr.expense', 'read', params_check_created)
+                            if renewed_check_created:
+                                odoo_session_data.update(renewed_check_created)
+                            if ok_check_created and res_check_created:
+                                expense_created = res_check_created[0] if isinstance(res_check_created, list) else res_check_created
+                                created_state = expense_created.get('state', 'unknown')
+                                self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM expense #{expense_id} state immediately after creation: '{created_state}'", "bot_logic")
+                        except Exception as e:
+                            self._log(f"[REIMBURSEMENT DEBUG] Error checking PER_DIEM expense state after creation: {e}", "bot_logic")
                         # Submit expense to "Submitted" status
                         submit_ok, submit_msg, submit_renewed = _submit_expense(expense_id)
                         if submit_renewed:
                             odoo_session_data.update(submit_renewed)
                         if not submit_ok:
-                            self._log(f"Expense created but submission failed: {submit_msg}", "bot_logic")
+                            self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM expense created but submission failed: {submit_msg}", "bot_logic")
                             # Still return success since expense was created
                         return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, submit_renewed or renewed_sc
                     else:
@@ -692,12 +826,28 @@ class ReimbursementService:
                     
                     # Return the latest renewed session
                     latest_renewed = renewed_write2 if ok_write2 else renewed_write
+                    self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM two-phase expense created with ID: {expense_id}", "bot_logic")
+                    # DEBUG: Check expense state immediately after creation
+                    try:
+                        params_check_created = {
+                            'args': [[expense_id]],
+                            'kwargs': {'fields': ['state', 'name', 'employee_id']}
+                        }
+                        ok_check_created, res_check_created, renewed_check_created = _make_request('hr.expense', 'read', params_check_created)
+                        if renewed_check_created:
+                            odoo_session_data.update(renewed_check_created)
+                        if ok_check_created and res_check_created:
+                            expense_created = res_check_created[0] if isinstance(res_check_created, list) else res_check_created
+                            created_state = expense_created.get('state', 'unknown')
+                            self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM two-phase expense #{expense_id} state immediately after creation: '{created_state}'", "bot_logic")
+                    except Exception as e:
+                        self._log(f"[REIMBURSEMENT DEBUG] Error checking PER_DIEM two-phase expense state after creation: {e}", "bot_logic")
                     # Submit expense to "Submitted" status
                     submit_ok, submit_msg, submit_renewed = _submit_expense(expense_id)
                     if submit_renewed:
                         odoo_session_data.update(submit_renewed)
                     if not submit_ok:
-                        self._log(f"Expense created but submission failed: {submit_msg}", "bot_logic")
+                        self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM two-phase expense created but submission failed: {submit_msg}", "bot_logic")
                         # Still return success since expense was created
                     return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, submit_renewed or latest_renewed
                 except Exception as e:
@@ -708,12 +858,28 @@ class ReimbursementService:
                     success, result, renewed_fallback = _make_request('hr.expense', 'create', params)
                     if success:
                         expense_id = result
+                        self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM fallback expense created with ID: {expense_id}", "bot_logic")
+                        # DEBUG: Check expense state immediately after creation
+                        try:
+                            params_check_created = {
+                                'args': [[expense_id]],
+                                'kwargs': {'fields': ['state', 'name', 'employee_id']}
+                            }
+                            ok_check_created, res_check_created, renewed_check_created = _make_request('hr.expense', 'read', params_check_created)
+                            if renewed_check_created:
+                                odoo_session_data.update(renewed_check_created)
+                            if ok_check_created and res_check_created:
+                                expense_created = res_check_created[0] if isinstance(res_check_created, list) else res_check_created
+                                created_state = expense_created.get('state', 'unknown')
+                                self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM fallback expense #{expense_id} state immediately after creation: '{created_state}'", "bot_logic")
+                        except Exception as e:
+                            self._log(f"[REIMBURSEMENT DEBUG] Error checking PER_DIEM fallback expense state after creation: {e}", "bot_logic")
                         # Submit expense to "Submitted" status
                         submit_ok, submit_msg, submit_renewed = _submit_expense(expense_id)
                         if submit_renewed:
                             odoo_session_data.update(submit_renewed)
                         if not submit_ok:
-                            self._log(f"Expense created but submission failed: {submit_msg}", "bot_logic")
+                            self._log(f"[REIMBURSEMENT DEBUG] PER_DIEM fallback expense created but submission failed: {submit_msg}", "bot_logic")
                             # Still return success since expense was created
                         return True, {'id': expense_id, 'message': f"Expense record #{expense_id} created successfully."}, submit_renewed or renewed_fallback
                     else:
@@ -730,20 +896,37 @@ class ReimbursementService:
 
                 if success:
                     expense_id = result
-                    self._log(f"Expense record created successfully with ID: {expense_id}", "bot_logic")
+                    self._log(f"[REIMBURSEMENT DEBUG] Expense record created successfully with ID: {expense_id}", "bot_logic")
+                    
+                    # DEBUG: Check expense state immediately after creation
+                    try:
+                        params_check_created = {
+                            'args': [[expense_id]],
+                            'kwargs': {'fields': ['state', 'name', 'employee_id']}
+                        }
+                        ok_check_created, res_check_created, renewed_check_created = _make_request('hr.expense', 'read', params_check_created)
+                        if renewed_check_created:
+                            odoo_session_data.update(renewed_check_created)
+                        if ok_check_created and res_check_created:
+                            expense_created = res_check_created[0] if isinstance(res_check_created, list) else res_check_created
+                            created_state = expense_created.get('state', 'unknown')
+                            self._log(f"[REIMBURSEMENT DEBUG] Expense #{expense_id} state immediately after creation: '{created_state}'", "bot_logic")
+                    except Exception as e:
+                        self._log(f"[REIMBURSEMENT DEBUG] Error checking expense state after creation: {e}", "bot_logic")
+                    
                     # Submit expense to "Submitted" status
                     submit_ok, submit_msg, submit_renewed = _submit_expense(expense_id)
                     if submit_renewed:
                         odoo_session_data.update(submit_renewed)
                     if not submit_ok:
-                        self._log(f"Expense created but submission failed: {submit_msg}", "bot_logic")
+                        self._log(f"[REIMBURSEMENT DEBUG] Expense created but submission failed: {submit_msg}", "bot_logic")
                         # Still return success since expense was created
                     return True, {
                         'id': expense_id,
                         'message': f"Expense record #{expense_id} created successfully."
                     }, submit_renewed or renewed
                 else:
-                    self._log(f"Failed to create expense record: {result}", "bot_logic")
+                    self._log(f"[REIMBURSEMENT DEBUG] Failed to create expense record: {result}", "bot_logic")
                     return False, result, renewed
 
         except Exception as e:
@@ -915,8 +1098,8 @@ class ReimbursementService:
                         return False, "No result in Odoo response"
                         
                 except Exception as stateless_error:
-                    self._log(f"Stateless request failed, falling back to stateful: {stateless_error}", "bot_logic")
-                    # Fall through to stateful request below
+                    self._log(f"Stateless request failed: {stateless_error}", "bot_logic")
+                    return False, f"Stateless request failed: {stateless_error}"
             
             # Fallback to stateful request (using shared odoo_service session)
             # Ensure session is active before making request
@@ -1206,6 +1389,7 @@ class ReimbursementService:
             session_data = {
                 'extracted_data': extracted_data,
                 'employee_data': employee_data,
+                'employee_id': employee_data.get('id'),
                 'step': 'form',
                 'expense_data': {}
             }
@@ -1216,13 +1400,18 @@ class ReimbursementService:
             # Always get fresh Odoo session data (with refresh token if needed) - same approach as confirmation
             # This ensures we have valid credentials even if session expired
             odoo_session_data = self._get_fresh_odoo_session_data(odoo_session_data)
+            if not odoo_session_data or not odoo_session_data.get('session_id') or not odoo_session_data.get('user_id'):
+                if self.session_manager:
+                    self.session_manager.clear_session(thread_id)
+                return {
+                    'message': 'Failed to authenticate with Odoo. Please try logging out and logging back in.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
             
             # Log session data status for debugging
-            if odoo_session_data:
-                has_password = bool(odoo_session_data.get('password'))
-                self._log(f"Building form with session_data: has_session_id={bool(odoo_session_data.get('session_id'))}, has_user_id={bool(odoo_session_data.get('user_id'))}, has_password={has_password}", "bot_logic")
-            else:
-                self._log(f"Building form with no session_data - will use stateful fallback", "bot_logic")
+            has_password = bool(odoo_session_data.get('password'))
+            self._log(f"Building form with session_data: has_session_id={bool(odoo_session_data.get('session_id'))}, has_user_id={bool(odoo_session_data.get('user_id'))}, has_password={has_password}", "bot_logic")
 
             # Build form data
             employee_id = employee_data.get('id')
@@ -1667,9 +1856,13 @@ class ReimbursementService:
     def _handle_reimbursement_confirmation(self, thread_id: str, employee_data: Dict, odoo_session_data: Dict = None) -> Dict:
         """Handle reimbursement confirmation - submit the request to Odoo with refresh token approach"""
         try:
+            employee_id = employee_data.get('id') if employee_data else None
+            self._log(f"[REIMBURSEMENT DEBUG] Starting confirmation for thread {thread_id}, employee_id: {employee_id}", "bot_logic")
+            
             # Get expense data from session
             active_session = self.session_manager.get_session(thread_id) if self.session_manager else None
             if not active_session or active_session.get('type') != 'reimbursement':
+                self._log(f"[REIMBURSEMENT DEBUG] ❌ No active reimbursement session found for thread {thread_id}", "bot_logic")
                 return {
                     'message': 'No active reimbursement session found. Please start a new request.',
                     'thread_id': thread_id,
@@ -1680,6 +1873,7 @@ class ReimbursementService:
             expense_data = session_data.get('expense_data', {})
             
             if not expense_data:
+                self._log(f"[REIMBURSEMENT DEBUG] ❌ No expense data found in session for thread {thread_id}", "bot_logic")
                 return {
                     'message': 'Expense data not found. Please start a new request.',
                     'thread_id': thread_id,
@@ -1688,18 +1882,57 @@ class ReimbursementService:
             
             # Validate employee data
             if not employee_data or not isinstance(employee_data, dict) or not employee_data.get('id'):
+                self._log(f"[REIMBURSEMENT DEBUG] ❌ Invalid employee data for thread {thread_id}", "bot_logic")
                 return {
                     'message': 'Employee data not found. Please refresh the page and try again.',
                     'thread_id': thread_id,
                     'source': 'reimbursement_service'
                 }
             
+            session_employee_id = None
+            if isinstance(session_data, dict):
+                if session_data.get('employee_id'):
+                    session_employee_id = session_data.get('employee_id')
+                elif isinstance(session_data.get('employee_data'), dict):
+                    session_employee_id = session_data['employee_data'].get('id')
+            if session_employee_id and employee_id and session_employee_id != employee_id:
+                self._log(
+                    f"[REIMBURSEMENT DEBUG] Session employee_id mismatch: session has {session_employee_id}, current has {employee_id}",
+                    "bot_logic"
+                )
+                if self.session_manager:
+                    self.session_manager.clear_session(thread_id)
+                return {
+                    'message': 'This reimbursement session does not match your account. Please start a new request.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            self._log(f"[REIMBURSEMENT DEBUG] Expense data: category={expense_data.get('category')}, amount={expense_data.get('amount')}", "bot_logic")
+            
             # Always get fresh Odoo session data (with refresh token if needed) - same approach as timeoff
             # This ensures we have valid credentials even if session expired
             odoo_session_data = self._get_fresh_odoo_session_data(odoo_session_data)
+            if not odoo_session_data or not odoo_session_data.get('session_id') or not odoo_session_data.get('user_id'):
+                self._log(f"[REIMBURSEMENT DEBUG] ❌ Failed to get fresh Odoo session data for thread {thread_id}", "bot_logic")
+                return {
+                    'message': 'Failed to authenticate with Odoo. Please try logging out and logging back in.',
+                    'thread_id': thread_id,
+                    'source': 'reimbursement_service'
+                }
+            
+            if not odoo_session_data.get('password'):
+                self._log(
+                    f"[REIMBURSEMENT DEBUG] Proceeding without refresh token; using active session for thread {thread_id}",
+                    "bot_logic"
+                )
+            
+            self._log(f"[REIMBURSEMENT DEBUG] Calling create_expense_record for employee_id: {employee_id}", "bot_logic")
             
             # Create expense record
             success, result, renewed_session = self.create_expense_record(employee_data, expense_data, odoo_session_data)
+            
+            self._log(f"[REIMBURSEMENT DEBUG] create_expense_record returned: success={success}, result={result}", "bot_logic")
             
             # Update Flask session if session was renewed
             if renewed_session:
@@ -1708,8 +1941,9 @@ class ReimbursementService:
                     flask_session['odoo_session_id'] = renewed_session['session_id']
                     flask_session['user_id'] = renewed_session['user_id']
                     flask_session.modified = True
-                except Exception:
-                    pass
+                    self._log(f"[REIMBURSEMENT DEBUG] Updated Flask session with renewed session data", "bot_logic")
+                except Exception as e:
+                    self._log(f"[REIMBURSEMENT DEBUG] Failed to update Flask session: {e}", "bot_logic")
             
             # Clear session
             if self.session_manager:
@@ -1717,13 +1951,86 @@ class ReimbursementService:
             
             if success:
                 expense_id = result.get('id') if isinstance(result, dict) else result
-                self._log_metric(thread_id, expense_data, result if isinstance(result, dict) else {'id': expense_id}, employee_data)
+                result_payload = result if isinstance(result, dict) else {'id': expense_id}
+                
+                # DEBUG: Verify final expense state after creation
+                if expense_id:
+                    try:
+                        # Use stateless request helper
+                        use_stateless = odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id')
+                        def _make_request(model, method, params):
+                            if use_stateless:
+                                ok, res, renewed = self._make_odoo_request_stateless(
+                                    model, method, params,
+                                    session_id=odoo_session_data['session_id'],
+                                    user_id=odoo_session_data['user_id'],
+                                    username=odoo_session_data.get('username'),
+                                    password=odoo_session_data.get('password')
+                                )
+                                return ok, res, renewed
+                            else:
+                                ok, res = self._make_odoo_request(model, method, params)
+                                return ok, res, None
+                        
+                        params_final_check = {
+                            'args': [[expense_id]],
+                            'kwargs': {'fields': ['state', 'sheet_id', 'name']}
+                        }
+                        ok_final, res_final, _ = _make_request('hr.expense', 'read', params_final_check)
+                        if ok_final and res_final:
+                            expense_final = res_final[0] if isinstance(res_final, list) else res_final
+                            final_state = expense_final.get('state', 'unknown')
+                            final_sheet_id = expense_final.get('sheet_id')
+                            self._log(f"[REIMBURSEMENT DEBUG] ✅ FINAL CHECK: Expense #{expense_id} state: '{final_state}', sheet_id: {final_sheet_id}", "bot_logic")
+                            
+                            if final_state not in ['submitted', 'approve']:
+                                self._log(f"[REIMBURSEMENT DEBUG] ⚠️ WARNING: Expense #{expense_id} is NOT in 'submitted' state after creation. State: '{final_state}'. This may indicate the submission process did not complete successfully.", "bot_logic")
+                        else:
+                            self._log(f"[REIMBURSEMENT DEBUG] Failed to verify final expense state: {res_final}", "bot_logic")
+                    except Exception as e:
+                        self._log(f"[REIMBURSEMENT DEBUG] Error checking final expense state: {e}", "bot_logic")
+                
+                self._log_metric(thread_id, expense_data, result_payload, employee_data)
+                
+                # Include state information in response message if available
+                state_info = ""
+                if expense_id:
+                    try:
+                        use_stateless = odoo_session_data and odoo_session_data.get('session_id') and odoo_session_data.get('user_id')
+                        def _make_request(model, method, params):
+                            if use_stateless:
+                                ok, res, renewed = self._make_odoo_request_stateless(
+                                    model, method, params,
+                                    session_id=odoo_session_data['session_id'],
+                                    user_id=odoo_session_data['user_id'],
+                                    username=odoo_session_data.get('username'),
+                                    password=odoo_session_data.get('password')
+                                )
+                                return ok, res, renewed
+                            else:
+                                ok, res = self._make_odoo_request(model, method, params)
+                                return ok, res, None
+                        
+                        params_state = {
+                            'args': [[expense_id]],
+                            'kwargs': {'fields': ['state']}
+                        }
+                        ok_state, res_state, _ = _make_request('hr.expense', 'read', params_state)
+                        if ok_state and res_state:
+                            expense_state_obj = res_state[0] if isinstance(res_state, list) else res_state
+                            current_state = expense_state_obj.get('state', 'unknown')
+                            if current_state not in ['submitted', 'approve']:
+                                state_info = f" (Current state: {current_state})"
+                    except Exception:
+                        pass
+                
                 return {
-                    'message': f"✅ Your reimbursement request has been submitted successfully! Expense ID: {expense_id}",
+                    'message': f"✅ Your reimbursement request has been submitted successfully! Expense ID: {expense_id or 'N/A'}{state_info}",
                     'thread_id': thread_id,
                     'source': 'reimbursement_service'
                 }
             else:
+                self._log(f"[REIMBURSEMENT DEBUG] ❌ Expense creation FAILED: {result}", "bot_logic")
                 return {
                     'message': f"❌ There was an error submitting your reimbursement request: {result}",
                     'thread_id': thread_id,
@@ -1731,7 +2038,7 @@ class ReimbursementService:
                 }
                 
         except Exception as e:
-            self._log(f"Error handling reimbursement confirmation: {e}", "general")
+            self._log(f"[REIMBURSEMENT DEBUG] ❌ EXCEPTION in confirmation handler: {e}", "general")
             import traceback
             traceback.print_exc()
             if self.session_manager:
@@ -1909,4 +2216,3 @@ class ReimbursementService:
             import traceback
             traceback.print_exc()
             return {'project': [], 'market': [], 'pool': []}
-
