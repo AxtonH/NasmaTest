@@ -546,24 +546,46 @@ class ReimbursementService:
                     self._log(f"[REIMBURSEMENT DEBUG] Starting submission for expense #{expense_id}", "bot_logic")
                     params_check_initial = {
                         'args': [[expense_id]],
-                        'kwargs': {'fields': ['state', 'name', 'employee_id', 'sheet_id']}
+                        'kwargs': {'fields': ['state', 'name', 'employee_id', 'sheet_id', 'company_id']}
                     }
                     ok_check_initial, res_check_initial, renewed_check_initial = _make_request('hr.expense', 'read', params_check_initial)
                     if renewed_check_initial:
                         odoo_session_data.update(renewed_check_initial)
+                    expense_company_id = None
                     if ok_check_initial and res_check_initial:
                         expense_initial = res_check_initial[0] if isinstance(res_check_initial, list) else res_check_initial
                         initial_state = expense_initial.get('state', 'unknown')
                         initial_sheet_id = expense_initial.get('sheet_id')
+                        company_val = expense_initial.get('company_id')
+                        if isinstance(company_val, (list, tuple)) and company_val:
+                            expense_company_id = company_val[0]
+                        elif isinstance(company_val, int):
+                            expense_company_id = company_val
                         self._log(f"[REIMBURSEMENT DEBUG] Initial expense state: '{initial_state}', sheet_id: {initial_sheet_id}", "bot_logic")
                     else:
                         self._log(f"[REIMBURSEMENT DEBUG] Failed to read initial expense state: {res_check_initial}", "bot_logic")
+                    if not expense_company_id:
+                        try:
+                            emp_company_val = employee_data.get('company_id') if isinstance(employee_data, dict) else None
+                            if isinstance(emp_company_val, (list, tuple)) and emp_company_val:
+                                expense_company_id = emp_company_val[0]
+                            elif isinstance(emp_company_val, int):
+                                expense_company_id = emp_company_val
+                        except Exception:
+                            pass
+                    submit_context = {}
+                    if expense_company_id:
+                        submit_context = {
+                            'allowed_company_ids': [expense_company_id],
+                            'force_company': expense_company_id,
+                            'company_id': expense_company_id
+                        }
                     
                     # Step 1: Call action_submit_expenses on hr.expense to create report/sheet
                     self._log(f"[REIMBURSEMENT DEBUG] Step 1: Calling action_submit_expenses on expense #{expense_id}", "bot_logic")
                     params_submit_expenses = {
                         'args': [[expense_id]],
-                        'kwargs': {}
+                        'kwargs': {'context': submit_context} if submit_context else {}
                     }
                     ok_submit_expenses, res_submit_expenses, renewed_submit_expenses = _make_request(
                         'hr.expense', 'action_submit_expenses', params_submit_expenses
@@ -635,7 +657,7 @@ class ReimbursementService:
                     self._log(f"[REIMBURSEMENT DEBUG] Step 3: Calling action_submit_sheet on sheet #{sheet_id}", "bot_logic")
                     params_submit_sheet = {
                         'args': [[sheet_id]],
-                        'kwargs': {}
+                        'kwargs': {'context': submit_context} if submit_context else {}
                     }
                     ok_submit_sheet, res_submit_sheet, renewed_submit_sheet = _make_request(
                         'hr.expense.sheet', 'action_submit_sheet', params_submit_sheet
