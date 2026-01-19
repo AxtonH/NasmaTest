@@ -3838,6 +3838,11 @@
                                     ${categoryOptsHtml}
                                 </select>
                             </div>
+
+                            <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
+                                <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description:</label>
+                                <input type="text" id="${descriptionId}" required placeholder="Description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
+                            </div>
                             
                             <!-- Analytic Distribution field (required for all categories) -->
                             <div id="${wid}_analytic_distribution" class="flex flex-col gap-3 w-full" style="box-sizing: border-box;">
@@ -3846,23 +3851,38 @@
                                     <div class="flex-1 min-w-0 flex flex-col gap-3" style="box-sizing: border-box; max-width: calc(100% - 120px);">
                                         <!-- Single line with Project, Market, Pool -->
                                         <div class="flex flex-col gap-2 p-3 border border-gray-300 rounded-lg bg-white">
-                                            <div class="flex gap-2 items-center">
-                                                <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Project:</label>
-                                                <select id="${wid}_analytic_project" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
-                                                    ${projectOptsHtml}
-                                                </select>
+                                            <div class="flex flex-col gap-1">
+                                                <div class="flex gap-2 items-center">
+                                                    <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Project:</label>
+                                                    <select id="${wid}_analytic_project" required aria-required="true" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
+                                                        ${projectOptsHtml}
+                                                    </select>
+                                                </div>
+                                                <div class="text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-2 py-1 leading-snug" style="margin-left: 88px;">
+                                                    Select "PrezLab - Internal" if the expense is not client-related.
+                                                </div>
                                             </div>
-                                            <div class="flex gap-2 items-center">
-                                                <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Market:</label>
-                                                <select id="${wid}_analytic_market" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
-                                                    ${marketOptsHtml}
-                                                </select>
+                                            <div class="flex flex-col gap-1">
+                                                <div class="flex gap-2 items-center">
+                                                    <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Market:</label>
+                                                    <select id="${wid}_analytic_market" required aria-required="true" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
+                                                        ${marketOptsHtml}
+                                                    </select>
+                                                </div>
+                                                <div class="text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-2 py-1 leading-snug" style="margin-left: 88px;">
+                                                    Choose your market, or "Shared" if not project-specific.
+                                                </div>
                                             </div>
-                                            <div class="flex gap-2 items-center">
-                                                <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Pool:</label>
-                                                <select id="${wid}_analytic_pool" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
-                                                    ${poolOptsHtml}
-                                                </select>
+                                            <div class="flex flex-col gap-1">
+                                                <div class="flex gap-2 items-center">
+                                                    <label class="text-sm font-medium flex-shrink-0" style="width: 80px;">Pool:</label>
+                                                    <select id="${wid}_analytic_pool" required aria-required="true" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1" style="min-width: 150px;">
+                                                        ${poolOptsHtml}
+                                                    </select>
+                                                </div>
+                                                <div class="text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-2 py-1 leading-snug" style="margin-left: 88px;">
+                                                    Choose your pool, or "Shared" if not pool-specific.
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -3888,10 +3908,6 @@
                                     <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Link (optional):</label>
                                     <input type="url" id="${linkId}" placeholder="https://example.com/receipt" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
                                 </div>
-                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description (optional):</label>
-                                    <input type="text" id="${descriptionId}" placeholder="Description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
-                                </div>
                             </div>
                             
                             <!-- Per Diem fields -->
@@ -3912,10 +3928,6 @@
                                     <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Link (optional):</label>
                                     <input type="url" id="${linkId}_pd" placeholder="https://example.com/receipt" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
                                 </div>
-                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description (optional):</label>
-                                    <input type="text" id="${descriptionId}_pd" placeholder="Description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
-                                </div>
                             </div>
                             
                             <!-- Travel & Accommodation fields -->
@@ -3932,10 +3944,6 @@
                                 <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
                                     <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Link:</label>
                                     <input type="url" id="${linkId}_ta" placeholder="https://example.com/receipt" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
-                                </div>
-                                <div class="flex items-center justify-start gap-3 w-full min-w-0" style="box-sizing: border-box;">
-                                    <label class="text-base font-medium flex-shrink-0" style="width: 100px;">Description (optional):</label>
-                                    <input type="text" id="${descriptionId}_ta" placeholder="Description" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] flex-1 min-w-0" style="box-sizing: border-box; max-width: calc(100% - 120px);" />
                                 </div>
                             </div>
                             
@@ -3955,9 +3963,7 @@
                         const amountTaEl = document.getElementById(`${amountId}_ta`);
                         const currencyTaEl = document.getElementById(`${currencyId}_ta`);
                         const linkTaEl = document.getElementById(`${linkId}_ta`);
-                        const descriptionTaEl = document.getElementById(`${descriptionId}_ta`);
                         const linkPdEl = document.getElementById(`${linkId}_pd`);
-                        const descriptionPdEl = document.getElementById(`${descriptionId}_pd`);
                         const submitBtn = document.getElementById(submitId);
                         
                         const miscFields = document.getElementById(`${wid}_misc_fields`);
@@ -4039,6 +4045,12 @@
                                     alert('Please select a category.');
                                     return;
                                 }
+
+                                const description = descriptionEl ? descriptionEl.value.trim() : '';
+                                if (!description) {
+                                    alert('Please enter a description.');
+                                    return;
+                                }
                                 
                                 let formData = {
                                     category: category,
@@ -4049,7 +4061,7 @@
                                     date_to: '',
                                     destination_id: '',
                                     link: '',
-                                    description: ''
+                                    description: description
                                 };
                                 
                                 if (category === 'miscellaneous') {
@@ -4057,7 +4069,6 @@
                                     const currency = currencyEl ? currencyEl.value : '';
                                     const date = dateEl ? dateEl.value.trim() : '';
                                     const link = linkEl ? linkEl.value.trim() : '';
-                                    const desc = descriptionEl ? descriptionEl.value.trim() : '';
                                     
                                     if (!amount || !currency || !date) {
                                         alert('Please fill in all required fields: Amount, Currency, and Expense Date.');
@@ -4068,14 +4079,12 @@
                                     formData.currency_id = currency;
                                     formData.date = date;
                                     formData.link = link;
-                                    formData.description = desc;
                                     
                                 } else if (category === 'per_diem') {
                                     const dateFrom = dateFromEl ? dateFromEl.value.trim() : '';
                                     const dateTo = dateToEl ? dateToEl.value.trim() : '';
                                     const destination = destinationEl ? destinationEl.value : '';
                                     const link = linkPdEl ? linkPdEl.value.trim() : '';
-                                    const desc = descriptionPdEl ? descriptionPdEl.value.trim() : '';
                                     
                                     if (!dateFrom || !dateTo || !destination) {
                                         alert('Please fill in all required fields: Date Range and Destination.');
@@ -4086,13 +4095,11 @@
                                     formData.date_to = dateTo;
                                     formData.destination_id = destination;
                                     formData.link = link;
-                                    formData.description = desc;
                                     
                                 } else if (category === 'travel_accommodation') {
                                     const amount = amountTaEl ? amountTaEl.value.trim() : '';
                                     const currency = currencyTaEl ? currencyTaEl.value : '';
                                     const link = linkTaEl ? linkTaEl.value.trim() : '';
-                                    const desc = descriptionTaEl ? descriptionTaEl.value.trim() : '';
                                     
                                     if (!amount || !currency || !link) {
                                         alert('Please fill in all required fields: Amount, Currency, and Link.');
@@ -4102,7 +4109,6 @@
                                     formData.amount = amount;
                                     formData.currency_id = currency;
                                     formData.link = link;
-                                    formData.description = desc;
                                 }
                                 
                                 // Validate analytic distribution
