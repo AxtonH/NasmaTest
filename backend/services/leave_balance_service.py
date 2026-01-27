@@ -151,9 +151,24 @@ class LeaveBalanceService:
             return holiday_status_id.get('id')
         return None
 
+    def _extract_year_from_date_str(self, date_str: str) -> Optional[int]:
+        """Extract year from a date string like '2025-01-03', '01/03/2025', or with time."""
+        try:
+            if not date_str:
+                return None
+            import re
+            match = re.search(r'(\d{4})', str(date_str))
+            if match:
+                return int(match.group(1))
+        except Exception:
+            return None
+        return None
+
     def get_total_allocated_leave(self, employee_id: int, start_year: int, end_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
         Get total allocated leave for the specified period (start_year to end_year) from hr.leave.allocation.
+        Allocations are counted if their end date (date_to) is within start_year/end_year,
+        or if they have no end date ("No limit"/NULL).
         
         Returns:
             Tuple of (allocated_dict, error_message)
@@ -162,8 +177,9 @@ class LeaveBalanceService:
             - error_message: None if successful, error string if there was a problem fetching data
         """
         try:
-            # Domain: filter by employee and year
-            # We need to check allocations that are valid for the current year
+            # Domain: filter by employee
+            # We only count allocations whose end date is in the current or previous year,
+            # or allocations with no end date ("No limit"/NULL).
             domain = [
                 ('employee_id', '=', employee_id),
                 ('state', '=', 'validate')  # Only validated allocations
@@ -186,9 +202,6 @@ class LeaveBalanceService:
                 return {}, error_msg
 
             allocated = {}
-            period_start = date(start_year, 1, 1)
-            period_end = date(end_year, 12, 31)
-
             for allocation in allocations:
                 try:
                     holiday_status_id = allocation.get('holiday_status_id')
@@ -197,24 +210,21 @@ class LeaveBalanceService:
                     if not leave_type_name:
                         continue
 
-                    # Check if allocation is valid for current year
-                    # Some allocations might have date_from/date_to, check if they overlap with current year
-                    date_from_str = allocation.get('date_from')
+                    # Only count allocations whose end date is within current/previous year,
+                    # or with no end date ("No limit"/NULL) which are always valid.
                     date_to_str = allocation.get('date_to')
-                    
-                    valid_for_year = True
-                    if date_from_str or date_to_str:
-                        try:
-                            if date_from_str:
-                                date_from = datetime.strptime(date_from_str.split(' ')[0], '%Y-%m-%d').date()
-                                if date_from > period_end:
-                                    valid_for_year = False
-                            if date_to_str:
-                                date_to = datetime.strptime(date_to_str.split(' ')[0], '%Y-%m-%d').date()
-                                if date_to < period_start:
-                                    valid_for_year = False
-                        except Exception:
-                            pass  # If date parsing fails, assume valid
+                    date_to_raw = str(date_to_str).strip() if date_to_str is not None else ""
+                    date_to_lower = date_to_raw.lower()
+
+                    if not date_to_raw or "no limit" in date_to_lower or date_to_lower in ("none", "null", "false"):
+                        valid_for_year = True
+                    else:
+                        date_to_year = self._extract_year_from_date_str(date_to_raw)
+                        if date_to_year is None:
+                            debug_log(f"Unable to parse allocation date_to '{date_to_raw}', treating as valid", "odoo_data")
+                            valid_for_year = True
+                        else:
+                            valid_for_year = date_to_year in (start_year, end_year)
 
                     if not valid_for_year:
                         continue
