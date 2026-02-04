@@ -3135,7 +3135,11 @@ def create_app():
                             msg = format_my_requests_message(ot_count, to_count)
                             actioned_ot_requests = requests_data.get('actioned_overtime_requests', [])
                             actioned_to_requests = requests_data.get('actioned_timeoff_requests', [])
-                            tables = build_my_requests_table_widget(ot_requests, to_requests, actioned_ot_requests, actioned_to_requests, user_tz)
+                            actioned_reimb_requests = requests_data.get('actioned_reimbursement_requests', [])
+                            tables = build_my_requests_table_widget(
+                                ot_requests, to_requests, actioned_ot_requests, actioned_to_requests,
+                                actioned_reimb_requests, user_tz
+                            )
                             
                             # Build leave balance table widget (ensure it's always a dict, not None)
                             leave_balance_table = build_leave_balance_table_widget(remaining_leave if remaining_leave else {})
@@ -4835,5 +4839,4 @@ if __name__ == '__main__':
     app = create_app()
     # Disable the dev auto-reloader to prevent in-memory Odoo session loss
     app.run(debug=False, host='0.0.0.0', port=5000, use_reloader=False)
-
 

@@ -322,7 +322,7 @@ def fetch_user_timeoff_requests(odoo_service, employee_id: int) -> Tuple[bool, A
 
 
 def fetch_actioned_timeoff_requests(odoo_service, employee_id: int) -> Tuple[bool, Any]:
-    """Fetch actioned time off requests (hr.leave) for the current user for the current year.
+    """Fetch actioned time off requests (hr.leave) for the current user (all time).
     
     Includes requests with state in ['refuse', 'validate1', 'validate'] (Refused, Second Approval, Approved).
     
@@ -337,18 +337,11 @@ def fetch_actioned_timeoff_requests(odoo_service, employee_id: int) -> Tuple[boo
         if not ok_session:
             return False, msg
 
-        # Get current year start and end dates
-        current_year = datetime.now().year
-        year_start = f"{current_year}-01-01"
-        year_end = f"{current_year}-12-31"
-
         # Domain: employee_id = current user AND state in ['refuse', 'validate1', 'validate'] 
-        # AND request_date_from within current year
+        # (no year filter; show all actioned requests)
         domain = [
             ('employee_id', '=', employee_id),
-            ('state', 'in', ['refuse', 'validate1', 'validate']),
-            ('request_date_from', '>=', year_start),
-            ('request_date_from', '<=', year_end)
+            ('state', 'in', ['refuse', 'validate1', 'validate'])
         ]
 
         params = {
@@ -370,8 +363,50 @@ def fetch_actioned_timeoff_requests(odoo_service, employee_id: int) -> Tuple[boo
         return False, f"Error fetching actioned time off requests: {e}"
 
 
+def fetch_actioned_reimbursement_requests(odoo_service, employee_id: int) -> Tuple[bool, Any]:
+    """Fetch actioned reimbursement requests (hr.expense) for the current user (all time).
+    
+    Includes requests with state in ['submitted', 'approved', 'refused'].
+    
+    Returns (ok, expenses) where expenses is a list of hr.expense dictionaries.
+    """
+    try:
+        if not employee_id:
+            return False, "Employee ID not provided"
+
+        # Ensure session is active
+        ok_session, msg = odoo_service.ensure_active_session()
+        if not ok_session:
+            return False, msg
+
+        domain = [
+            ('employee_id', '=', employee_id),
+            ('state', 'in', ['submitted', 'approved', 'refused'])
+        ]
+
+        params = {
+            'args': [domain],
+            'kwargs': {
+                'fields': [
+                    'id', 'name', 'employee_id', 'product_id', 'date',
+                    'total_amount_currency', 'currency_id', 'state'
+                ],
+                'limit': 500,
+                'order': 'date desc'
+            }
+        }
+
+        ok, expenses = _make_odoo_request(odoo_service, 'hr.expense', 'search_read', params)
+        if not ok:
+            return False, expenses
+
+        return True, expenses if isinstance(expenses, list) else []
+    except Exception as e:
+        return False, f"Error fetching actioned reimbursement requests: {e}"
+
+
 def fetch_actioned_overtime_requests(odoo_service, user_id: int) -> Tuple[bool, Any]:
-    """Fetch actioned overtime requests (approval.request) for the current user for the current year.
+    """Fetch actioned overtime requests (approval.request) for the current user (all time).
     
     Includes requests with request_status in ['approved', 'refused'].
     
@@ -386,18 +421,11 @@ def fetch_actioned_overtime_requests(odoo_service, user_id: int) -> Tuple[bool, 
         if not ok_session:
             return False, msg
 
-        # Get current year start and end dates
-        current_year = datetime.now().year
-        year_start = f"{current_year}-01-01 00:00:00"
-        year_end = f"{current_year}-12-31 23:59:59"
-
         # Domain: request_owner_id = current user AND request_status in ['approved', 'refused']
-        # AND date_start within current year
+        # (no year filter; show all actioned requests)
         domain = [
             ('request_owner_id', '=', user_id),
-            ('request_status', 'in', ['approved', 'refused']),
-            ('date_start', '>=', year_start),
-            ('date_start', '<=', year_end)
+            ('request_status', 'in', ['approved', 'refused'])
         ]
 
         # Use two-step fetch: search => read
@@ -657,7 +685,9 @@ def build_timeoff_requests_table_widget(timeoff_requests: List[Dict]) -> Dict[st
     return { 'columns': columns, 'rows': rows }
 
 
-def build_actioned_requests_table_widget(actioned_overtime: List[Dict], actioned_timeoff: List[Dict], user_tz: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+def build_actioned_requests_table_widget(actioned_overtime: List[Dict], actioned_timeoff: List[Dict],
+                                         actioned_reimbursements: List[Dict] = None,
+                                         user_tz: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
     """Build a table widget for actioned requests (overtime and time-off combined).
     
     Columns: Type, Project, Dates, Duration, Status
@@ -666,6 +696,7 @@ def build_actioned_requests_table_widget(actioned_overtime: List[Dict], actioned
     Args:
         actioned_overtime: List of actioned overtime request dicts
         actioned_timeoff: List of actioned time off request dicts
+        actioned_reimbursements: List of actioned reimbursement request dicts
         user_tz: User's timezone (e.g., "Asia/Amman")
         limit: Optional limit on number of rows to return (for main table view)
     """
@@ -816,6 +847,82 @@ def build_actioned_requests_table_widget(actioned_overtime: List[Dict], actioned
             '_sort_date': sort_date,  # Internal field for sorting
         })
 
+    # Process actioned reimbursement requests
+    for exp in actioned_reimbursements or []:
+        # Get expense description (name) or product name
+        project_name = '—'
+        try:
+            exp_name = exp.get('name')
+            if exp_name:
+                project_name = str(exp_name)
+            else:
+                product_field = exp.get('product_id')
+                if isinstance(product_field, list) and len(product_field) > 1:
+                    project_name = str(product_field[1])
+                elif isinstance(product_field, str):
+                    project_name = product_field
+        except Exception:
+            pass
+
+        # Date
+        exp_date_raw = exp.get('date') or ''
+        exp_date = _format_date(exp_date_raw) if exp_date_raw else "—"
+
+        # Amount as "duration"
+        amount_txt = "—"
+        try:
+            amount_val = exp.get('total_amount_currency')
+            currency_field = exp.get('currency_id')
+            currency_name = ''
+            if isinstance(currency_field, list) and len(currency_field) > 1:
+                currency_name = str(currency_field[1])
+            elif isinstance(currency_field, str):
+                currency_name = currency_field
+            if isinstance(amount_val, (int, float)):
+                if currency_name:
+                    amount_txt = f"{amount_val:.2f} {currency_name}"
+                else:
+                    amount_txt = f"{amount_val:.2f}"
+            elif amount_val is not None:
+                amount_txt = str(amount_val)
+        except Exception:
+            pass
+
+        # Status badge
+        state = exp.get('state') or ''
+        state_map = {
+            'submitted': 'Submitted',
+            'approved': 'Approved',
+            'refused': 'Refused'
+        }
+        state_txt = state_map.get(state, state.title() if isinstance(state, str) else '—')
+
+        if state == 'approved':
+            status_html = '<span class="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold text-white bg-green-600" style="min-width: 70px;">Approved</span>'
+        elif state == 'refused':
+            status_html = '<span class="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold text-gray-700 bg-gray-300" style="min-width: 70px;">Refused</span>'
+        elif state == 'submitted':
+            status_html = '<span class="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold text-white bg-blue-600" style="min-width: 70px;">Submitted</span>'
+        else:
+            status_html = f'<span class="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold text-white bg-gray-600" style="min-width: 70px;">{state_txt}</span>'
+
+        # Sort date
+        sort_date = ''
+        try:
+            if exp_date_raw:
+                sort_date = str(exp_date_raw)[:10]
+        except Exception:
+            pass
+
+        rows.append({
+            'type': 'Reimbursement',
+            'project': project_name,
+            'dates': exp_date,
+            'duration': amount_txt,
+            'status': status_html,
+            '_sort_date': sort_date,
+        })
+
     # Sort by date descending (most recent first)
     rows.sort(key=lambda x: x.get('_sort_date', ''), reverse=True)
     
@@ -832,6 +939,7 @@ def build_actioned_requests_table_widget(actioned_overtime: List[Dict], actioned
 
 def build_my_requests_table_widget(overtime_requests: List[Dict], timeoff_requests: List[Dict], 
                                    actioned_overtime: List[Dict] = None, actioned_timeoff: List[Dict] = None,
+                                   actioned_reimbursements: List[Dict] = None,
                                    user_tz: Optional[str] = None) -> Dict[str, Any]:
     """Build separate table widgets for overtime, time off, and actioned requests.
     
@@ -842,6 +950,7 @@ def build_my_requests_table_widget(overtime_requests: List[Dict], timeoff_reques
         timeoff_requests: List of time off request dicts
         actioned_overtime: List of actioned overtime request dicts (optional)
         actioned_timeoff: List of actioned time off request dicts (optional)
+        actioned_reimbursements: List of actioned reimbursement request dicts (optional)
         user_tz: User's timezone (e.g., "Asia/Amman")
     """
     result = {
@@ -852,8 +961,12 @@ def build_my_requests_table_widget(overtime_requests: List[Dict], timeoff_reques
     # Add actioned requests table if data is provided
     # Main table shows top 5, full table shows all
     if actioned_overtime is not None and actioned_timeoff is not None:
-        result['actioned'] = build_actioned_requests_table_widget(actioned_overtime, actioned_timeoff, user_tz, limit=5)
-        result['actioned_full'] = build_actioned_requests_table_widget(actioned_overtime, actioned_timeoff, user_tz, limit=None)
+        result['actioned'] = build_actioned_requests_table_widget(
+            actioned_overtime, actioned_timeoff, actioned_reimbursements, user_tz, limit=5
+        )
+        result['actioned_full'] = build_actioned_requests_table_widget(
+            actioned_overtime, actioned_timeoff, actioned_reimbursements, user_tz, limit=None
+        )
     
     return result
 
@@ -896,7 +1009,7 @@ def get_my_requests(odoo_service, employee_data: Dict) -> Tuple[bool, Any]:
         if not ok_to:
             return False, f"Error fetching time off requests: {to_requests}"
 
-        # Fetch actioned requests for current year
+        # Fetch actioned requests (all time)
         ok_actioned_ot, actioned_ot_requests = fetch_actioned_overtime_requests(odoo_service, user_id)
         if not ok_actioned_ot:
             # Don't fail if actioned requests can't be fetched, just log and continue
@@ -907,11 +1020,16 @@ def get_my_requests(odoo_service, employee_data: Dict) -> Tuple[bool, Any]:
             # Don't fail if actioned requests can't be fetched, just log and continue
             actioned_to_requests = []
 
+        ok_actioned_reimb, actioned_reimb_requests = fetch_actioned_reimbursement_requests(odoo_service, employee_id)
+        if not ok_actioned_reimb:
+            actioned_reimb_requests = []
+
         return True, {
             'overtime_requests': ot_requests if isinstance(ot_requests, list) else [],
             'timeoff_requests': to_requests if isinstance(to_requests, list) else [],
             'actioned_overtime_requests': actioned_ot_requests if isinstance(actioned_ot_requests, list) else [],
-            'actioned_timeoff_requests': actioned_to_requests if isinstance(actioned_to_requests, list) else []
+            'actioned_timeoff_requests': actioned_to_requests if isinstance(actioned_to_requests, list) else [],
+            'actioned_reimbursement_requests': actioned_reimb_requests if isinstance(actioned_reimb_requests, list) else []
         }
     except Exception as e:
         return False, f"Error getting my requests: {e}"

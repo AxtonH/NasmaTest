@@ -188,7 +188,7 @@ class LeaveBalanceService:
             params = {
                 'args': [domain],
                 'kwargs': {
-                    'fields': ['holiday_status_id', 'number_of_days', 'date_from', 'date_to'],
+                    'fields': ['id', 'holiday_status_id', 'number_of_days', 'date_from', 'date_to'],
                     'limit': 500
                 }
             }
@@ -244,6 +244,15 @@ class LeaveBalanceService:
                         allocated[leave_type_name] += days
                     else:
                         allocated[leave_type_name] = days
+
+                    # Debug: show which allocation contributed to which leave type and by how much
+                    alloc_id = allocation.get('id')
+                    debug_log(
+                        f"Allocation contribution - id={alloc_id}, type='{leave_type_name}', "
+                        f"days={days}, date_to='{date_to_raw or None}', "
+                        f"running_total={allocated.get(leave_type_name)}",
+                        "odoo_data"
+                    )
 
                 except Exception as e:
                     debug_log(f"Error processing allocation: {str(e)}", "odoo_data")
