@@ -1137,10 +1137,10 @@ class TimeOffService:
                 ok, result = self.get_leave_types()
                 return ok, result
             
-            def fetch_allocated():
-                """Fetch allocated leave"""
+            def fetch_allocated_and_taken():
+                """Fetch allocated and taken leave using same period logic as calculate_remaining_leave (3-year for Annual Leave, 2-year for others)"""
                 if not employee_id:
-                    return {}
+                    return {}, {}
                 try:
                     try:
                         from .leave_balance_service import LeaveBalanceService
@@ -1148,51 +1148,22 @@ class TimeOffService:
                         from leave_balance_service import LeaveBalanceService
                     
                     leave_balance_service = LeaveBalanceService(self.odoo_service)
-                    # Use same 2-year period as calculate_remaining_leave for consistency
-                    current_year = datetime.now().year
-                    start_year = current_year - 1
-                    end_year = current_year
-                    allocated, alloc_error = leave_balance_service.get_total_allocated_leave(
-                        employee_id, start_year, end_year, odoo_session_data
+                    allocated, taken, error = leave_balance_service.get_allocated_and_taken_for_display(
+                        employee_id, odoo_session_data
                     )
-                    return allocated if not alloc_error else {}
+                    return (allocated, taken) if not error else ({}, {})
                 except Exception as e:
-                    debug_log(f"Error fetching allocated leave: {str(e)}", "bot_logic")
-                    return {}
+                    debug_log(f"Error fetching allocated/taken leave: {str(e)}", "bot_logic")
+                    return {}, {}
             
-            def fetch_taken():
-                """Fetch taken leave"""
-                if not employee_id:
-                    return {}
-                try:
-                    try:
-                        from .leave_balance_service import LeaveBalanceService
-                    except Exception:
-                        from leave_balance_service import LeaveBalanceService
-                    
-                    leave_balance_service = LeaveBalanceService(self.odoo_service)
-                    # Use same 2-year period as calculate_remaining_leave for consistency
-                    current_year = datetime.now().year
-                    start_year = current_year - 1
-                    end_year = current_year
-                    taken, taken_error = leave_balance_service.get_taken_leave(
-                        employee_id, start_year, end_year, odoo_session_data
-                    )
-                    return taken if not taken_error else {}
-                except Exception as e:
-                    debug_log(f"Error fetching taken leave: {str(e)}", "bot_logic")
-                    return {}
-            
-            # Execute all three API calls in parallel for maximum speed
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            # Execute API calls in parallel for maximum speed
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 leave_types_future = executor.submit(fetch_leave_types)
-                allocated_future = executor.submit(fetch_allocated)
-                taken_future = executor.submit(fetch_taken)
+                allocated_taken_future = executor.submit(fetch_allocated_and_taken)
                 
                 # Get results
                 ok_leave_types, leave_types = leave_types_future.result()
-                allocated = allocated_future.result()
-                taken = taken_future.result()
+                allocated, taken = allocated_taken_future.result()
             
             if not ok_leave_types:
                 return False, "Failed to fetch leave types"

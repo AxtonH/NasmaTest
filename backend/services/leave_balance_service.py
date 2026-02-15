@@ -164,11 +164,49 @@ class LeaveBalanceService:
             return None
         return None
 
+    def _allocation_overlaps_period(
+        self, date_from_str: Any, date_to_str: Any, period_start: date, period_end: date
+    ) -> bool:
+        """
+        Check if an allocation's validity period overlaps with the target period.
+        Includes both regular allocations (with date_from/date_to) and accrual allocations
+        (with no date_to / "No limit"). Overlap = allocation was valid at some point during period.
+        """
+        try:
+            # No end date (No limit) -> allocation is ongoing, always overlaps
+            # Odoo may return False, None, or empty for "No limit"
+            if date_to_str is None or date_to_str is False:
+                date_to_raw = ""
+            else:
+                date_to_raw = str(date_to_str).strip()
+            date_to_lower = date_to_raw.lower() if date_to_raw else ""
+            if not date_to_raw or "no limit" in date_to_lower or date_to_lower in ("none", "null", "false"):
+                # Still need allocation to have started by end of period
+                if not date_from_str or date_from_str is False:
+                    return True
+                try:
+                    date_from = datetime.strptime(str(date_from_str).split(' ')[0], '%Y-%m-%d').date()
+                    return date_from <= period_end
+                except Exception:
+                    return True
+            # Parse date_to
+            date_to = datetime.strptime(str(date_to_str).split(' ')[0], '%Y-%m-%d').date()
+            if date_to < period_start:
+                return False  # Expired before period started
+            # Parse date_from if present
+            if date_from_str:
+                date_from = datetime.strptime(str(date_from_str).split(' ')[0], '%Y-%m-%d').date()
+                if date_from > period_end:
+                    return False  # Starts after period ended
+            return True
+        except Exception:
+            return True  # If parsing fails, include to avoid excluding valid allocations
+
     def get_total_allocated_leave(self, employee_id: int, start_year: int, end_year: int, odoo_session_data: Dict = None) -> Tuple[Dict[str, float], Optional[str]]:
         """
         Get total allocated leave for the specified period (start_year to end_year) from hr.leave.allocation.
-        Allocations are counted if their end date (date_to) is within start_year/end_year,
-        or if they have no end date ("No limit"/NULL).
+        Includes both regular allocations and accrual allocations. An allocation is counted if its
+        validity period overlaps with the target period (not just "currently valid").
         
         Returns:
             Tuple of (allocated_dict, error_message)
@@ -177,9 +215,10 @@ class LeaveBalanceService:
             - error_message: None if successful, error string if there was a problem fetching data
         """
         try:
-            # Domain: filter by employee
-            # We only count allocations whose end date is in the current or previous year,
-            # or allocations with no end date ("No limit"/NULL).
+            period_start = date(start_year, 1, 1)
+            period_end = date(end_year, 12, 31)
+
+            # Domain: filter by employee and state only - no date filter (we check overlap in Python)
             domain = [
                 ('employee_id', '=', employee_id),
                 ('state', '=', 'validate')  # Only validated allocations
@@ -210,23 +249,11 @@ class LeaveBalanceService:
                     if not leave_type_name:
                         continue
 
-                    # Only count allocations whose end date is within current/previous year,
-                    # or with no end date ("No limit"/NULL) which are always valid.
+                    # Include allocation if its validity overlaps with our period
+                    # (covers both regular allocations with validity period and accrual with no end)
+                    date_from_str = allocation.get('date_from')
                     date_to_str = allocation.get('date_to')
-                    date_to_raw = str(date_to_str).strip() if date_to_str is not None else ""
-                    date_to_lower = date_to_raw.lower()
-
-                    if not date_to_raw or "no limit" in date_to_lower or date_to_lower in ("none", "null", "false"):
-                        valid_for_year = True
-                    else:
-                        date_to_year = self._extract_year_from_date_str(date_to_raw)
-                        if date_to_year is None:
-                            debug_log(f"Unable to parse allocation date_to '{date_to_raw}', treating as valid", "odoo_data")
-                            valid_for_year = True
-                        else:
-                            valid_for_year = date_to_year in (start_year, end_year)
-
-                    if not valid_for_year:
+                    if not self._allocation_overlaps_period(date_from_str, date_to_str, period_start, period_end):
                         continue
 
                     # Get number_of_days directly from the allocation
@@ -249,7 +276,7 @@ class LeaveBalanceService:
                     alloc_id = allocation.get('id')
                     debug_log(
                         f"Allocation contribution - id={alloc_id}, type='{leave_type_name}', "
-                        f"days={days}, date_to='{date_to_raw or None}', "
+                        f"days={days}, date_from={date_from_str}, date_to={date_to_str}, "
                         f"running_total={allocated.get(leave_type_name)}",
                         "odoo_data"
                     )
@@ -406,6 +433,9 @@ class LeaveBalanceService:
         """
         Calculate remaining leave time for an employee.
         
+        Annual Leave uses a 3-year period (current year + previous 2 years).
+        Other leave types use a 2-year period (current year + previous year).
+        
         Args:
             employee_id: Employee ID
             leave_type_name: Optional specific leave type to calculate for (e.g., 'Annual Leave', 'Sick Leave')
@@ -420,34 +450,57 @@ class LeaveBalanceService:
         """
         try:
             current_year = datetime.now().year
-            start_year = current_year - 1
-            end_year = current_year
+            # Annual Leave: 3-year period (e.g. 2026 → 2024, 2025, 2026)
+            annual_start_year = current_year - 2
+            annual_end_year = current_year
+            # Other leave types: 2-year period (e.g. 2026 → 2025, 2026)
+            other_start_year = current_year - 1
+            other_end_year = current_year
 
-            # Get allocations and taken leave for the 2-year period
-            allocated, alloc_error = self.get_total_allocated_leave(employee_id, start_year, end_year, odoo_session_data)
-            taken, taken_error = self.get_taken_leave(employee_id, start_year, end_year, odoo_session_data)
-
-            # Check if we got errors
-            if alloc_error:
-                return {}, alloc_error
-            if taken_error:
-                return {}, taken_error
-
-            # Calculate remaining per leave type
             remaining = {}
 
-            # If specific leave type requested, always include it (even if 0)
-            if leave_type_name:
+            if leave_type_name == 'Annual Leave':
+                # Annual Leave only: use 3-year period
+                allocated, alloc_error = self.get_total_allocated_leave(employee_id, annual_start_year, annual_end_year, odoo_session_data)
+                taken, taken_error = self.get_taken_leave(employee_id, annual_start_year, annual_end_year, odoo_session_data)
+                if alloc_error:
+                    return {}, alloc_error
+                if taken_error:
+                    return {}, taken_error
+                allocated_days = allocated.get('Annual Leave', 0.0)
+                taken_days = taken.get('Annual Leave', 0.0)
+                remaining['Annual Leave'] = max(0.0, allocated_days - taken_days)
+            elif leave_type_name:
+                # Specific non-annual type: use 2-year period
+                allocated, alloc_error = self.get_total_allocated_leave(employee_id, other_start_year, other_end_year, odoo_session_data)
+                taken, taken_error = self.get_taken_leave(employee_id, other_start_year, other_end_year, odoo_session_data)
+                if alloc_error:
+                    return {}, alloc_error
+                if taken_error:
+                    return {}, taken_error
                 allocated_days = allocated.get(leave_type_name, 0.0)
                 taken_days = taken.get(leave_type_name, 0.0)
                 remaining[leave_type_name] = max(0.0, allocated_days - taken_days)
             else:
-                # Calculate for all leave types
-                # Include all types that have allocations or taken leave
-                all_types = set(allocated.keys()) | set(taken.keys())
+                # All types: fetch both periods and combine (Annual from 3-year, others from 2-year)
+                allocated_annual, alloc_err_a = self.get_total_allocated_leave(employee_id, annual_start_year, annual_end_year, odoo_session_data)
+                taken_annual, taken_err_a = self.get_taken_leave(employee_id, annual_start_year, annual_end_year, odoo_session_data)
+                allocated_other, alloc_err_o = self.get_total_allocated_leave(employee_id, other_start_year, other_end_year, odoo_session_data)
+                taken_other, taken_err_o = self.get_taken_leave(employee_id, other_start_year, other_end_year, odoo_session_data)
+
+                if alloc_err_a or alloc_err_o:
+                    return {}, alloc_err_a or alloc_err_o
+                if taken_err_a or taken_err_o:
+                    return {}, taken_err_a or taken_err_o
+
+                all_types = set(allocated_annual.keys()) | set(allocated_other.keys()) | set(taken_annual.keys()) | set(taken_other.keys())
                 for leave_type in all_types:
-                    allocated_days = allocated.get(leave_type, 0.0)
-                    taken_days = taken.get(leave_type, 0.0)
+                    if leave_type == 'Annual Leave':
+                        allocated_days = allocated_annual.get(leave_type, 0.0)
+                        taken_days = taken_annual.get(leave_type, 0.0)
+                    else:
+                        allocated_days = allocated_other.get(leave_type, 0.0)
+                        taken_days = taken_other.get(leave_type, 0.0)
                     remaining[leave_type] = max(0.0, allocated_days - taken_days)
 
             debug_log(f"Remaining leave for employee {employee_id}: {remaining}", "bot_logic")
@@ -457,6 +510,57 @@ class LeaveBalanceService:
             error_msg = f"Error calculating remaining leave: {str(e)}"
             debug_log(error_msg, "odoo_data")
             return {}, error_msg
+
+    def get_allocated_and_taken_for_display(
+        self, employee_id: int, odoo_session_data: Dict = None
+    ) -> Tuple[Dict[str, float], Dict[str, float], Optional[str]]:
+        """
+        Get allocated and taken leave for display, using the same period logic as calculate_remaining_leave.
+        Annual Leave: 3-year period. Other types: 2-year period.
+        
+        Returns:
+            Tuple of (allocated_dict, taken_dict, error_message)
+        """
+        current_year = datetime.now().year
+        annual_start_year = current_year - 2
+        annual_end_year = current_year
+        other_start_year = current_year - 1
+        other_end_year = current_year
+
+        allocated_annual, alloc_err_a = self.get_total_allocated_leave(
+            employee_id, annual_start_year, annual_end_year, odoo_session_data
+        )
+        taken_annual, taken_err_a = self.get_taken_leave(
+            employee_id, annual_start_year, annual_end_year, odoo_session_data
+        )
+        allocated_other, alloc_err_o = self.get_total_allocated_leave(
+            employee_id, other_start_year, other_end_year, odoo_session_data
+        )
+        taken_other, taken_err_o = self.get_taken_leave(
+            employee_id, other_start_year, other_end_year, odoo_session_data
+        )
+
+        if alloc_err_a or alloc_err_o:
+            return {}, {}, alloc_err_a or alloc_err_o
+        if taken_err_a or taken_err_o:
+            return {}, {}, taken_err_a or taken_err_o
+
+        all_types = (
+            set(allocated_annual.keys())
+            | set(allocated_other.keys())
+            | set(taken_annual.keys())
+            | set(taken_other.keys())
+        )
+        allocated = {}
+        taken = {}
+        for leave_type in all_types:
+            if leave_type == 'Annual Leave':
+                allocated[leave_type] = allocated_annual.get(leave_type, 0.0)
+                taken[leave_type] = taken_annual.get(leave_type, 0.0)
+            else:
+                allocated[leave_type] = allocated_other.get(leave_type, 0.0)
+                taken[leave_type] = taken_other.get(leave_type, 0.0)
+        return allocated, taken, None
 
     def _days_to_hours_minutes(self, days: float, hours_per_day: float = 8.0) -> Tuple[int, int]:
         """
