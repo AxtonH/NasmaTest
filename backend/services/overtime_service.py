@@ -280,24 +280,33 @@ class OvertimeService:
         return options
 
     def _generate_hour_options_30min(self) -> List[Dict[str, str]]:
-        """Generate hour options with 30-minute intervals covering 24 hours (0:00 to 23:30).
+        """Generate hour options: 9:00 AM to 1:00 AM (next day), 30-minute intervals.
         
         Used for time off custom hours which require 30-minute intervals.
         """
         options = []
-        def _push_hour(val: float):
-            key = str(int(val)) if abs(val - int(val)) < 1e-9 else f"{val:.2f}".rstrip('0').rstrip('.')
+        def _fmt_label(val: float) -> str:
             h = int(val)
-            m = int(round((val - h) * 60))  # Calculate minutes from decimal part
-            label = f"{h:02d}:{m:02d}"
-            options.append({'value': key, 'label': label})
-        
-        # Generate all 30-minute intervals from 0:00 to 23:30
+            m = 30 if abs(val - h - 0.5) < 1e-6 else 0
+            ampm_h = h % 12
+            if ampm_h == 0:
+                ampm_h = 12
+            ampm = 'AM' if h < 12 else 'PM'
+            return f"{ampm_h}:{m:02d} {ampm}" if m else f"{ampm_h}:00 {ampm}"
+        def _push(val: float):
+            canonical = round(val * 2) / 2.0
+            key = f"{canonical:.1f}"
+            options.append({'value': key, 'label': _fmt_label(val)})
+        # 9:00 to 23:30 (same day)
+        v = 9.0
+        while v <= 23.5 + 1e-9:
+            _push(v)
+            v += 0.5
+        # 0:00 to 1:00 (next day)
         v = 0.0
-        while v <= 23.5 + 1e-9:  # 23.5 = 23:30
-            _push_hour(v)
-            v += 0.5  # 30 minutes = 0.5 hours
-        
+        while v <= 1.0 + 1e-9:
+            _push(v)
+            v += 0.5
         return options
 
     def _list_projects(self, odoo_session_data: Dict = None) -> Tuple[bool, Any]:

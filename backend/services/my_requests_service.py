@@ -1570,68 +1570,26 @@ def get_timeoff_request_for_edit(odoo_service, leave_id: int, user_tz: Optional[
                 date_to_formatted = date_to_str[:10]
         
         # Extract hours if custom hours mode - convert to hour keys for dropdown
+        # Dropdown uses format "11.0", "11.5", "15.5" etc. (must match _generate_hour_options_30min)
+        def _to_hour_key(val) -> str:
+            if val is None or val == '':
+                return ''
+            try:
+                hour_float = float(val)
+                # Round to nearest 30 min to match dropdown options
+                canonical = round(hour_float * 2) / 2.0
+                return f"{canonical:.1f}"
+            except Exception:
+                return str(val)
         hour_from = ''
         hour_to = ''
         if is_custom_hours:
             hour_from_val = leave_data.get('request_hour_from')
             hour_to_val = leave_data.get('request_hour_to')
             if hour_from_val:
-                try:
-                    # Convert float hour to hour key format (e.g., "9" or "9.5")
-                    hour_float = float(hour_from_val)
-                    hour = int(hour_float)
-                    minute = int((hour_float - hour) * 60)
-                    if minute == 0:
-                        hour_from = str(hour)
-                    elif minute == 30:
-                        hour_from = f"{hour}.5"
-                    elif minute == 15:
-                        hour_from = f"{hour}.25"
-                    elif minute == 45:
-                        hour_from = f"{hour}.75"
-                    else:
-                        # Round to nearest quarter hour
-                        quarter = round(minute / 15) * 15
-                        if quarter == 60:
-                            hour_from = str(hour + 1)
-                        elif quarter == 0:
-                            hour_from = str(hour)
-                        elif quarter == 15:
-                            hour_from = f"{hour}.25"
-                        elif quarter == 30:
-                            hour_from = f"{hour}.5"
-                        else:  # 45
-                            hour_from = f"{hour}.75"
-                except Exception:
-                    hour_from = str(hour_from_val)
+                hour_from = _to_hour_key(hour_from_val)
             if hour_to_val:
-                try:
-                    hour_float = float(hour_to_val)
-                    hour = int(hour_float)
-                    minute = int((hour_float - hour) * 60)
-                    if minute == 0:
-                        hour_to = str(hour)
-                    elif minute == 30:
-                        hour_to = f"{hour}.5"
-                    elif minute == 15:
-                        hour_to = f"{hour}.25"
-                    elif minute == 45:
-                        hour_to = f"{hour}.75"
-                    else:
-                        # Round to nearest quarter hour
-                        quarter = round(minute / 15) * 15
-                        if quarter == 60:
-                            hour_to = str(hour + 1)
-                        elif quarter == 0:
-                            hour_to = str(hour)
-                        elif quarter == 15:
-                            hour_to = f"{hour}.25"
-                        elif quarter == 30:
-                            hour_to = f"{hour}.5"
-                        else:  # 45
-                            hour_to = f"{hour}.75"
-                except Exception:
-                    hour_to = str(hour_to_val)
+                hour_to = _to_hour_key(hour_to_val)
         
         # Extract existing attachment IDs
         attachment_ids = leave_data.get('supported_attachment_ids', [])

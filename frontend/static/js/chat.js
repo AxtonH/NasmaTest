@@ -397,15 +397,24 @@ class ChatBot {
                 const toId = `ns_hour_to_${uid}`;
                 const applyId = `ns_hour_apply_${uid}`;
                 const options = Array.isArray(widgets.hour_options) ? widgets.hour_options : [];
-                const optsHtml = options.map(o => `<option value="${o.value}">${this.escapeHtml(o.label)}</option>`).join('');
+                const defaultFrom = widgets.hour_from || '9.0';
+                const defaultTo = widgets.hour_to || '1.0';
+                const optsHtmlFrom = options.map(o => {
+                    const sel = String(o.value) === String(defaultFrom) ? ' selected' : '';
+                    return `<option value="${o.value}"${sel}>${this.escapeHtml(o.label)}</option>`;
+                }).join('');
+                const optsHtmlTo = options.map(o => {
+                    const sel = String(o.value) === String(defaultTo) ? ' selected' : '';
+                    return `<option value="${o.value}"${sel}>${this.escapeHtml(o.label)}</option>`;
+                }).join('');
                 widgetsHtml = `
                     <div class="mt-3 flex items-center justify-start gap-3">
                         <select id="${fromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 min-w-[100px]">
-                            ${optsHtml}
+                            ${optsHtmlFrom}
                         </select>
                         <span>to</span>
                         <select id="${toId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 min-w-[100px]">
-                            ${optsHtml}
+                            ${optsHtmlTo}
                         </select>
                         <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium" style="background: #8B5FBF; color: white; border: none; cursor: pointer;">Apply</button>
                     </div>`;

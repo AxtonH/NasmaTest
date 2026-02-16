@@ -2400,21 +2400,30 @@
                         }
                     }, 0);
                 } else if (buttons && buttons.widgets && buttons.widgets.hour_range_picker) {
-                    // Hour range picker widget support (Half Days)
+                    // Hour range picker widget support (Half Days) - 9:00 AM to 1:00 AM, 30-min intervals
                     const wid = `nsw_${Date.now()}_${Math.floor(Math.random()*10000)}`;
                     const fromId = `${wid}_hour_from`;
                     const toId = `${wid}_hour_to`;
                     const applyId = `${wid}_apply`;
                     const hours = Array.isArray(buttons.widgets.hour_options) ? buttons.widgets.hour_options : [];
-                    const optsHtml = hours.map(o => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('');
+                    const defaultFrom = buttons.widgets.hour_from || '9.0';
+                    const defaultTo = buttons.widgets.hour_to || '1.0';
+                    const optsHtmlFrom = hours.map(o => {
+                        const sel = String(o.value) === String(defaultFrom) ? ' selected' : '';
+                        return `<option value="${escapeHtml(o.value)}"${sel}>${escapeHtml(o.label)}</option>`;
+                    }).join('');
+                    const optsHtmlTo = hours.map(o => {
+                        const sel = String(o.value) === String(defaultTo) ? ' selected' : '';
+                        return `<option value="${escapeHtml(o.value)}"${sel}>${escapeHtml(o.label)}</option>`;
+                    }).join('');
                     widgetsHtml = `
                         <div class="mt-3 flex items-center justify-start gap-3">
                             <select id="${fromId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] min-w-[100px]">
-                                ${optsHtml}
+                                ${optsHtmlFrom}
                             </select>
                             <span class="text-gray-600">to</span>
                             <select id="${toId}" class="h-10 px-3 rounded-full border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] min-w-[100px]">
-                                ${optsHtml}
+                                ${optsHtmlTo}
                             </select>
                             <button id="${applyId}" class="h-10 px-4 rounded-full text-sm font-medium btn-gradient transition-colors">Apply</button>
                         </div>
@@ -2923,9 +2932,9 @@
                     const defaultLeaveTypeId = buttons.widgets.leave_type_id || '';
                     const defaultDateFrom = buttons.widgets.date_from || '';
                     const defaultDateTo = buttons.widgets.date_to || '';
-                    const defaultIsCustomHours = buttons.widgets.is_custom_hours || false;
-                    const defaultHourFrom = buttons.widgets.hour_from || '';
-                    const defaultHourTo = buttons.widgets.hour_to || '';
+                                const defaultIsCustomHours = buttons.widgets.is_custom_hours || false;
+                                const defaultHourFrom = buttons.widgets.hour_from || '9.0';
+                                const defaultHourTo = buttons.widgets.hour_to || '1.0';
                     const defaultRelation = buttons.widgets.x_studio_relation || '';
                     
                     const leaveTypeOptsHtml = `<option value="" disabled ${!defaultLeaveTypeId ? 'selected' : ''}>Select leave type</option>` +

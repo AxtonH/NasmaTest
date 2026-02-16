@@ -1275,6 +1275,8 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         'leave_type_options': form_data.get('leave_type_options', []),
                         'leave_type_balances': form_data.get('leave_type_balances', {}),
                         'hour_options': form_data.get('hour_options', []),
+                        'hour_from': form_data.get('hour_from', '9.0'),
+                        'hour_to': form_data.get('hour_to', '1.0'),
                         'relation_options': form_data.get('relation_options', []),  # For Compassionate Leave
                         'context_key': 'submit_timeoff_request'
                     }
@@ -3264,7 +3266,9 @@ Be thorough and informative while maintaining clarity and accuracy."""
             'session_handled': True,
             'widgets': {
                 'hour_range_picker': True,
-                'hour_options': options
+                'hour_options': options,
+                'hour_from': '9.0',  # Default start: 9:00 AM
+                'hour_to': '1.0'     # Default end: 1:00 AM
             }
         }
 

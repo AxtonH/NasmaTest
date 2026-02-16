@@ -1335,20 +1335,29 @@ class TimeOffService:
                 relation_options = fallback_relation_options.copy()
                 debug_log("Using fallback relation options (Odoo fetch skipped for speed)", "bot_logic")
             
-            # Generate hour options (30-minute intervals)
-            # Simple function to generate hour options without needing OvertimeService
+            # Generate hour options: 9:00 AM to 1:00 AM (next day), 30-minute intervals
+            # Order: 9:00, 9:30, ..., 11:30 PM, 12:00 AM, 12:30 AM, 1:00 AM
+            def _fmt_hour_label(val: float) -> str:
+                h = int(val)
+                m = 30 if abs(val - h - 0.5) < 1e-6 else 0
+                ampm_h = h % 12
+                if ampm_h == 0:
+                    ampm_h = 12
+                ampm = 'AM' if h < 12 else 'PM'
+                return f"{ampm_h}:{m:02d} {ampm}" if m else f"{ampm_h}:00 {ampm}"
             hour_options = []
-            for hour in range(24):
-                # Whole hour
-                hour_options.append({
-                    'value': str(hour),
-                    'label': f"{hour:02d}:00"
-                })
-                # Half hour
-                hour_options.append({
-                    'value': f"{hour}.5",
-                    'label': f"{hour:02d}:30"
-                })
+            def _push(val: float):
+                canonical = round(val * 2) / 2.0
+                key = f"{canonical:.1f}"
+                hour_options.append({'value': key, 'label': _fmt_hour_label(val)})
+            v = 9.0
+            while v <= 23.5 + 1e-9:
+                _push(v)
+                v += 0.5
+            v = 0.0
+            while v <= 1.0 + 1e-9:
+                _push(v)
+                v += 0.5
             
             # Final safety check: if Compassionate Leave is in leave_type_options but relation_options is empty, use fallback
             has_compassionate = any(opt.get('label') == 'Compassionate Leave' for opt in leave_type_options)
@@ -1362,6 +1371,8 @@ class TimeOffService:
                 'leave_type_options': leave_type_options,
                 'leave_type_balances': leave_type_balances,
                 'hour_options': hour_options,
+                'hour_from': '9.0',  # Default start: 9:00 AM
+                'hour_to': '1.0',    # Default end: 1:00 AM
                 'relation_options': relation_options  # For Compassionate Leave
             }
         except Exception as e:

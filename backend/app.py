@@ -93,8 +93,9 @@ logging.basicConfig(
     force=True  # Override any existing configuration
 )
 
-# Suppress httpx INFO logs (Supabase client) - only show WARNING and above
-logging.getLogger('httpx').setLevel(logging.WARNING)
+# Suppress verbose INFO logs - only show WARNING and above
+logging.getLogger('httpx').setLevel(logging.WARNING)   # Supabase client
+logging.getLogger('werkzeug').setLevel(logging.WARNING)  # Flask/Werkzeug request logs
 
 # Get Flask logger
 logger = logging.getLogger('flask')
@@ -2581,8 +2582,8 @@ def create_app():
                                     'date_from': request_data.get('date_from', ''),
                                     'date_to': request_data.get('date_to', ''),
                                     'is_custom_hours': request_data.get('is_custom_hours', False),
-                                    'hour_from': request_data.get('hour_from', ''),
-                                    'hour_to': request_data.get('hour_to', ''),
+                                    'hour_from': request_data.get('hour_from') or '9.0',
+                                    'hour_to': request_data.get('hour_to') or '1.0',
                                     'has_existing_attachments': len(request_data.get('existing_attachment_ids', [])) > 0,
                                     'leave_type_options': leave_type_options,
                                     'leave_type_balances': leave_type_balances,

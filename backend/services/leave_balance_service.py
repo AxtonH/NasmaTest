@@ -272,20 +272,10 @@ class LeaveBalanceService:
                     else:
                         allocated[leave_type_name] = days
 
-                    # Debug: show which allocation contributed to which leave type and by how much
-                    alloc_id = allocation.get('id')
-                    debug_log(
-                        f"Allocation contribution - id={alloc_id}, type='{leave_type_name}', "
-                        f"days={days}, date_from={date_from_str}, date_to={date_to_str}, "
-                        f"running_total={allocated.get(leave_type_name)}",
-                        "odoo_data"
-                    )
-
                 except Exception as e:
                     debug_log(f"Error processing allocation: {str(e)}", "odoo_data")
                     continue
 
-            debug_log(f"Total allocated leave for employee {employee_id}: {allocated}", "odoo_data")
             return allocated, None
 
         except Exception as e:
@@ -389,7 +379,6 @@ class LeaveBalanceService:
                             if date_from >= period_start and date_to <= period_end:
                                 # Leave is entirely within period - use number_of_days directly
                                 days = total_days
-                                debug_log(f"Leave entirely in period {start_year}-{end_year}: using number_of_days={total_days}", "odoo_data")
                             elif date_from > period_end or date_to < period_start:
                                 # Leave is entirely outside period - skip (should be caught by domain but safety check)
                                 days = 0.0
@@ -404,7 +393,6 @@ class LeaveBalanceService:
                                     calendar_days_in_period = self._count_days_in_period(date_from, date_to, period_start, period_end)
                                     # Apportion number_of_days proportionally
                                     days = (total_days * calendar_days_in_period) / total_calendar_days
-                                    debug_log(f"Leave spans period: total_days={total_days}, calendar_days_in_period={calendar_days_in_period}, total_calendar_days={total_calendar_days}, apportioned={days}", "odoo_data")
                         except Exception as e:
                             # Fallback to number_of_days if date parsing fails
                             debug_log(f"Date parsing error, using number_of_days directly: {str(e)}", "odoo_data")
@@ -421,7 +409,6 @@ class LeaveBalanceService:
                     debug_log(f"Error processing leave: {str(e)}", "odoo_data")
                     continue
 
-            debug_log(f"Total taken leave for employee {employee_id}: {taken}", "odoo_data")
             return taken, None
 
         except Exception as e:
@@ -503,7 +490,6 @@ class LeaveBalanceService:
                         taken_days = taken_other.get(leave_type, 0.0)
                     remaining[leave_type] = max(0.0, allocated_days - taken_days)
 
-            debug_log(f"Remaining leave for employee {employee_id}: {remaining}", "bot_logic")
             return remaining, None
 
         except Exception as e:
