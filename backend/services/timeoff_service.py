@@ -1232,9 +1232,9 @@ class TimeOffService:
                 # Cannot determine balance -> enforce policy by hiding unpaid
                 show_unpaid_leave = False
 
-            # Check allocations for Maternity, Paternity, and Compassionate Leave
+            # Check allocations for Maternity, Paternity, Compassionate Leave, and Rest Days
             if allocated and isinstance(allocated, dict):
-                for check_type in ['Maternity Leave', 'Paternity Leave', 'Compassionate Leave']:
+                for check_type in ['Maternity Leave', 'Paternity Leave', 'Compassionate Leave', 'Rest Days']:
                     type_allocated = allocated.get(check_type, 0.0)
                     if type_allocated > 0:
                         # Check if there's remaining balance
@@ -1245,50 +1245,21 @@ class TimeOffService:
                             debug_log(f"Including {check_type} in dropdown - user has {type_remaining} days remaining", "bot_logic")
             
             # Filter to only show main types: Annual Leave, Sick Leave, Unpaid Leave (if allowed)
-            # Plus Maternity/Paternity/Compassionate if user has allocations
+            # Plus Maternity/Paternity/Compassionate/Rest Days if user has allocations
             main_types = ['Annual Leave', 'Sick Leave']
             if show_unpaid_leave:
                 main_types.append('Unpaid Leave')
             main_types.extend(additional_types)
 
             # Build balance map for UI (leave type id -> formatted balance)
-            # Use calculate_remaining_leave for consistency with the "Leaves and Balances" view
+            # Derive from allocated/taken already fetched - same logic as calculate_remaining_leave, avoids 4 extra Odoo calls
             remaining_all = {}
-            try:
-                try:
-                    from .leave_balance_service import LeaveBalanceService
-                except Exception:
-                    from leave_balance_service import LeaveBalanceService
-                
-                leave_balance_service = LeaveBalanceService(self.odoo_service)
-                # Use calculate_remaining_leave to ensure consistency with balance display
-                remaining_all, remaining_error = leave_balance_service.calculate_remaining_leave(
-                    employee_id,
-                    leave_type_name=None,  # Get all leave types
-                    odoo_session_data=odoo_session_data
-                )
-                
-                if remaining_error:
-                    debug_log(f"Error calculating remaining leave for balance display: {remaining_error}. Falling back to manual calculation.", "bot_logic")
-                    # Fallback to manual calculation if calculate_remaining_leave fails
-                    if isinstance(allocated, dict) or isinstance(taken, dict):
-                        all_types = set((allocated or {}).keys()) | set((taken or {}).keys())
-                        for lt_name in all_types:
-                            alloc_val = (allocated or {}).get(lt_name, 0.0)
-                            taken_val = (taken or {}).get(lt_name, 0.0)
-                            remaining_all[lt_name] = max(0.0, alloc_val - taken_val)
-            except Exception as e:
-                debug_log(f"Error building remaining balances: {str(e)}. Falling back to manual calculation.", "bot_logic")
-                # Fallback to manual calculation
-                try:
-                    if isinstance(allocated, dict) or isinstance(taken, dict):
-                        all_types = set((allocated or {}).keys()) | set((taken or {}).keys())
-                        for lt_name in all_types:
-                            alloc_val = (allocated or {}).get(lt_name, 0.0)
-                            taken_val = (taken or {}).get(lt_name, 0.0)
-                            remaining_all[lt_name] = max(0.0, alloc_val - taken_val)
-                except Exception:
-                    remaining_all = {}
+            if isinstance(allocated, dict) and isinstance(taken, dict):
+                all_types = set(allocated.keys()) | set(taken.keys())
+                for lt_name in all_types:
+                    alloc_val = allocated.get(lt_name, 0.0)
+                    taken_val = taken.get(lt_name, 0.0)
+                    remaining_all[lt_name] = max(0.0, alloc_val - taken_val)
 
             leave_type_options = []
             for lt in leave_types:

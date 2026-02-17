@@ -420,7 +420,7 @@ class LeaveBalanceService:
         """
         Calculate remaining leave time for an employee.
         
-        Annual Leave uses a 3-year period (current year + previous 2 years).
+        Annual Leave and Rest Days use a 3-year period (current year + previous 2 years).
         Other leave types use a 2-year period (current year + previous year).
         
         Args:
@@ -446,17 +446,17 @@ class LeaveBalanceService:
 
             remaining = {}
 
-            if leave_type_name == 'Annual Leave':
-                # Annual Leave only: use 3-year period
+            if leave_type_name in ('Annual Leave', 'Rest Days'):
+                # Annual Leave and Rest Days: use 3-year period
                 allocated, alloc_error = self.get_total_allocated_leave(employee_id, annual_start_year, annual_end_year, odoo_session_data)
                 taken, taken_error = self.get_taken_leave(employee_id, annual_start_year, annual_end_year, odoo_session_data)
                 if alloc_error:
                     return {}, alloc_error
                 if taken_error:
                     return {}, taken_error
-                allocated_days = allocated.get('Annual Leave', 0.0)
-                taken_days = taken.get('Annual Leave', 0.0)
-                remaining['Annual Leave'] = max(0.0, allocated_days - taken_days)
+                allocated_days = allocated.get(leave_type_name, 0.0)
+                taken_days = taken.get(leave_type_name, 0.0)
+                remaining[leave_type_name] = max(0.0, allocated_days - taken_days)
             elif leave_type_name:
                 # Specific non-annual type: use 2-year period
                 allocated, alloc_error = self.get_total_allocated_leave(employee_id, other_start_year, other_end_year, odoo_session_data)
@@ -482,7 +482,7 @@ class LeaveBalanceService:
 
                 all_types = set(allocated_annual.keys()) | set(allocated_other.keys()) | set(taken_annual.keys()) | set(taken_other.keys())
                 for leave_type in all_types:
-                    if leave_type == 'Annual Leave':
+                    if leave_type in ('Annual Leave', 'Rest Days'):
                         allocated_days = allocated_annual.get(leave_type, 0.0)
                         taken_days = taken_annual.get(leave_type, 0.0)
                     else:
@@ -502,29 +502,42 @@ class LeaveBalanceService:
     ) -> Tuple[Dict[str, float], Dict[str, float], Optional[str]]:
         """
         Get allocated and taken leave for display, using the same period logic as calculate_remaining_leave.
-        Annual Leave: 3-year period. Other types: 2-year period.
+        Annual Leave and Rest Days: 3-year period. Other types: 2-year period.
+        Runs Odoo calls in parallel for faster performance.
         
         Returns:
             Tuple of (allocated_dict, taken_dict, error_message)
         """
+        import concurrent.futures
         current_year = datetime.now().year
         annual_start_year = current_year - 2
         annual_end_year = current_year
         other_start_year = current_year - 1
         other_end_year = current_year
 
-        allocated_annual, alloc_err_a = self.get_total_allocated_leave(
-            employee_id, annual_start_year, annual_end_year, odoo_session_data
-        )
-        taken_annual, taken_err_a = self.get_taken_leave(
-            employee_id, annual_start_year, annual_end_year, odoo_session_data
-        )
-        allocated_other, alloc_err_o = self.get_total_allocated_leave(
-            employee_id, other_start_year, other_end_year, odoo_session_data
-        )
-        taken_other, taken_err_o = self.get_taken_leave(
-            employee_id, other_start_year, other_end_year, odoo_session_data
-        )
+        allocated_annual, alloc_err_a = None, None
+        taken_annual, taken_err_a = None, None
+        allocated_other, alloc_err_o = None, None
+        taken_other, taken_err_o = None, None
+
+        def fetch_annual_allocated():
+            return self.get_total_allocated_leave(employee_id, annual_start_year, annual_end_year, odoo_session_data)
+        def fetch_annual_taken():
+            return self.get_taken_leave(employee_id, annual_start_year, annual_end_year, odoo_session_data)
+        def fetch_other_allocated():
+            return self.get_total_allocated_leave(employee_id, other_start_year, other_end_year, odoo_session_data)
+        def fetch_other_taken():
+            return self.get_taken_leave(employee_id, other_start_year, other_end_year, odoo_session_data)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            f_alloc_a = executor.submit(fetch_annual_allocated)
+            f_taken_a = executor.submit(fetch_annual_taken)
+            f_alloc_o = executor.submit(fetch_other_allocated)
+            f_taken_o = executor.submit(fetch_other_taken)
+            allocated_annual, alloc_err_a = f_alloc_a.result()
+            taken_annual, taken_err_a = f_taken_a.result()
+            allocated_other, alloc_err_o = f_alloc_o.result()
+            taken_other, taken_err_o = f_taken_o.result()
 
         if alloc_err_a or alloc_err_o:
             return {}, {}, alloc_err_a or alloc_err_o
@@ -540,7 +553,7 @@ class LeaveBalanceService:
         allocated = {}
         taken = {}
         for leave_type in all_types:
-            if leave_type == 'Annual Leave':
+            if leave_type in ('Annual Leave', 'Rest Days'):
                 allocated[leave_type] = allocated_annual.get(leave_type, 0.0)
                 taken[leave_type] = taken_annual.get(leave_type, 0.0)
             else:

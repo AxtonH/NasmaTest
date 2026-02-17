@@ -2382,77 +2382,56 @@ def create_app():
                         except Exception:
                             user_tz = None
                         odoo_session_data = get_odoo_session_data()
-                        ok, request_data = get_timeoff_request_for_edit(odoo_service, leave_id, user_tz, odoo_session_data)
+                        employee_id = employee_data.get('id') if employee_data else None
+
+                        def _fetch_allocated_taken():
+                            if not employee_id:
+                                return {}, {}
+                            try:
+                                try:
+                                    from .services.leave_balance_service import LeaveBalanceService
+                                except Exception:
+                                    from services.leave_balance_service import LeaveBalanceService
+                                lbs = LeaveBalanceService(odoo_service)
+                                a, t, err = lbs.get_allocated_and_taken_for_display(employee_id, odoo_session_data)
+                                return (a, t) if not err else ({}, {})
+                            except Exception:
+                                return {}, {}
+
+                        # Run fetches in parallel for faster performance
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                            f_request = executor.submit(get_timeoff_request_for_edit, odoo_service, leave_id, user_tz, odoo_session_data)
+                            f_leave_types = executor.submit(timeoff_service.get_leave_types)
+                            f_at = executor.submit(_fetch_allocated_taken)
+                            ok, request_data = f_request.result()
+                            ok_leave_types, leave_types = f_leave_types.result()
+                            allocated, taken = f_at.result()
                         if ok:
-                            # Fetch leave types for dropdown
-                            ok_leave_types, leave_types = timeoff_service.get_leave_types()
                             leave_type_options = []
                             leave_type_balances = {}
                             if ok_leave_types and isinstance(leave_types, list):
-                                # Check Annual Leave balance to determine if Unpaid Leave should be shown
-                                # Hide Unpaid Leave if user has more than 30 minutes (0.0625 days) of Annual Leave available
+                                # Derive from allocated/taken (single fetch, no extra Odoo calls)
                                 show_unpaid_leave = True
-                                try:
-                                    try:
-                                        from .services.leave_balance_service import LeaveBalanceService
-                                    except Exception:
-                                        from services.leave_balance_service import LeaveBalanceService
-                                    
-                                    leave_balance_service = LeaveBalanceService(odoo_service)
-                                    odoo_session_data = get_odoo_session_data()
-                                    remaining, error = leave_balance_service.calculate_remaining_leave(
-                                        employee_data.get('id') if employee_data else None,
-                                        'Annual Leave',
-                                        odoo_session_data
-                                    )
-                                    
-                                    if not error and remaining and employee_data:
-                                        annual_leave_balance = remaining.get('Annual Leave', 0.0)
-                                        # 30 minutes = 0.5 hours = 0.5/8 = 0.0625 days
-                                        if annual_leave_balance > 0.0625:
-                                            show_unpaid_leave = False
-                                            debug_log(f"Hiding Unpaid Leave option in edit form - user has {annual_leave_balance} days of Annual Leave available", "bot_logic")
-                                except Exception as e:
-                                    debug_log(f"Error checking Annual Leave balance for unpaid leave filter in edit form: {str(e)}", "bot_logic")
-                                    # On error, allow unpaid leave to be shown (fail open)
-                                
-                                # Check for allocations of Maternity, Paternity, and Compassionate Leave
+                                annual_remaining = (allocated.get('Annual Leave', 0.0) - taken.get('Annual Leave', 0.0)) if allocated or taken else None
+                                if annual_remaining is not None and annual_remaining > 0.0625:
+                                    show_unpaid_leave = False
+                                    debug_log(f"Hiding Unpaid Leave option in edit form - user has {annual_remaining} days of Annual Leave available", "bot_logic")
                                 additional_types = []
-                                try:
-                                    odoo_session_data = get_odoo_session_data()
-                                    # Check each leave type for allocations
-                                    for check_type in ['Maternity Leave', 'Paternity Leave', 'Compassionate Leave']:
-                                        remaining, error = leave_balance_service.calculate_remaining_leave(
-                                            employee_data.get('id') if employee_data else None,
-                                            check_type,
-                                            odoo_session_data
-                                        )
-                                        if not error and remaining:
-                                            balance = remaining.get(check_type, 0.0)
-                                            if balance > 0:
-                                                additional_types.append(check_type)
-                                                debug_log(f"Including {check_type} in edit form dropdown - user has {balance} days allocated", "bot_logic")
-                                except Exception as e:
-                                    debug_log(f"Error checking allocations for additional leave types in edit form: {str(e)}", "bot_logic")
-                                    # On error, continue without these types (fail safe)
-                                
-                                # Filter to only show Annual Leave, Sick Leave, Unpaid Leave (if allowed)
-                                # Plus Maternity/Paternity/Compassionate if user has allocations
+                                for check_type in ['Maternity Leave', 'Paternity Leave', 'Compassionate Leave', 'Rest Days']:
+                                    type_remaining = (allocated.get(check_type, 0.0) - taken.get(check_type, 0.0)) if (allocated or taken) else 0.0
+                                    if type_remaining > 0:
+                                        additional_types.append(check_type)
+                                        debug_log(f"Including {check_type} in edit form dropdown - user has {type_remaining} days allocated", "bot_logic")
                                 main_types = ['Annual Leave', 'Sick Leave']
                                 if show_unpaid_leave:
                                     main_types.append('Unpaid Leave')
                                 main_types.extend(additional_types)
-
-                                # Build balance map for UI (leave type id -> formatted balance)
                                 remaining_all = {}
-                                try:
-                                    remaining_all, _ = leave_balance_service.calculate_remaining_leave(
-                                        employee_data.get('id') if employee_data else None,
-                                        None,
-                                        odoo_session_data
-                                    )
-                                except Exception:
-                                    remaining_all = {}
+                                if allocated or taken:
+                                    all_lt = set((allocated or {}).keys()) | set((taken or {}).keys())
+                                    for lt_name in all_lt:
+                                        remaining_all[lt_name] = max(0.0, (allocated or {}).get(lt_name, 0.0) - (taken or {}).get(lt_name, 0.0))
                                 
                                 for lt in leave_types:
                                     lt_name = lt.get('name', '')
