@@ -451,21 +451,21 @@ class ReimbursementService:
                     if len(analytic_distribution) > 0:
                         first_line = analytic_distribution[0]
                         if isinstance(first_line, dict):
-                            project_id = first_line.get('project_id')
-                            market_id = first_line.get('market_id')
                             pool_id = first_line.get('pool_id')
+                            business_unit_id = first_line.get('business_unit_id')
+                            sub_business_unit_id = first_line.get('sub_business_unit_id')
                             
                             account_ids = []
-                            if project_id:
-                                account_ids.append(int(project_id))
-                            if market_id:
-                                account_ids.append(int(market_id))
                             if pool_id:
                                 account_ids.append(int(pool_id))
+                            if business_unit_id:
+                                account_ids.append(int(business_unit_id))
+                            if sub_business_unit_id:
+                                account_ids.append(int(sub_business_unit_id))
                             
                             if account_ids:
                                 # Odoo stores ONE line with all columns using a comma-separated string key
-                                # Format: {'153,265,269': 100.0} creates one row with Project, Market, Pool columns all filled
+                                # Format matches analytic columns (e.g. Pod/Pool | Business Unit | Sub-business Unit)
                                 account_ids_str = ','.join(str(int(acc_id)) for acc_id in account_ids)
                                 analytic_dict = {account_ids_str: 100.0}
                                 
@@ -1279,9 +1279,9 @@ class ReimbursementService:
                     'category_options': form_data.get('category_options', []),
                     'currency_options': form_data.get('currency_options', []),
                     'destination_options': form_data.get('destination_options', []),
-                    'project_options': form_data.get('project_options', []),
-                    'market_options': form_data.get('market_options', []),
                     'pool_options': form_data.get('pool_options', []),
+                    'business_unit_options': form_data.get('business_unit_options', []),
+                    'sub_business_unit_options': form_data.get('sub_business_unit_options', []),
                     'default_currency': form_data.get('default_currency'),
                     'context_key': 'submit_reimbursement_request'
                 }
@@ -1300,8 +1300,8 @@ class ReimbursementService:
     def build_reimbursement_request_form_data(self, employee_id: int, odoo_session_data: Dict = None) -> Tuple[bool, Any]:
         """Build form widget data for reimbursement request.
         
-        Returns widget data with category options, currency options, destination options, and analytic account options.
-        Similar structure to build_timeoff_request_form_data for consistency.
+        Returns widget data with category options, currency options, destination options,
+        and analytic accounts for Pool (or Pod), Business Unit, and Sub-business Unit plans.
         """
         try:
             # Fetch currency, destination, and analytic account options in parallel for better performance
@@ -1339,10 +1339,10 @@ class ReimbursementService:
                 self._log(f"Error fetching destination options: {destination_error}", "bot_logic")
                 destination_options = []
             
-            # analytic_options is a dict with 'project', 'market', 'pool' keys
+            # analytic_options is a dict with 'pool', 'business_unit', 'sub_business_unit' keys
             if not isinstance(analytic_options, dict):
                 self._log(f"Error fetching analytic account options: Invalid format", "bot_logic")
-                analytic_options = {'project': [], 'market': [], 'pool': []}
+                analytic_options = {'pool': [], 'business_unit': [], 'sub_business_unit': []}
             
             # Get default currency based on company
             default_currency_code = self._get_default_currency_for_company(
@@ -1356,18 +1356,18 @@ class ReimbursementService:
                 {'value': 'travel_accommodation', 'label': 'Travel & Accommodation'}
             ]
             
-            # Separate analytic options by plan (Project, Market, Pool)
-            project_options = analytic_options.get('project', [])
-            market_options = analytic_options.get('market', [])
+            # Separate analytic options by plan (Pool/Pod, Business Unit, Sub-business Unit)
             pool_options = analytic_options.get('pool', [])
+            business_unit_options = analytic_options.get('business_unit', [])
+            sub_business_unit_options = analytic_options.get('sub_business_unit', [])
             
             return True, {
                 'category_options': category_options,
                 'currency_options': currency_options,
                 'destination_options': destination_options,
-                'project_options': project_options,
-                'market_options': market_options,
                 'pool_options': pool_options,
+                'business_unit_options': business_unit_options,
+                'sub_business_unit_options': sub_business_unit_options,
                 'default_currency': default_currency_code
             }
             
@@ -1381,7 +1381,8 @@ class ReimbursementService:
         """Handle reimbursement form submission - parse form data and show confirmation"""
         try:
             # Format: submit_reimbursement_request:CATEGORY|AMOUNT|CURRENCY_ID|DATE|DESTINATION_ID|LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
-            # ANALYTIC_DISTRIBUTION format: JSON string like '[{"account_id": 123, "percentage": 50}, {"account_id": 456, "percentage": 50}]'
+            # ANALYTIC_DISTRIBUTION format: JSON array with objects
+            #   {"pool_id": int, "business_unit_id": int, "sub_business_unit_id": int} (pool = Pod/Pool analytic account)
             # For Per Diem: submit_reimbursement_request:per_diem|||DD/MM/YYYY to DD/MM/YYYY|DESTINATION_ID|LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
             # For Miscellaneous: submit_reimbursement_request:miscellaneous|AMOUNT|CURRENCY_ID|DD/MM/YYYY||LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
             # For Travel & Accommodation: submit_reimbursement_request:travel_accommodation|AMOUNT|CURRENCY_ID|||LINK|DESCRIPTION|ANALYTIC_DISTRIBUTION
@@ -1442,7 +1443,7 @@ class ReimbursementService:
                             'thread_id': thread_id,
                             'source': 'reimbursement_service'
                         }
-                    # Validate each line has project_id, market_id, pool_id
+                    # Validate each line has pool_id, business_unit_id, sub_business_unit_id
                     for idx, item in enumerate(analytic_distribution):
                         if not isinstance(item, dict):
                             return {
@@ -1450,9 +1451,13 @@ class ReimbursementService:
                                 'thread_id': thread_id,
                                 'source': 'reimbursement_service'
                             }
-                        if not item.get('project_id') or not item.get('market_id') or not item.get('pool_id'):
+                        if (
+                            not item.get('pool_id')
+                            or not item.get('business_unit_id')
+                            or not item.get('sub_business_unit_id')
+                        ):
                             return {
-                                'message': f'Line {idx + 1} must have project_id, market_id, and pool_id.',
+                                'message': f'Line {idx + 1} must have pool_id, business_unit_id, and sub_business_unit_id.',
                                 'thread_id': thread_id,
                                 'source': 'reimbursement_service'
                             }
@@ -1472,7 +1477,7 @@ class ReimbursementService:
             else:
                 # Analytic distribution is required
                 return {
-                    'message': 'Please fill in Analytic Distribution (Project, Market, and Pool). It is required for all reimbursement requests.',
+                    'message': 'Please fill in Analytic Distribution (Pool, Business Unit, and Sub-business Unit). It is required for all reimbursement requests.',
                     'thread_id': thread_id,
                     'source': 'reimbursement_service'
                 }
@@ -1646,9 +1651,9 @@ class ReimbursementService:
             if analytic_distribution and isinstance(analytic_distribution, list):
                 confirmation_lines.append(f"📊 **Analytic Distribution:**\n")
                 for idx, item in enumerate(analytic_distribution):
-                    project_id = item.get('project_id')
-                    market_id = item.get('market_id')
                     pool_id = item.get('pool_id')
+                    business_unit_id = item.get('business_unit_id')
+                    sub_business_unit_id = item.get('sub_business_unit_id')
                     
                     # Resolve account names
                     def resolve_account_name(account_id):
@@ -1667,15 +1672,15 @@ class ReimbursementService:
                             pass
                         return f"Account ID: {account_id}"
                     
-                    project_name = resolve_account_name(project_id)
-                    market_name = resolve_account_name(market_id)
                     pool_name = resolve_account_name(pool_id)
+                    business_unit_name = resolve_account_name(business_unit_id)
+                    sub_business_unit_name = resolve_account_name(sub_business_unit_id)
                     
                     if len(analytic_distribution) > 1:
                         confirmation_lines.append(f"   **Line {idx + 1}:**\n")
-                    confirmation_lines.append(f"   • Project: {project_name}\n")
-                    confirmation_lines.append(f"   • Market: {market_name}\n")
-                    confirmation_lines.append(f"   • Pool: {pool_name}\n")
+                    confirmation_lines.append(f"   • Pod: {pool_name}\n")
+                    confirmation_lines.append(f"   • Business Unit: {business_unit_name}\n")
+                    confirmation_lines.append(f"   • Sub-business Unit: {sub_business_unit_name}\n")
             
             confirmation_lines.append("\nDo you want to submit this request? Reply or click 'Yes' to confirm or 'No' to cancel.")
             
@@ -1951,41 +1956,52 @@ class ReimbursementService:
         except Exception:
             return None
 
+    def _resolve_analytic_plan_id(self, odoo_session_data: Dict, candidate_names: List[str]) -> Optional[int]:
+        """Return account.analytic.plan id for the first matching plan name (exact match)."""
+        for plan_name in candidate_names:
+            params = {
+                'args': [[('name', '=', plan_name)]],
+                'kwargs': {
+                    'fields': ['id', 'name'],
+                    'limit': 1
+                }
+            }
+            success, result = self._make_odoo_request('account.analytic.plan', 'search_read', params, odoo_session_data)
+            if success and result and len(result) > 0:
+                return result[0].get('id')
+        return None
+
     def _get_analytic_account_options_by_plan(self, odoo_session_data: Dict = None) -> Dict[str, List[Dict[str, Any]]]:
         """Fetch analytic account options from account.analytic.account, separated by plan.
-        Returns dict with 'project', 'market', 'pool' keys, each containing a list of {label, value}.
+        Returns dict with 'pool', 'business_unit', 'sub_business_unit' keys (Pool covers Pod/Pool plan names in Odoo).
         """
         try:
-            # First, resolve plan names to IDs
-            plan_names = {
-                'project': 'Projects',  # Updated: Live database uses "Projects" not "Projects [Archive]"
-                'market': 'Market',
-                'pool': 'Pool'
+            # Order matches Odoo analytic distribution columns: Pod/Pool | Business Unit | Sub-business Unit
+            plan_groups: List[Tuple[str, List[str]]] = [
+                ('pool', ['Pod', 'Pool']),
+                ('business_unit', ['Business Unit']),
+                ('sub_business_unit', ['Sub-business Unit', 'Sub-Business Unit', 'Sub Business Unit']),
+            ]
+
+            plan_ids: Dict[str, Optional[int]] = {}
+            for key, candidates in plan_groups:
+                plan_ids[key] = self._resolve_analytic_plan_id(odoo_session_data, candidates)
+                if not plan_ids[key]:
+                    self._log(
+                        f"Could not resolve analytic plan for '{key}' (tried {candidates})",
+                        "bot_logic",
+                    )
+
+            result_dict: Dict[str, List[Dict[str, Any]]] = {
+                'pool': [],
+                'business_unit': [],
+                'sub_business_unit': [],
             }
-            
-            plan_ids = {}
-            for key, plan_name in plan_names.items():
-                params = {
-                    'args': [[('name', '=', plan_name)]],
-                    'kwargs': {
-                        'fields': ['id', 'name'],
-                        'limit': 1
-                    }
-                }
-                success, result = self._make_odoo_request('account.analytic.plan', 'search_read', params, odoo_session_data)
-                if success and result and len(result) > 0:
-                    plan_ids[key] = result[0].get('id')
-                else:
-                    self._log(f"Could not find plan '{plan_name}'", "bot_logic")
-                    plan_ids[key] = None
-            
-            # Fetch accounts for each plan
-            result_dict = {'project': [], 'market': [], 'pool': []}
-            
+
             for key, plan_id in plan_ids.items():
                 if not plan_id:
                     continue
-                
+
                 params = {
                     'args': [[('plan_id', '=', plan_id)]],
                     'kwargs': {
@@ -1997,16 +2013,19 @@ class ReimbursementService:
                 success, accounts = self._make_odoo_request('account.analytic.account', 'search_read', params, odoo_session_data)
                 if success and accounts:
                     result_dict[key] = [
-                        {'label': r.get('name') or f"Analytic Account {r.get('id')}", 'value': r.get('id')} 
+                        {'label': r.get('name') or f"Analytic Account {r.get('id')}", 'value': r.get('id')}
                         for r in accounts
                     ]
                 else:
-                    self._log(f"Error fetching accounts for plan '{key}': {accounts if not success else 'No accounts found'}", "bot_logic")
-            
+                    self._log(
+                        f"Error fetching accounts for plan '{key}': {accounts if not success else 'No accounts found'}",
+                        "bot_logic",
+                    )
+
             return result_dict
-            
+
         except Exception as e:
             self._log(f"Error fetching analytic account options by plan: {e}", "bot_logic")
             import traceback
             traceback.print_exc()
-            return {'project': [], 'market': [], 'pool': []}
+            return {'pool': [], 'business_unit': [], 'sub_business_unit': []}
