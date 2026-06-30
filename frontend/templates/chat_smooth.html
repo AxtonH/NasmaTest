@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
     <link crossorigin="" href="https://fonts.gstatic.com/" rel="preconnect"/>
     <link as="style" href="https://fonts.googleapis.com/css2?display=swap&amp;family=Noto+Sans%3Awght%40400%3B500%3B700%3B900&amp;family=Space+Grotesk%3Awght%40400%3B500%3B700" onload="this.rel='stylesheet'" rel="stylesheet"/>
     <link as="style" href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&display=swap" onload="this.rel='stylesheet'" rel="stylesheet"/>
@@ -653,6 +654,145 @@
              pointer-events: none;
          }
 
+         .design-font-root {
+             font-family: "Space Grotesk", "Noto Sans", sans-serif;
+         }
+
+         .brand-primary {
+             color: #2b1b4c;
+         }
+
+         .brand-dot {
+             color: #ff6666;
+         }
+
+         .greeting-heading {
+             font-family: 'Poppins', sans-serif;
+             font-size: 24pt;
+         }
+
+         .avatar-bg-initial {
+             background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuByAlk1xd1gFxpcyF2YjgQgOqziFQnVkG18tRDUlP29ZRlgzShVuTeWX8ew1gKajYuD9KU7sn9ehtTzszONEGhnFL0SEwEKIFkpX9KxTIIrHfx2cLbjRqUowfV2tf-zjGo_k1HxYOo1r3j7_9LDMeIELganfPwV6_q-JEVeaMYRuR_ekBjo9GBBpT8pJSQpL2sF4qaL2mqKWke0fkV8VOo-MUf0r7m07yQ_-kcvvkiYgPcGhyeFrNfL-FKfHi1fd-75jmV81QcxKWFz");
+             background-size: cover;
+             background-position: center;
+         }
+
+         .avatar-bg-conversation {
+             background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDhwW5-wPcfNiUcpFsTkT6y9M8_0qlwWaACSajKEttxrB_8x_HYum0NPwqQDg-OMN_PJ6m4yDP3wRShiqCC5VYloTvlVgh-t0feReJLOzXvTqUAyaPFr1mkRtYsASdB_O-BM14d7n5qzlKpo1ypb0_0EoIQprHzisHUIa90V6fVLCZGr8yrBo6Vj2myu8q4tT7IB4NnpnCtIBfnB8TmtvoLEKn6zXup_9oTIZWrCTLYuJbS51DSmKVEYrvargYZktcRikgYRIApRhX8");
+             background-size: cover;
+             background-position: center;
+         }
+
+         .card-text-left {
+             text-align: left;
+         }
+
+         .icon-left {
+             justify-content: flex-start;
+         }
+
+         .conversation-sidebar-panel {
+             z-index: 2147483647 !important;
+             pointer-events: auto !important;
+         }
+
+         .conversation-sidebar-actions {
+             position: relative !important;
+             z-index: 2147483647 !important;
+             pointer-events: auto !important;
+         }
+
+         .sidebar-action-button {
+             z-index: 2147483647;
+             pointer-events: auto;
+         }
+
+         .sidebar-action-button-spaced {
+             margin-bottom: 0.75rem;
+         }
+
+         .conversation-footer-shell {
+             background: transparent;
+         }
+
+         .global-sidebar-wrapper,
+         .global-overlay-wrapper {
+             position: absolute;
+             top: 0;
+             left: 0;
+             height: 0;
+             width: 0;
+             overflow: visible;
+         }
+
+         .global-sidebar-panel {
+             position: fixed;
+             top: 0;
+             left: 0;
+             width: 320px;
+             height: 100vh;
+             background: rgba(255, 255, 255, 0.95);
+             backdrop-filter: blur(20px);
+             box-shadow: 0 0 50px rgba(0, 0, 0, 0.1);
+             transform: translateX(-100%);
+             transition: transform 0.3s ease;
+             z-index: 10000;
+             display: flex;
+             flex-direction: column;
+             pointer-events: none;
+         }
+
+         .global-sidebar-footer {
+             padding: 1.5rem;
+             border-top: 1px solid rgba(0, 0, 0, 0.1);
+             display: flex;
+             flex-direction: column;
+             gap: 0.75rem;
+         }
+
+         .global-sidebar-action {
+             width: 100%;
+             height: 50px;
+             border: none;
+             border-radius: 8px;
+             display: flex;
+             align-items: center;
+             justify-content: center;
+             cursor: pointer;
+             font-size: 16px;
+             font-weight: 500;
+             position: relative;
+             z-index: 99999;
+             pointer-events: auto;
+             margin: 0;
+             padding: 0;
+             box-sizing: border-box;
+             gap: 8px;
+         }
+
+         .global-sidebar-action-spaced {
+             margin-bottom: 12px;
+         }
+
+         .material-icon-20 {
+             font-family: 'Material Symbols Outlined';
+             font-size: 20px;
+         }
+
+         .global-overlay-panel {
+             position: fixed;
+             top: 0;
+             left: 0;
+             width: 100vw;
+             height: 100vh;
+             background: rgba(0, 0, 0, 0.3);
+             opacity: 0;
+             visibility: hidden;
+             transition: opacity 0.3s ease, visibility 0.3s ease;
+             z-index: 99;
+             pointer-events: none;
+         }
+
 
          /* Background image styling */
          .nasma-background {
@@ -911,20 +1051,20 @@
 
     <!-- Initial State -->
     <div id="initialState" class="blur-transition">
-         <div class="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden" style='font-family: "Space Grotesk", "Noto Sans", sans-serif;'>
+         <div class="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden design-font-root">
             <div class="layout-container flex h-full grow flex-col">
                 <header class="flex items-center justify-between whitespace-nowrap px-6 py-4">
                     <div class="flex items-center gap-2 text-[var(--text-primary)]">
-                        <button id="initialSidebarToggle" class="flex items-center justify-center size-14 rounded-full hover:bg-white/60 transition-colors">
+                        <button id="initialSidebarToggle" class="flex items-center justify-center size-14 rounded-full hover:bg-white/60 transition-colors" aria-label="Open chat history" title="Open chat history">
                             <span class="material-symbols-outlined text-2xl">menu</span>
                         </button>
-                        <h1 class="text-xl font-bold"><span style="color: #2b1b4c;">{{ brand_name or 'NasmaPL' }}</span><span style="color: #ff6666;">.</span></h1>
+                        <h1 class="text-xl font-bold"><span class="brand-primary">{{ brand_name or 'NasmaPL' }}</span><span class="brand-dot">.</span></h1>
                     </div>
                     <div class="flex items-center gap-4">
-                        <button id="newChatButtonInitial" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors">
+                        <button id="newChatButtonInitial" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors" aria-label="Start new chat" title="Start new chat">
                             <span class="material-symbols-outlined text-[var(--text-primary)]">add</span>
                         </button>
-                        <button id="logoutButton" class="avatar-loading w-[44px] h-[44px] rounded-full border border-gray-200 shadow-sm overflow-hidden" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuByAlk1xd1gFxpcyF2YjgQgOqziFQnVkG18tRDUlP29ZRlgzShVuTeWX8ew1gKajYuD9KU7sn9ehtTzszONEGhnFL0SEwEKIFkpX9KxTIIrHfx2cLbjRqUowfV2tf-zjGo_k1HxYOo1r3j7_9LDMeIELganfPwV6_q-JEVeaMYRuR_ekBjo9GBBpT8pJSQpL2sF4qaL2mqKWke0fkV8VOo-MUf0r7m07yQ_-kcvvkiYgPcGhyeFrNfL-FKfHi1fd-75jmV81QcxKWFz"); background-size: cover; background-position: center;'></button>
+                        <button id="logoutButton" class="avatar-loading avatar-bg-initial w-[44px] h-[44px] rounded-full border border-gray-200 shadow-sm overflow-hidden" aria-label="Log out" title="Log out"></button>
                     </div>
                 </header>
                 <main class="flex-1 flex flex-col items-center justify-center px-4 py-8">
@@ -934,7 +1074,7 @@
                                 <img src="/Nasma-Avatar.svg" onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEwIiBoZWlnaHQ9IjExNCIgdmlld0JveD0iMCAwIDExMCAxMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yNS4wNSA4Ni44NjQ0QzE4LjYyIDg2Ljg2NDQgMTMuMTcgODUuMTM0NCA4Ljc4OTk4IDgxLjY3NDRDMy45MTM0NCA3Ny43MDQ2IDAuNzk1MzY1IDcxLjk3NSAwLjEwOTk4NSA2NS43MjQ0VjY1LjM5NDRWNjUuMDY0NEMwLjEwOTk4NSA1OC4zMTQ0IDIuNCA1Mi41MDQ0IDYuNzUgNDguMjU0NEMxNC4xMSA0MS4wNjQ0IDI0LjY2IDQwLjg5NDQgMjYuMzYgNDAuOTE0NEgzOC40OVY1Ny40NjQ0SDI2LjFDMjQuNjggNTcuNDY0NCAyMC40NCA1Ny45NjQ0IDE4LjI5IDYwLjExNDRDMTcuNzQxNCA2MC43MDExIDE3LjMxNjMgNjEuMzkyIDE3LjAzOTcgNjIuMTQ2MUMxNi43NjMyIDYyLjkwMDIgMTYuNjQwOSA2My43MDIyIDE2LjY4IDY0LjUwNDRDMTYuOTk4NiA2Ni4xNTA1IDE3Ljg3ODcgNjcuNjM0OSAxOS4xNyA2OC43MDQ0QzIxLjY3IDcwLjU5NDQgMjUuODUgNzAuNDE0NCAyOC45MiA2OS45MjQ0QzMzLjk3IDY5LjEzNDQgMzguOTIgNjUuMDc0NCA0NC42NSA2MC4zODQ0QzU2Ljg5IDUwLjM4NDQgNzMuNjUgMzYuNjM0NCAxMDQuMzEgNDcuMTQ0NEw5OC45MyA2Mi44MzQ0Qzc3LjAyIDU1LjMxNDQgNjYuOTMgNjMuNjE0NCA1NS4xNiA3My4yMTQ0QzQ4LjE2IDc4LjkxNDQgNDEgODQuODE0NCAzMS41IDg2LjMwNDRDMjkuMzY4MiA4Ni42NjE2IDI3LjIxMTQgODYuODQ4OCAyNS4wNSA4Ni44NjQ0WiIgZmlsbD0iIzI5MUM0OCIvPgo8cGF0aCBkPSJNODMuODcgMTEzLjY1NEg3MS41M1Y5Ny4wNzQ0SDgzLjlDODUuMzIgOTcuMDc0NCA4OS41NiA5Ni41NjQ0IDkxLjcxIDk0LjQyNDRDOTIuMzYgOTMuNzc0NCA5My4yMiA5Mi42MjQ0IDkzLjMyIDkwLjAyNDRDOTIuOTk3NiA4OC4zODI1IDkyLjExODEgODYuOTAyNCA5MC44MyA4NS44MzQ0Qzg4LjMzIDgzLjk0NDQgODQuMTUgODQuMTI0NCA4MS4wOCA4NC42MTQ0Qzc2LjAzIDg1LjQwNDQgNzEuMDggODkuNDU0NCA2NS4zNSA5NC4xNTQ0QzU2LjIyIDEwMS42MjQgNDQuNTYgMTExLjE1NCAyNi41MSAxMTEuMTU0QzE5LjQwODkgMTExLjA2MiAxMi4zNzI4IDEwOS43ODggNS42OSAxMDcuMzg0TDExLjA3IDkxLjY5NDRDMzIuOTggOTkuMjE0NCA0My4wNyA5MC45MTQ0IDU0Ljg0IDgxLjMxNDRDNjEuODQgNzUuNjE0NCA2OSA2OS43MTQ0IDc4LjUgNjguMjI0NEM4Ny43OSA2Ni43NTQ0IDk1LjQzIDY4LjMyNDQgMTAxLjIgNzIuODg0NEMxMDYuMDgyIDc2Ljg1MSAxMDkuMjA0IDgyLjU4MTYgMTA5Ljg5IDg4LjgzNDRWODkuMTY0NFY4OS40NjQ0QzEwOS44OSA5Ni4yMTQ0IDEwNy42IDEwMi4wMjQgMTAzLjI1IDEwNi4yNzRDOTYuMTcgMTEzLjI1NCA4Ni4wOSAxMTMuNjU0IDgzLjg3IDExMy42NTRaIiBmaWxsPSIjMjkxQzQ4Ii8+CjxwYXRoIGQ9Ik01Mi4zOCAyLjQ2NDM5QzUxLjI2MjggMS42OTkwNCA0OS45OTk2IDEuMTcyNTUgNDguNjY5NSAwLjkxNzg4MkM0Ny4zMzkzIDAuNjYzMjE4IDQ1Ljk3MSAwLjY4NTg1OSA0NC42NSAwLjk4NDM4QzQ0LjQ0IDAuOTg0MzggNDQuMjQgMS4wOTQzOSA0NC4wMyAxLjE1NDM5QzQzLjAxODUgMS4xMDc4NSA0Mi4wMTI4IDEuMzMxNTkgNDEuMTE2NSAxLjgwMjYyQzQwLjIyMDEgMi4yNzM2NCAzOS40NjU0IDIuOTc0OTQgMzguOTMgMy44MzQzOUMzOC44MiA0LjAyNDM5IDM4LjcxIDQuMjI0MzkgMzguNjEgNC40MzQzOUMzOC4xODgyIDQuNDM0MDMgMzcuNzY4MSA0LjQ4NzgxIDM3LjM2IDQuNTk0NEMzNC4wNSA1LjQwNDQgMzEuNDIgOC43MDQzOSAzMi4yNiAxMi4yNDQ0QzMzLjU0IDE3LjU3NDQgMzguMzQgMjEuOTQ0NCA0NC4wMiAyMS43OTQ0QzQ2LjkwNTQgMjEuNzEzNiA0OS42NjM1IDIwLjU4ODUgNTEuNzgyMSAxOC42MjhDNTMuOTAwOCAxNi42Njc2IDU1LjIzNiAxNC4wMDQ5IDU1LjU0IDExLjEzNDRDNTUuOSA4LjA5NDQgNTUgNC4zMDQzOSA1Mi4zOCAyLjQ2NDM5WiIgZmlsbD0iI0ZGNjY2NiIvPgo8cGF0aCBkPSJNODIuNzUgNy41ODQzN0M4Mi43NSA3LjQ1NDM3IDgyLjc1IDcuMzI0MzggODIuNzUgNy4xOTQzOEM4Mi44NCA0LjYxNDM4IDgxLjE3IDEuMTk0MzYgNzguMzcgMC42NDQzNjRDNzYuMzMyNyAwLjA5NTQzNSA3NC4xODA1IDAuMTQ0MDQ4IDcyLjE3IDAuNzg0Mzc5QzcwLjE5NTggMS40OTEyNyA2OC40NjIyIDIuNzQyOSA2Ny4xNyA0LjM5NDM2QzY1Ljk2OTEgNS44OTM0OSA2NS4yMjExIDcuNzA0MjYgNjUuMDEzOSA5LjYxMzg1QzY0LjgwNjYgMTEuNTIzNCA2NS4xNDg3IDEzLjQ1MjUgNjYgMTUuMTc0NEM2OS41NiAyMS45MjQ0IDc5LjU1IDIyLjQ3NDQgODMuOSAxNi4yNTQ0Qzg0Ljc4OSAxNC45MTQ0IDg1LjE2MjMgMTMuMjk3OCA4NC45NTA4IDExLjcwMzdDODQuNzM5NCAxMC4xMDk3IDgzLjk1NzUgOC42NDYyNCA4Mi43NSA3LjU4NDM3WiIgZmlsbD0iI0ZGNjY2NiIvPgo8L3N2Zz4K';" alt="Nasma" class="avatar-normal w-36 h-36 object-contain" />
                             </div>
                         </div>
-                        <h1 class="text-4xl font-semibold text-gray-900 tracking-tighter mb-4" style="font-family: 'Poppins', sans-serif; font-size:24pt;">
+                        <h1 class="text-4xl font-semibold text-gray-900 tracking-tighter mb-4 greeting-heading">
                             Hey <span id="greetingName">Prezlaber</span>!<br>
                             <span class="font-medium">What can I do for you today?</span>
                         </h1>
@@ -1002,9 +1142,9 @@
                         </button>
                         {% endif %}
                         {% if not is_manager %}
-                        <button class="suggestion-card card" id="logMyHoursBtn" data-suggestion="log my hours" style="text-align: left;">
+                        <button class="suggestion-card card card-text-left" id="logMyHoursBtn" data-suggestion="log my hours">
                             <div class="card-content">
-                                <div class="icon" style="justify-content: flex-start;"><img src="/static/Log-my-hours.svg" alt="Log my hours" class="w-10 h-10"/></div>
+                                <div class="icon icon-left"><img src="/static/Log-my-hours.svg" alt="Log my hours" class="w-10 h-10"/></div>
                                 <div class="label"><p>Log my hours</p></div>
                             </div>
                         </button>
@@ -1040,9 +1180,9 @@
                             </div>
                         </button>
                         {% if is_manager %}
-                        <button class="suggestion-card card" id="logMyHoursBtnManager" data-suggestion="log my hours" style="text-align: left;">
+                        <button class="suggestion-card card card-text-left" id="logMyHoursBtnManager" data-suggestion="log my hours">
                             <div class="card-content">
-                                <div class="icon" style="justify-content: flex-start;"><img src="/static/Log-my-hours.svg" alt="Log my hours" class="w-10 h-10"/></div>
+                                <div class="icon icon-left"><img src="/static/Log-my-hours.svg" alt="Log my hours" class="w-10 h-10"/></div>
                                 <div class="label"><p>Log my hours</p></div>
                             </div>
                         </button>
@@ -1070,10 +1210,10 @@
     <!-- Conversation State -->
     <div id="conversationState" class="state-hidden">
         <!-- Sidebar -->
-        <div id="conversationSidebar" class="sidebar fixed top-0 left-0 h-full w-80 bg-white/90 backdrop-blur-lg border-r border-gray-200/80 shadow-xl" style="z-index: 2147483647 !important; pointer-events: auto !important;">
+        <div id="conversationSidebar" class="sidebar fixed top-0 left-0 h-full w-80 bg-white/90 backdrop-blur-lg border-r border-gray-200/80 shadow-xl conversation-sidebar-panel">
             <div class="flex flex-col h-full">
                 <div class="flex items-center justify-center p-8 border-b border-gray-200/50">
-                    <button id="conversationSidebarClose">
+                    <button id="conversationSidebarClose" aria-label="Close chat history" title="Close chat history">
                         <img src="/Nasma-Avatar.svg" onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEwIiBoZWlnaHQ9IjExNCIgdmlld0JveD0iMCAwIDExMCAxMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yNS4wNSA4Ni44NjQ0QzE4LjYyIDg2Ljg2NDQgMTMuMTcgODUuMTM0NCA4Ljc4OTk4IDgxLjY3NDRDMy45MTM0NCA3Ny43MDQ2IDAuNzk1MzY1IDcxLjk3NSAwLjEwOTk4NSA2NS43MjQ0VjY1LjM5NDRWNjUuMDY0NEMwLjEwOTk4NSA1OC4zMTQ0IDIuNCA1Mi41MDQ0IDYuNzUgNDguMjU0NEMxNC4xMSA0MS4wNjQ0IDI0LjY2IDQwLjg5NDQgMjYuMzYgNDAuOTE0NEgzOC40OVY1Ny40NjQ0SDI2LjFDMjQuNjggNTcuNDY0NCAyMC40NCA1Ny45NjQ0IDE4LjI5IDYwLjExNDRDMTcuNzQxNCA2MC43MDExIDE3LjMxNjMgNjEuMzkyIDE3LjAzOTcgNjIuMTQ2MUMxNi43NjMyIDYyLjkwMDIgMTYuNjQwOSA2My43MDIyIDE2LjY4IDY0LjUwNDRDMTYuOTk4NiA2Ni4xNTA1IDE3Ljg3ODcgNjcuNjM0OSAxOS4xNyA2OC43MDQ0QzIxLjY3IDcwLjU5NDQgMjUuODUgNzAuNDE0NCAyOC45MiA2OS45MjQ0QzMzLjk3IDY5LjEzNDQgMzguOTIgNjUuMDc0NCA0NC42NSA2MC4zODQ0QzU2Ljg5IDUwLjM4NDQgNzMuNjUgMzYuNjM0NCAxMDQuMzEgNDcuMTQ0NEw5OC45MyA2Mi44MzQ0Qzc3LjAyIDU1LjMxNDQgNjYuOTMgNjMuNjE0NCA1NS4xNiA3My4yMTQ0QzQ4LjE2IDc4LjkxNDQgNDEgODQuODE0NCAzMS41IDg2LjMwNDRDMjkuMzY4MiA4Ni42NjE2IDI3LjIxMTQgODYuODQ4OCAyNS4wNSA4Ni44NjQ0WiIgZmlsbD0iIzI5MUM0OCIvPgo8cGF0aCBkPSJNODMuODcgMTEzLjY1NEg3MS41M1Y5Ny4wNzQ0SDgzLjlDODUuMzIgOTcuMDc0NCA4OS41NiA5Ni41NjQ0IDkxLjcxIDk0LjQyNDRDOTIuMzYgOTMuNzc0NCA5My4yMiA5Mi42MjQ0IDkzLjMyIDkwLjAyNDRDOTIuOTk3NiA4OC4zODI1IDkyLjExODEgODYuOTAyNCA5MC44MyA4NS44MzQ0Qzg4LjMzIDgzLjk0NDQgODQuMTUgODQuMTI0NCA4MS4wOCA4NC42MTQ0Qzc2LjAzIDg1LjQwNDQgNzEuMDggODkuNDU0NCA2NS4zNSA5NC4xNTQ0QzU2LjIyIDEwMS42MjQgNDQuNTYgMTExLjE1NCAyNi41MSAxMTEuMTU0QzE5LjQwODkgMTExLjA2MiAxMi4zNzI4IDEwOS43ODggNS42OSAxMDcuMzg0TDExLjA3IDkxLjY5NDRDMzIuOTggOTkuMjE0NCA0My4wNyA5MC45MTQ0IDU0Ljg0IDgxLjMxNDRDNjEuODQgNzUuNjE0NCA2OSA2OS43MTQ0IDc4LjUgNjguMjI0NEM4Ny43OSA2Ni43NTQ0IDk1LjQzIDY4LjMyNDQgMTAxLjIgNzIuODg0NEMxMDYuMDgyIDc2Ljg1MSAxMDkuMjA0IDgyLjU4MTYgMTA5Ljg5IDg4LjgzNDRWODkuMTY0NFY4OS40NjQ0QzEwOS44OSA5Ni4yMTQ0IDEwNy42IDEwMi4wMjQgMTAzLjI1IDEwNi4yNzRDOTYuMTcgMTEzLjI1NCA4Ni4wOSAxMTMuNjU0IDgzLjg3IDExMy42NTRaIiBmaWxsPSIjMjkxQzQ4Ii8+CjxwYXRoIGQ9Ik01Mi4zOCAyLjQ2NDM5QzUxLjI2MjggMS42OTkwNCA0OS45OTk2IDEuMTcyNTUgNDguNjY5NSAwLjkxNzg4MkM0Ny4zMzkzIDAuNjYzMjE4IDQ1Ljk3MSAwLjY4NTg1OSA0NC42NSAwLjk4NDM4QzQ0LjQ0IDAuOTg0MzggNDQuMjQgMS4wOTQzOSA0NC4wMyAxLjE1NDM5QzQzLjAxODUgMS4xMDc4NSA0Mi4wMTI4IDEuMzMxNTkgNDEuMTE2NSAxLjgwMjYyQzQwLjIyMDEgMi4yNzM2NCAzOS40NjU0IDIuOTc0OTQgMzguOTMgMy44MzQzOUMzOC44MiA0LjAyNDM5IDM4LjcxIDQuMjI0MzkgMzguNjEgNC40MzQzOUMzOC4xODgyIDQuNDM0MDMgMzcuNzY4MSA0LjQ4NzgxIDM3LjM2IDQuNTk0NEMzNC4wNSA1LjQwNDQgMzEuNDIgOC43MDQzOSAzMi4yNiAxMi4yNDQ0QzMzLjU0IDE3LjU3NDQgMzguMzQgMjEuOTQ0NCA0NC4wMiAyMS43OTQ0QzQ2LjkwNTQgMjEuNzEzNiA0OS42NjM1IDIwLjU4ODUgNTEuNzgyMSAxOC42MjhDNTMuOTAwOCAxNi42Njc2IDU1LjIzNiAxNC4wMDQ5IDU1LjU0IDExLjEzNDRDNTUuOSA4LjA5NDQgNTUgNC4zMDQzOSA1Mi4zOCAyLjQ2NDM5WiIgZmlsbD0iI0ZGNjY2NiIvPgo8cGF0aCBkPSJNODIuNzUgNy41ODQzN0M4Mi43NSA3LjQ1NDM3IDgyLjc1IDcuMzI0MzggODIuNzUgNy4xOTQzOEM4Mi44NCA0LjYxNDM4IDgxLjE3IDEuMTk0MzYgNzguMzcgMC42NDQzNjRDNzYuMzMyNyAwLjA5NTQzNSA3NC4xODA1IDAuMTQ0MDQ4IDcyLjE3IDAuNzg0Mzc5QzcwLjE5NTggMS40OTEyNyA2OC40NjIyIDIuNzQyOSA2Ny4xNyA0LjM5NDM2QzY1Ljk2OTEgNS44OTM0OSA2NS4yMjExIDcuNzA0MjYgNjUuMDEzOSA5LjYxMzg1QzY0LjgwNjYgMTEuNTIzNCA2NS4xNDg3IDEzLjQ1MjUgNjYgMTUuMTc0NEM2OS41NiAyMS45MjQ0IDc5LjU1IDIyLjQ3NDQgODMuOSAxNi4yNTQ0Qzg0Ljc4OSAxNC45MTQ0IDg1LjE2MjMgMTMuMjk3OCA4NC45NTA4IDExLjcwMzdDODQuNzM5NCAxMC4xMDk3IDgzLjk1NzUgOC42NDYyNCA4Mi43NSA3LjU4NDM3WiIgZmlsbD0iI0ZGNjY2NiIvPgo8L3N2Zz4K';" alt="Nasma" class="w-24 h-24 object-contain" />
                     </button>
                 </div>
@@ -1082,45 +1222,12 @@
                     <div id="conversationHistoryList" class="history-list"></div>
                     <div id="conversationHistoryEmpty" class="history-empty text-sm">No conversations yet.</div>
                 </div>
-                <div class="p-6 border-t border-gray-200/50 space-y-3" style="position: relative !important; z-index: 2147483647 !important; pointer-events: auto !important;">
-                    <button onclick="logoutUser()" class="logout-btn" style="
-                        width: 100%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        gap: 0.5rem;
-                        padding: 0.75rem 1rem;
-                        border: none;
-                        border-radius: 0.5rem;
-                        font-family: inherit;
-                        font-size: 1rem;
-                        cursor: pointer;
-                        transition: all 0.2s ease;
-                        z-index: 2147483647;
-                        position: relative;
-                        pointer-events: auto;
-                        margin-bottom: 0.75rem;
-                    ">
+                <div class="p-6 border-t border-gray-200/50 space-y-3 conversation-sidebar-actions">
+                    <button onclick="logoutUser()" class="logout-btn sidebar-action-button sidebar-action-button-spaced">
                         <span class="material-symbols-outlined">logout</span>
                         <span>Log Out</span>
                     </button>
-                    <button onclick="window.location.href='/';" class="new-chat-btn" style="
-                        width: 100%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        gap: 0.5rem;
-                        padding: 0.75rem 1rem;
-                        border: none;
-                        border-radius: 0.5rem;
-                        font-family: inherit;
-                        font-size: 1rem;
-                        cursor: pointer;
-                        transition: all 0.2s ease;
-                        z-index: 2147483647;
-                        position: relative;
-                        pointer-events: auto;
-                    ">
+                    <button onclick="window.location.href='/';" class="new-chat-btn sidebar-action-button">
                         <span class="material-symbols-outlined">add</span>
                         <span>New Chat</span>
                     </button>
@@ -1134,16 +1241,16 @@
         <div class="flex h-screen w-full flex-col">
             <header class="flex items-center justify-between whitespace-nowrap px-6 py-4">
                 <div class="flex items-center gap-2 text-[var(--text-primary)]">
-                    <button id="conversationSidebarToggle" class="nasma-avatar-header flex items-center justify-center size-14 rounded-full hover:bg-white/60 transition-colors">
+                    <button id="conversationSidebarToggle" class="nasma-avatar-header flex items-center justify-center size-14 rounded-full hover:bg-white/60 transition-colors" aria-label="Open chat history" title="Open chat history">
                         <span class="material-symbols-outlined text-2xl">menu</span>
                     </button>
-                    <h1 class="text-xl font-bold"><span style="color: #2b1b4c;">{{ brand_name or 'NasmaPL' }}</span><span style="color: #ff6666;">.</span></h1>
+                    <h1 class="text-xl font-bold"><span class="brand-primary">{{ brand_name or 'NasmaPL' }}</span><span class="brand-dot">.</span></h1>
                 </div>
                 <div class="flex items-center gap-4">
-                    <button id="newChatButton" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors">
+                    <button id="newChatButton" class="flex items-center justify-center size-10 rounded-full hover:bg-white/60 transition-colors" aria-label="Start new chat" title="Start new chat">
                         <span class="material-symbols-outlined text-[var(--text-primary)]">add</span>
                     </button>
-                    <button id="conversationLogoutButton" class="avatar-loading w-[44px] h-[44px] rounded-full border border-gray-200 shadow-sm overflow-hidden" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDhwW5-wPcfNiUcpFsTkT6y9M8_0qlwWaACSajKEttxrB_8x_HYum0NPwqQDg-OMN_PJ6m4yDP3wRShiqCC5VYloTvlVgh-t0feReJLOzXvTqUAyaPFr1mkRtYsASdB_O-BM14d7n5qzlKpo1ypb0_0EoIQprHzisHUIa90V6fVLCZGr8yrBo6Vj2myu8q4tT7IB4NnpnCtIBfnB8TmtvoLEKn6zXup_9oTIZWrCTLYuJbS51DSmKVEYrvargYZktcRikgYRIApRhX8"); background-size: cover; background-position: center;'></button>
+                    <button id="conversationLogoutButton" class="avatar-loading avatar-bg-conversation w-[44px] h-[44px] rounded-full border border-gray-200 shadow-sm overflow-hidden" aria-label="Log out" title="Log out"></button>
                 </div>
             </header>
             <main class="flex-1 flex flex-col items-center overflow-y-auto px-4 pt-8 pb-60">
@@ -1151,7 +1258,7 @@
                     <!-- Chat messages will be dynamically added here -->
                 </div>
             </main>
-            <footer class="fixed bottom-0 left-0 right-0 flex justify-center p-4 pb-4" style="background: transparent;">
+            <footer class="fixed bottom-0 left-0 right-0 flex justify-center p-4 pb-4 conversation-footer-shell">
                 <div class="w-full relative">
                     <!-- Manager-specific prompts are shown inline in the bottom bar now -->
 
@@ -4464,7 +4571,7 @@
                                         let content = '';
                                         if (isDates) {
                                             content = String(r[c.key] ?? '').replace(/<br\/>/g, '<br>');
-                                        } else if (c.key === 'approval' || c.key === 'edit' || c.key === 'log_hours' || c.key === 'status') {
+                                        } else if (c.key === 'approval' || c.key === 'edit' || c.key === 'log_hours' || c.key === 'status' || c.key === 'punched_in') {
                                             content = String(r[c.key] ?? '');
                                         } else {
                                             content = renderMarkdown(String(r[c.key] ?? ''));
@@ -4485,7 +4592,10 @@
                             <div class="mt-6">
                                 <div class="flex items-center justify-between mb-2">
                                     <div class="text-sm font-semibold text-gray-700">Team overview</div>
-                                    <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullMainOverviewTable()">Full view</button>
+                                    <div class="flex items-center gap-6">
+                                        <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openAttendanceViewModal()">Attendance view</button>
+                                        <button class="text-sm text-[var(--primary-color)] hover:underline font-medium" onclick="openFullMainOverviewTable()">Full view</button>
+                                    </div>
                                 </div>
                                 <div class="overflow-x-auto">
                                     <table class="w-full bg-white/70 rounded-lg overflow-hidden">
@@ -6112,14 +6222,19 @@
 
                 const header = cols.map(c => {
                     const isDates = c.key === 'dates';
-                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    const align = c.align || (isDates ? 'center' : 'left');
+                    const alignClass = align === 'center' ? 'text-center' : (align === 'right' ? 'text-right' : 'text-left');
                     return `<th class=\"px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800\">${escapeHtml(c.label || '')}</th>`;
                 }).join('');
                 const body = rows.map(r => `<tr class=\"border-t\">${cols.map(c => {
                     const isDates = c.key === 'dates';
-                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    const align = c.align || (isDates ? 'center' : 'left');
+                    const alignClass = align === 'center' ? 'text-center' : (align === 'right' ? 'text-right' : 'text-left');
                     let content = r[c.key] ?? '';
                     if (isDates) content = String(content).replace(/<br\/>/g, '<br>');
+                    if (c.key === 'punched_in') {
+                        return `<td class=\"px-4 py-3 ${alignClass} text-sm text-gray-900\">${String(content)}</td>`;
+                    }
                     return `<td class=\"px-4 py-3 ${alignClass} text-sm text-gray-900\">${escapeHtml(content)}</td>`;
                 }).join('')}</tr>`).join('');
 
@@ -6166,6 +6281,269 @@
             } catch (e) {
                 console.error('Failed to open full main overview table:', e);
             }
+        }
+
+        // Attendance view: date-range picker popup → fetches the team's
+        // attendance for the chosen range and renders it in the same modal.
+        // Reuses the overlay/panel pattern from openFullMainOverviewTable and
+        // the flatpickr config from the time-off widget.
+        function openAttendanceViewModal() {
+            try {
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.inset = '0';
+                overlay.style.background = 'rgba(0,0,0,0.35)';
+                overlay.style.zIndex = '2147483646';
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) document.body.removeChild(overlay);
+                });
+
+                const panel = document.createElement('div');
+                panel.style.position = 'absolute';
+                panel.style.top = '50%';
+                panel.style.left = '50%';
+                panel.style.transform = 'translate(-50%, -50%)';
+                panel.style.width = '90%';
+                panel.style.maxWidth = '1000px';
+                panel.style.maxHeight = '80%';
+                panel.style.overflow = 'auto';
+                panel.style.background = 'white';
+                panel.style.borderRadius = '12px';
+                panel.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)';
+                panel.style.padding = '16px';
+
+                const uid = `att_${Date.now()}`;
+
+                // Sticky top bar: Export (dropdown) on the right, Close beside it.
+                const topbar = document.createElement('div');
+                topbar.style.position = 'sticky';
+                topbar.style.top = '0';
+                topbar.style.zIndex = '2';
+                topbar.style.background = 'white';
+                topbar.style.display = 'flex';
+                topbar.style.justifyContent = 'flex-end';
+                topbar.style.alignItems = 'center';
+                topbar.style.gap = '12px';
+                topbar.style.marginBottom = '8px';
+                topbar.innerHTML = `
+                    <div class="relative inline-block" id="${uid}_export_wrap">
+                        <button id="${uid}_export_btn" class="inline-flex items-center gap-1 h-9 px-4 rounded-full text-white text-sm font-medium btn-gradient">
+                            Export
+                            <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M5.5 7.5L10 12l4.5-4.5z"/></svg>
+                        </button>
+                        <div id="${uid}_export_menu" class="hidden absolute right-0 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-10">
+                            <button data-fmt="excel" class="att-export-opt w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Export as Excel</button>
+                            <button data-fmt="pdf" class="att-export-opt w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Export as PDF</button>
+                        </div>
+                    </div>
+                    <button id="${uid}_close" class="text-sm font-semibold" style="color:#111318;background:transparent;">Close</button>
+                `;
+                panel.appendChild(topbar);
+
+                const close = topbar.querySelector(`#${uid}_close`);
+                close.addEventListener('click', () => document.body.removeChild(overlay));
+
+                // Export dropdown wiring.
+                const exportBtn = topbar.querySelector(`#${uid}_export_btn`);
+                const exportMenu = topbar.querySelector(`#${uid}_export_menu`);
+                exportBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    exportMenu.classList.toggle('hidden');
+                });
+                // Close the menu when clicking elsewhere inside the panel.
+                panel.addEventListener('click', (e) => {
+                    if (!topbar.querySelector(`#${uid}_export_wrap`).contains(e.target)) {
+                        exportMenu.classList.add('hidden');
+                    }
+                });
+                topbar.querySelectorAll('.att-export-opt').forEach(opt => {
+                    opt.addEventListener('click', () => {
+                        exportMenu.classList.add('hidden');
+                        const f = opt.getAttribute('data-fmt');
+                        exportTeamAttendance(toISO(fromEl.value), toISO(toEl.value), f, opt);
+                    });
+                });
+                const controls = document.createElement('div');
+                controls.innerHTML = `
+                    <div class="text-sm font-semibold text-gray-800 mb-3">Team attendance</div>
+                    <div class="flex flex-wrap items-end gap-3 mb-4">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs font-medium text-gray-600">From</label>
+                            <input id="${uid}_from" type="text" readonly placeholder="dd/mm/yyyy"
+                                class="h-10 px-3 rounded-full border border-gray-300 text-sm bg-white cursor-pointer" style="width:150px;"/>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs font-medium text-gray-600">To</label>
+                            <input id="${uid}_to" type="text" readonly placeholder="dd/mm/yyyy"
+                                class="h-10 px-3 rounded-full border border-gray-300 text-sm bg-white cursor-pointer" style="width:150px;"/>
+                        </div>
+                        <button id="${uid}_view" class="h-10 px-5 rounded-full text-white text-sm font-medium btn-gradient">View</button>
+                    </div>
+                    <div id="${uid}_results" class="overflow-x-auto"></div>
+                `;
+
+                panel.appendChild(controls);
+                overlay.appendChild(panel);
+                document.body.appendChild(overlay);
+
+                const fromEl = panel.querySelector(`#${uid}_from`);
+                const toEl = panel.querySelector(`#${uid}_to`);
+                const viewBtn = panel.querySelector(`#${uid}_view`);
+                const resultsEl = panel.querySelector(`#${uid}_results`);
+
+                // Default both to today (DD/MM/YYYY) so a single-day view works immediately.
+                const today = new Date();
+                const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+                fromEl.value = fmt(today);
+                toEl.value = fmt(today);
+
+                const initDatePicker = (el) => {
+                    if (el && window.flatpickr) {
+                        window.flatpickr(`#${el.id}`, {
+                            dateFormat: 'd/m/Y',
+                            defaultDate: el.value,
+                            static: false,
+                            appendTo: document.body,
+                            onChange: (selectedDates) => {
+                                if (Array.isArray(selectedDates) && selectedDates.length > 0) {
+                                    const d = selectedDates[0];
+                                    el.value = fmt(d);
+                                }
+                            },
+                            onOpen: function() {
+                                setTimeout(() => {
+                                    const cal = document.querySelector('.flatpickr-calendar');
+                                    if (cal) {
+                                        cal.style.zIndex = '2147483647';
+                                        cal.style.position = 'fixed';
+                                    }
+                                }, 10);
+                            }
+                        });
+                    }
+                };
+                initDatePicker(fromEl);
+                initDatePicker(toEl);
+
+                // DD/MM/YYYY → YYYY-MM-DD for the API.
+                const toISO = (ddmmyyyy) => {
+                    const parts = String(ddmmyyyy || '').split('/');
+                    if (parts.length !== 3) return '';
+                    const [dd, mm, yyyy] = parts;
+                    return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+                };
+
+                viewBtn.addEventListener('click', () => {
+                    const startISO = toISO(fromEl.value);
+                    const endISO = toISO(toEl.value);
+                    if (!startISO || !endISO) {
+                        resultsEl.innerHTML = '<div class="p-4 text-sm text-red-600">Please pick both dates.</div>';
+                        return;
+                    }
+                    loadTeamAttendance(startISO, endISO, resultsEl);
+                });
+
+                // Auto-load today's view on open.
+                loadTeamAttendance(toISO(fromEl.value), toISO(toEl.value), resultsEl);
+            } catch (e) {
+                console.error('Failed to open attendance view modal:', e);
+            }
+        }
+
+        // Fetch + render the team attendance table for a date range into `resultsEl`.
+        async function loadTeamAttendance(startISO, endISO, resultsEl) {
+            try {
+                resultsEl.innerHTML = '<div class="p-4 text-sm text-gray-500">Loading attendance…</div>';
+                const resp = await authFetch(`/api/team/attendance?start=${encodeURIComponent(startISO)}&end=${encodeURIComponent(endISO)}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data || !data.success) {
+                    const msg = (data && data.message) ? data.message : `Request failed (${resp.status})`;
+                    resultsEl.innerHTML = `<div class="p-4 text-sm text-red-600">${escapeHtml(String(msg))}</div>`;
+                    return;
+                }
+                resultsEl.innerHTML = renderAttendanceTable(data.widget);
+            } catch (e) {
+                console.error('Failed to load team attendance:', e);
+                resultsEl.innerHTML = '<div class="p-4 text-sm text-red-600">Could not load attendance.</div>';
+            }
+        }
+
+        // Download the team attendance export (Excel or PDF) for a date range.
+        // Fetches the file as a blob via authFetch (carries the session cookie
+        // and 401-retry), then triggers a browser download. `triggerEl` is the
+        // clicked menu item, used to show a brief "Exporting…" state.
+        async function exportTeamAttendance(startISO, endISO, format, triggerEl) {
+            const label = triggerEl ? triggerEl.textContent : '';
+            try {
+                if (!startISO || !endISO) { alert('Please pick both dates first.'); return; }
+                if (triggerEl) { triggerEl.textContent = 'Exporting…'; triggerEl.disabled = true; }
+                const url = `/api/team/attendance/export?start=${encodeURIComponent(startISO)}&end=${encodeURIComponent(endISO)}&format=${encodeURIComponent(format)}`;
+                const resp = await authFetch(url, { method: 'GET' });
+                if (!resp.ok) {
+                    let msg = `Export failed (${resp.status})`;
+                    try { const j = await resp.json(); if (j && j.message) msg = j.message; } catch (e) {}
+                    alert(msg);
+                    return;
+                }
+                const blob = await resp.blob();
+                // Derive filename from Content-Disposition, fallback to a sane default.
+                let filename = `prezlab-attendance.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
+                const cd = resp.headers.get('Content-Disposition') || '';
+                const match = cd.match(/filename="?([^"]+)"?/i);
+                if (match && match[1]) filename = match[1];
+                const objUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(objUrl);
+            } catch (e) {
+                console.error('Failed to export team attendance:', e);
+                alert('Could not export attendance.');
+            } finally {
+                if (triggerEl) { triggerEl.textContent = label; triggerEl.disabled = false; }
+            }
+        }
+
+        // Render an attendance widget ({columns, rows}) to table HTML. Mirrors
+        // the styling of the main overview full-view table; shades `_section`
+        // banner rows (per-member headers in the grouped range layout).
+        function renderAttendanceTable(widget) {
+            const cols = (widget && Array.isArray(widget.columns)) ? widget.columns : [];
+            const rows = (widget && Array.isArray(widget.rows)) ? widget.rows : [];
+            if (!cols.length || !rows.length) {
+                return '<div class="p-4 text-sm text-gray-500">No attendance for this period.</div>';
+            }
+            // Columns whose cells are raw HTML (status pills) — pass through
+            // unescaped, like the main overview's punched_in cell.
+            const htmlCols = new Set((widget && Array.isArray(widget.html_columns)) ? widget.html_columns : []);
+            const alignOf = (c) => (c.align === 'center' ? 'text-center' : (c.align === 'right' ? 'text-right' : 'text-left'));
+            const header = cols.map(c =>
+                `<th class="px-4 py-3 ${alignOf(c)} text-sm font-semibold text-gray-800">${escapeHtml(c.label || '')}</th>`
+            ).join('');
+            const body = rows.map(r => {
+                const isSection = r && r._section === true;
+                const isWeek = r && r._week === true;
+                // Week divider: a full-width light sub-header spanning all columns,
+                // like the dashboard's "WEEK OF …" rows.
+                if (isWeek) {
+                    return `<tr class="border-t bg-gray-50"><td colspan="${cols.length}" class="px-4 py-2 text-left text-xs font-semibold tracking-wide text-gray-500 uppercase">${escapeHtml(r.member ?? '')}</td></tr>`;
+                }
+                const rowCls = isSection ? 'border-t bg-gray-100 font-semibold' : 'border-t';
+                const cells = cols.map(c => {
+                    const raw = r[c.key] ?? '';
+                    // Section banner rows carry plain text even in HTML columns.
+                    const content = (htmlCols.has(c.key) && !isSection) ? String(raw) : escapeHtml(raw);
+                    return `<td class="px-4 py-3 ${alignOf(c)} text-sm text-gray-900">${content}</td>`;
+                }).join('');
+                return `<tr class="${rowCls}">${cells}</tr>`;
+            }).join('');
+            return `<table class="min-w-full"><thead class="bg-gray-50"><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
         }
 
         // Full view for new users confirmation by key (per record)
@@ -6225,12 +6603,14 @@
 
                 const header = cols.map(c => {
                     const isDates = c.key === 'dates';
-                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    const align = c.align || (isDates ? 'center' : 'left');
+                    const alignClass = align === 'center' ? 'text-center' : (align === 'right' ? 'text-right' : 'text-left');
                     return `<th class="px-4 py-3 ${alignClass} text-sm font-semibold text-gray-800">${(c.label || '')}</th>`;
                 }).join('');
                 const body = rows.map(r => `<tr class="border-t">${cols.map(c => {
                     const isDates = c.key === 'dates';
-                    const alignClass = isDates ? 'text-center' : 'text-left';
+                    const align = c.align || (isDates ? 'center' : 'left');
+                    const alignClass = align === 'center' ? 'text-center' : (align === 'right' ? 'text-right' : 'text-left');
                     let content = r[c.key] ?? '';
                     if (isDates) content = String(content).replace(/<br\/>/g, '<br>');
                     return `<td class="px-4 py-3 ${alignClass} text-sm text-gray-900">${content}</td>`;
@@ -6868,10 +7248,10 @@
     </script>
 
     <!-- New Sidebar for All States (positioned at end to avoid layout issues) -->
-    <div id="newSidebar" class="new-sidebar" style="position: absolute; top: 0; left: 0; height: 0; width: 0; overflow: visible;">
-        <div style="position: fixed; top: 0; left: 0; width: 320px; height: 100vh; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); box-shadow: 0 0 50px rgba(0, 0, 0, 0.1); transform: translateX(-100%); transition: transform 0.3s ease; z-index: 10000; display: flex; flex-direction: column; pointer-events: none;">
+    <div id="newSidebar" class="new-sidebar global-sidebar-wrapper">
+        <div class="global-sidebar-panel">
             <div class="new-sidebar-header">
-                <button id="newSidebarClose">
+                <button id="newSidebarClose" aria-label="Close chat history" title="Close chat history">
                     <img src="/Nasma-Avatar.svg" onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEwIiBoZWlnaHQ9IjExNCIgdmlld0JveD0iMCAwIDExMCAxMTQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0yNS4wNSA4Ni44NjQ0QzE4LjYyIDg2Ljg2NDQgMTMuMTcgODUuMTM0NCA4Ljc4OTk4IDgxLjY3NDRDMy45MTM0NCA3Ny43MDQ2IDAuNzk1MzY1IDcxLjk3NSAwLjEwOTk4NSA2NS43MjQ0VjY1LjM5NDRWNjUuMDY0NEMwLjEwOTk4NSA1OC4zMTQ0IDIuNCA1Mi41MDQ0IDYuNzUgNDguMjU0NEMxNC4xMSA0MS4wNjQ0IDI0LjY2IDQwLjg5NDQgMjYuMzYgNDAuOTE0NEgzOC40OVY1Ny40NjQ0SDI2LjFDMjQuNjggNTcuNDY0NCAyMC40NCA1Ny45NjQ0IDE4LjI5IDYwLjExNDRDMTcuNzQxNCA2MC43MDExIDE3LjMxNjMgNjEuMzkyIDE3LjAzOTcgNjIuMTQ2MUMxNi43NjMyIDYyLjkwMDIgMTYuNjQwOSA2My43MDIyIDE2LjY4IDY0LjUwNDRDMTYuOTk4NiA2Ni4xNTA1IDE3Ljg3ODcgNjcuNjM0OSAxOS4xNyA2OC43MDQ0QzIxLjY3IDcwLjU5NDQgMjUuODUgNzAuNDE0NCAyOC45MiA2OS45MjQ0QzMzLjk3IDY5LjEzNDQgMzguOTIgNjUuMDc0NCA0NC42NSA2MC4zODQ0QzU2Ljg5IDUwLjM4NDQgNzMuNjUgMzYuNjM0NCAxMDQuMzEgNDcuMTQ0NEw5OC45MyA2Mi44MzQ0Qzc3LjAyIDU1LjMxNDQgNjYuOTMgNjMuNjE0NCA1NS4xNiA3My4yMTQ0QzQ4LjE2IDc4LjkxNDQgNDEgODQuODE0NCAzMS41IDg2LjMwNDRDMjkuMzY4MiA4Ni42NjE2IDI3LjIxMTQgODYuODQ4OCAyNS4wNSA4Ni44NjQ0WiIgZmlsbD0iIzI5MUM0OCIvPgo8cGF0aCBkPSJNODMuODcgMTEzLjY1NEg3MS41M1Y5Ny4wNzQ0SDgzLjlDODUuMzIgOTcuMDc0NCA4OS41NiA5Ni41NjQ0IDkxLjcxIDk0LjQyNDRDOTIuMzYgOTMuNzc0NCA5My4yMiA5Mi42MjQ0IDkzLjMyIDkwLjAyNDRDOTIuOTk3NiA4OC4zODI1IDkyLjExODEgODYuOTAyNCA5MC44MyA4NS44MzQ0Qzg4LjMzIDgzLjk0NDQgODQuMTUgODQuMTI0NCA4MS4wOCA4NC42MTQ0Qzc2LjAzIDg1LjQwNDQgNzEuMDggODkuNDU0NCA2NS4zNSA5NC4xNTQ0QzU2LjIyIDEwMS42MjQgNDQuNTYgMTExLjE1NCAyNi41MSAxMTEuMTU0QzE5LjQwODkgMTExLjA2MiAxMi4zNzI4IDEwOS43ODggNS42OSAxMDcuMzg0TDExLjA3IDkxLjY5NDRDMzIuOTggOTkuMjE0NCA0My4wNyA5MC45MTQ0IDU0Ljg0IDgxLjMxNDRDNjEuODQgNzUuNjE0NCA2OSA2OS43MTQ0IDc4LjUgNjguMjI0NEM4Ny43OSA2Ni43NTQ0IDk1LjQzIDY4LjMyNDQgMTAxLjIgNzIuODg0NEMxMDYuMDgyIDc2Ljg1MSAxMDkuMjA0IDgyLjU4MTYgMTA5Ljg5IDg4LjgzNDRWODkuMTY0NFY4OS40NjQ0QzEwOS44OSA5Ni4yMTQ0IDEwNy42IDEwMi4wMjQgMTAzLjI1IDEwNi4yNzRDOTYuMTcgMTEzLjI1NCA4Ni4wOSAxMTMuNjU0IDgzLjg3IDExMy42NTRaIiBmaWxsPSIjMjkxQzQ4Ii8+CjxwYXRoIGQ9Ik01Mi4zOCAyLjQ2NDM5QzUxLjI2MjggMS42OTkwNCA0OS45OTk2IDEuMTcyNTUgNDguNjY5NSAwLjkxNzg4MkM0Ny4zMzkzIDAuNjYzMjE4IDQ1Ljk3MSAwLjY4NTg1OSA0NC42NSAwLjk4NDM4QzQ0LjQ0IDAuOTg0MzggNDQuMjQgMS4wOTQzOSA0NC4wMyAxLjE1NDM5QzQzLjAxODUgMS4xMDc4NSA0Mi4wMTI4IDEuMzMxNTkgNDEuMTE2NSAxLjgwMjYyQzQwLjIyMDEgMi4yNzM2NCAzOS40NjU0IDIuOTc0OTQgMzguOTMgMy44MzQzOUMzOC44MiA0LjAyNDM5IDM4LjcxIDQuMjI0MzkgMzguNjEgNC40MzQzOUMzOC4xODgyIDQuNDM0MDMgMzcuNzY4MSA0LjQ4NzgxIDM3LjM2IDQuNTk0NEMzNC4wNSA1LjQwNDQgMzEuNDIgOC43MDQzOSAzMi4yNiAxMi4yNDQ0QzMzLjU0IDE3LjU3NDQgMzguMzQgMjEuOTQ0NCA0NC4wMiAyMS43OTQ0QzQ2LjkwNTQgMjEuNzEzNiA0OS42NjM1IDIwLjU4ODUgNTEuNzgyMSAxOC42MjhDNTMuOTAwOCAxNi42Njc2IDU1LjIzNiAxNC4wMDQ5IDU1LjU0IDExLjEzNDRDNTUuOSA4LjA5NDQgNTUgNC4zMDQzOSA1Mi4zOCAyLjQ2NDM5WiIgZmlsbD0iI0ZGNjY2NiIvPgo8cGF0aCBkPSJNODIuNzUgNy41ODQzN0M4Mi43NSA3LjQ1NDM3IDgyLjc1IDcuMzI0MzggODIuNzUgNy4xOTQzOEM4Mi44NCA0LjYxNDM4IDgxLjE3IDEuMTk0MzYgNzguMzcgMC42NDQzNjRDNzYuMzMyNyAwLjA5NTQzNSA3NC4xODA1IDAuMTQ0MDQ4IDcyLjE3IDAuNzg0Mzc5QzcwLjE5NTggMS40OTEyNyA2OC40NjIyIDIuNzQyOSA2Ny4xNyA0LjM5NDM2QzY1Ljk2OTEgNS44OTM0OSA2NS4yMjExIDcuNzA0MjYgNjUuMDEzOSA5LjYxMzg1QzY0LjgwNjYgMTEuNTIzNCA2NS4xNDg3IDEzLjQ1MjUgNjYgMTUuMTc0NEM2OS41NiAyMS45MjQ0IDc5LjU1IDIyLjQ3NDQgODMuOSAxNi4yNTQ0Qzg0Ljc4OSAxNC45MTQ0IDg1LjE2MjMgMTMuMjk3OCA4NC45NTA4IDExLjcwMzdDODQuNzM5NCAxMC4xMDk3IDgzLjk1NzUgOC42NDYyNCA4Mi43NSA3LjU4NDM3WiIgZmlsbD0iI0ZGNjY2NiIvPgo8L3N2Zz4K';" alt="Nasma" class="sidebar-logo" />
                 </button>
             </div>
@@ -6882,49 +7262,13 @@
                     <div id="globalHistoryEmpty" class="history-empty no-chats">No conversations yet.</div>
                 </div>
             </div>
-            <div class="new-sidebar-footer" style="padding: 1.5rem; border-top: 1px solid rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; gap: 0.75rem;">
-                <button id="logoutBtn" class="logout-btn" style="
-                    width: 100%;
-                    height: 50px;
-                    border: none;
-                    border-radius: 8px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    font-size: 16px;
-                    font-weight: 500;
-                    position: relative;
-                    z-index: 99999;
-                    pointer-events: auto;
-                    margin: 0 0 12px 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                    gap: 8px;
-                ">
-                    <span style="font-family: 'Material Symbols Outlined'; font-size: 20px;">logout</span>
+            <div class="new-sidebar-footer global-sidebar-footer">
+                <button id="logoutBtn" class="logout-btn global-sidebar-action global-sidebar-action-spaced">
+                    <span class="material-symbols-outlined material-icon-20">logout</span>
                     <span>Log Out</span>
                 </button>
-                <button id="newChatBtn" class="new-chat-btn" style="
-                    width: 100%;
-                    height: 50px;
-                    border: none;
-                    border-radius: 8px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    font-size: 16px;
-                    font-weight: 500;
-                    position: relative;
-                    z-index: 99999;
-                    pointer-events: auto;
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                    gap: 8px;
-                ">
-                    <span style="font-family: 'Material Symbols Outlined'; font-size: 20px;">add</span>
+                <button id="newChatBtn" class="new-chat-btn global-sidebar-action">
+                    <span class="material-symbols-outlined material-icon-20">add</span>
                     <span>New Chat</span>
                 </button>
             </div>
@@ -7008,8 +7352,8 @@
     </script>
 
     <!-- New Sidebar Overlay -->
-    <div id="newSidebarOverlay" class="new-sidebar-overlay" style="position: absolute; top: 0; left: 0; height: 0; width: 0; overflow: visible;">
-        <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.3); opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0.3s ease; z-index: 99; pointer-events: none;"></div>
+    <div id="newSidebarOverlay" class="new-sidebar-overlay global-overlay-wrapper">
+        <div class="global-overlay-panel"></div>
     </div>
 
 

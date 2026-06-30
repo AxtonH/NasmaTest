@@ -1,9 +1,29 @@
+import os
+from functools import lru_cache
 from typing import Any, Dict, List, Tuple
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except Exception:
     ZoneInfo = None
+
+try:
+    from supabase import create_client
+except Exception:
+    create_client = None  # type: ignore
+
+try:
+    from ..config.settings import Config
+except Exception:
+    try:
+        from config.settings import Config
+    except Exception:
+        Config = None  # type: ignore
+
+
+ATTENDANCE_TABLE = "attendance"
+ATTENDANCE_SELECT_COLS = "emp_code,punch_time"
+ATTENDANCE_EMP_CODE_FIELD = "x_studio_employee_code"
 
 
 def _today_ymd() -> str:
@@ -38,6 +58,138 @@ def _current_month_datetime_range() -> Tuple[str, str]:
     """
     start_ymd, end_ymd = _current_month_range()
     return f"{start_ymd} 00:00:00", f"{end_ymd} 23:59:59"
+
+
+def _normalize_emp_code(raw: Any) -> str:
+    """Return canonical attendance emp_code, or empty string when not tracked."""
+    try:
+        if raw is False or raw is None:
+            return ''
+        if isinstance(raw, (int, float)):
+            code = str(int(raw))
+        else:
+            code = str(raw).strip()
+        if not code or code == '0':
+            return ''
+        return code
+    except Exception:
+        return ''
+
+
+def _attendance_config() -> Tuple[str, str, str]:
+    url = getattr(Config, 'ATTENDANCE_SUPABASE_URL', None) if Config else None
+    key = getattr(Config, 'ATTENDANCE_SUPABASE_SERVICE_ROLE', None) if Config else None
+    tzname = getattr(Config, 'APP_TIMEZONE', None) if Config else None
+    url = url or os.environ.get('ATTENDANCE_SUPABASE_URL') or os.environ.get('SUPABASE_URL') or ''
+    key = (
+        key
+        or os.environ.get('ATTENDANCE_SUPABASE_SERVICE_ROLE')
+        or os.environ.get('ATTENDANCE_SUPABASE_SERVICE_ROLE_KEY')
+        or os.environ.get('SUPABASE_SERVICE_ROLE')
+        or os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+        or ''
+    )
+    tzname = tzname or os.environ.get('APP_TIMEZONE') or 'Asia/Amman'
+    return url, key, tzname
+
+
+@lru_cache(maxsize=4)
+def _attendance_supabase_client(url: str, service_role_key: str):
+    if not create_client:
+        raise RuntimeError("Supabase client package is not available")
+    if not url or not service_role_key:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured")
+    return create_client(url, service_role_key)
+
+
+def _today_bounds_for_attendance(tzname: str) -> Tuple[datetime, datetime]:
+    try:
+        if ZoneInfo and tzname:
+            today = datetime.now(ZoneInfo(tzname)).date()
+        else:
+            today = datetime.now().date()
+    except Exception:
+        today = datetime.now().date()
+    start = datetime.combine(today, time.min)
+    return start, start + timedelta(days=1)
+
+
+def _parse_punch_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    raw = str(value or '').strip()
+    if not raw:
+        raise ValueError("Empty punch_time")
+    # Supabase may return either "YYYY-MM-DD HH:MM:SS" or ISO format.
+    return datetime.fromisoformat(raw.replace('Z', '+00:00')).replace(tzinfo=None)
+
+
+def fetch_first_punches_today(emp_codes: List[str]) -> Tuple[bool, Any]:
+    """Return emp_code -> first punch HH:MM for today's Amman-local day."""
+    try:
+        codes = sorted({c for c in (_normalize_emp_code(code) for code in emp_codes) if c})
+        if not codes:
+            return True, {}
+
+        url, key, tzname = _attendance_config()
+        client = _attendance_supabase_client(url, key)
+        start, end = _today_bounds_for_attendance(tzname)
+
+        rows_out: List[Dict[str, Any]] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            response = (
+                client.table(ATTENDANCE_TABLE)
+                .select(ATTENDANCE_SELECT_COLS)
+                .in_('emp_code', codes)
+                .gte('punch_time', start.isoformat())
+                .lt('punch_time', end.isoformat())
+                .order('punch_time', desc=False)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = response.data or []
+            if not rows:
+                break
+            rows_out.extend(rows)
+            if len(rows) < page_size:
+                break
+            offset += page_size
+
+        first_by_code: Dict[str, datetime] = {}
+        for row in rows_out:
+            if not isinstance(row, dict):
+                continue
+            code = _normalize_emp_code(row.get('emp_code'))
+            if not code or code in first_by_code:
+                continue
+            try:
+                first_by_code[code] = _parse_punch_datetime(row.get('punch_time'))
+            except Exception:
+                continue
+
+        return True, {code: dt.strftime('%H:%M') for code, dt in first_by_code.items()}
+    except Exception as e:
+        return False, f"Attendance lookup error: {e}"
+
+
+def _attendance_pill(label: str, tone: str) -> str:
+    classes = {
+        'present': 'bg-green-50 text-green-700 border-green-200',
+        'absent': 'bg-red-50 text-red-700 border-red-200',
+        'na': 'bg-gray-100 text-gray-600 border-gray-200',
+        'unavailable': 'bg-amber-50 text-amber-700 border-amber-200',
+        # Excused-absence tones, mirroring the Attendance Dashboard's pills:
+        # On leave → blue, Holiday → green (distinct from the present green).
+        'on_leave': 'bg-blue-50 text-blue-700 border-blue-200',
+        'holiday': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    }
+    cls = classes.get(tone, classes['na'])
+    return (
+        f'<span class="inline-flex items-center justify-center rounded-full border px-2.5 py-1 '
+        f'text-xs font-semibold whitespace-nowrap min-w-[88px] {cls}">{label}</span>'
+    )
 
 
 def fetch_team_members(employee_service) -> Tuple[bool, Any]:
@@ -158,6 +310,7 @@ def build_team_overview(team: List[Dict], leaves_by_employee: Dict[int, Dict[str
             'name': member.get('name') or 'Unknown',
             'job_title': member.get('job_title') or '',
             'department': member.get('department') or '',
+            'emp_code': _normalize_emp_code(member.get('emp_code')),
             # Keep linked Odoo user for downstream widgets (e.g., overtime requests)
             'user_id': member.get('user_id'),
             'approved': grouped.get('approved', []),
@@ -278,6 +431,7 @@ def build_main_overview_table_widget(odoo_service, overview: List[Dict], user_tz
             return True, { 'columns': [
                 { 'key': 'member', 'label': 'Member' },
                 { 'key': 'title', 'label': 'Title' },
+                { 'key': 'punched_in', 'label': 'Punched In', 'align': 'center' },
                 { 'key': 'tasks', 'label': 'Tasks' },
             ], 'rows': [] }
 
@@ -343,9 +497,25 @@ def build_main_overview_table_widget(odoo_service, overview: List[Dict], user_tz
         columns = [
             { 'key': 'member', 'label': 'Member' },
             { 'key': 'title', 'label': 'Title' },
+            { 'key': 'punched_in', 'label': 'Punched In', 'align': 'center' },
             { 'key': 'tasks', 'label': 'Tasks' },
         ]
         rows_out: List[Dict[str, str]] = []
+        emp_codes = [_normalize_emp_code(m.get('emp_code')) for m in overview or []]
+        ok_attendance, first_punch_by_code = fetch_first_punches_today(emp_codes)
+        if not ok_attendance or not isinstance(first_punch_by_code, dict):
+            first_punch_by_code = {}
+
+        def _punched_in_cell(member: Dict) -> str:
+            code = _normalize_emp_code(member.get('emp_code'))
+            if not code:
+                return _attendance_pill('NA', 'na')
+            if not ok_attendance:
+                return _attendance_pill('Unavailable', 'unavailable')
+            punch_time = first_punch_by_code.get(code)
+            if punch_time:
+                return _attendance_pill(str(punch_time), 'present')
+            return _attendance_pill('Absent', 'absent')
 
         for m in overview:
             emp_id = m.get('id')
@@ -381,6 +551,7 @@ def build_main_overview_table_widget(odoo_service, overview: List[Dict], user_tz
             rows_out.append({
                 'member': member_name,
                 'title': title,
+                'punched_in': _punched_in_cell(m),
                 'tasks': tasks_cell,
             })
 
@@ -601,5 +772,3 @@ def build_team_overview_table_widget(overview: List[Dict]) -> Dict[str, Any]:
             })
 
     return { 'columns': columns, 'rows': rows }
-
-

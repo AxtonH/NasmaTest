@@ -624,10 +624,27 @@ class EmployeeService:
             'expired_entries': len([k for k in self.cache_expiry.keys() if not self._is_cache_valid(k)])
         }
 
+    @staticmethod
+    def _normalize_emp_code(raw: Any) -> str:
+        """Return canonical attendance emp_code, or empty string when not tracked."""
+        try:
+            if raw is False or raw is None:
+                return ''
+            if isinstance(raw, (int, float)):
+                code = str(int(raw))
+            else:
+                code = str(raw).strip()
+            if not code or code == '0':
+                return ''
+            return code
+        except Exception:
+            return ''
+
     def get_direct_reports_current_user(self) -> Tuple[bool, Any]:
         """Return a list of direct reports (team members) for the current user.
 
-        Each entry includes minimal profile: name, job_title, department name, and employee id.
+        Each entry includes minimal profile: name, job_title, department name,
+        employee id, linked user id, and attendance emp_code when available.
         """
         try:
             if not self.odoo_service.is_authenticated():
@@ -650,14 +667,26 @@ class EmployeeService:
             params = {
                 'args': [[('parent_id', '=', my_employee_id)]],
                 'kwargs': {
-                    'fields': ['name', 'job_title', 'department_id', 'user_id'],
+                    'fields': ['name', 'job_title', 'department_id', 'user_id', 'x_studio_employee_code'],
                     'limit': 200,
                     'order': 'name asc'
                 }
             }
             ok2, rows = self._make_odoo_request('hr.employee', 'search_read', params)
             if not ok2:
-                return False, rows
+                # Keep the existing team feature working if the attendance
+                # custom field is unavailable in an environment.
+                fallback_params = {
+                    'args': [[('parent_id', '=', my_employee_id)]],
+                    'kwargs': {
+                        'fields': ['name', 'job_title', 'department_id', 'user_id'],
+                        'limit': 200,
+                        'order': 'name asc'
+                    }
+                }
+                ok2, rows = self._make_odoo_request('hr.employee', 'search_read', fallback_params)
+                if not ok2:
+                    return False, rows
 
             # Normalize
             team = []
@@ -679,7 +708,8 @@ class EmployeeService:
                     'name': r.get('name'),
                     'job_title': r.get('job_title') or '',
                     'department': dept or '',
-                    'user_id': user_id
+                    'user_id': user_id,
+                    'emp_code': self._normalize_emp_code(r.get('x_studio_employee_code'))
                 })
 
             # Cache team list

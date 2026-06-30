@@ -27,6 +27,7 @@ try:
         build_overtime_table_widget,
         build_main_overview_table_widget,
     )
+    from .services import attendance_report
     from .services.my_requests_service import (
         get_my_requests,
         build_my_requests_table_widget,
@@ -64,6 +65,7 @@ except Exception:
         build_overtime_table_widget,
         build_main_overview_table_widget,
     )
+    from services import attendance_report
     from services.my_requests_service import (
         get_my_requests,
         build_my_requests_table_widget,
@@ -125,6 +127,22 @@ def debug_log(message: str, category: str = "general"):
     elif category == "general" and Config.VERBOSE_LOGS:
         print(f"DEBUG: {message}")  # No flush for debug logs (performance)
         logger.debug(message)
+
+_SENSITIVE_SESSION_KEYS = frozenset({'password'})
+
+def _sanitize_session_for_log(session_obj) -> dict:
+    """Return a copy of session data safe for logs/API debug output (never include secrets)."""
+    try:
+        data = dict(session_obj)
+    except Exception:
+        return {'_error': 'could not read session'}
+    for key in _SENSITIVE_SESSION_KEYS:
+        if key in data and data[key]:
+            data[key] = '***REDACTED***'
+    if data.get('odoo_session_id'):
+        sid = str(data['odoo_session_id'])
+        data['odoo_session_id'] = f"{sid[:8]}...{sid[-4:]}" if len(sid) > 12 else '***'
+    return data
 
 def _parse_two_dates_from_text(text: str) -> tuple:
     # Restored to a no-op to avoid aggressive parsing side-effects
@@ -497,7 +515,7 @@ def create_app():
     @app.route('/')
     def index():
         # Check if user is authenticated
-        debug_log(f"Session data: {dict(session)}", "bot_logic")
+        debug_log(f"Session data: {_sanitize_session_for_log(session)}", "bot_logic")
         if not session.get('authenticated'):
             debug_log("User not authenticated, redirecting to login", "bot_logic")
             return redirect(url_for('login'))
@@ -534,46 +552,13 @@ def create_app():
     
     @app.route('/chat')
     def chat_page():
-        # Check if user is authenticated
-        debug_log(f"Chat route - Session data: {dict(session)}", "bot_logic")
-        if not session.get('authenticated'):
-            debug_log("User not authenticated, redirecting to login", "bot_logic")
-            return redirect(url_for('login'))
-        
-        # Verify Odoo authentication is still valid
-        if not odoo_service.is_authenticated():
-            debug_log("Flask session exists but Odoo service not authenticated, clearing session and redirecting to login", "bot_logic")
-            session.clear()
-            odoo_service.logout()
-            return redirect(url_for('login'))
-        else:
-            # Test if the Odoo session is still valid
-            debug_log("Testing Odoo session validity...", "bot_logic")
-            session_valid, session_message = odoo_service.test_session_validity()
-            if not session_valid:
-                debug_log(f"Odoo session is invalid: {session_message}, clearing session and redirecting to login", "bot_logic")
-                session.clear()
-                odoo_service.logout()
-                return redirect(url_for('login'))
-            else:
-                debug_log("Odoo session is valid", "bot_logic")
-        
-        debug_log("User authenticated and Odoo service connected, showing conversation chat state", "bot_logic")
-        # Determine brand and manager status
-        brand_name = 'NasmaPL'
-        is_manager = False
-        try:
-            is_manager = employee_service.is_current_user_manager()
-            if is_manager:
-                brand_name = 'NasmaManager'
-        except Exception:
-            pass
-        return render_template('chat_conversation.html', brand_name=brand_name, is_manager=is_manager)
+        # Keep legacy /chat bookmarks on the maintained chat surface.
+        return redirect(url_for('index'))
     
     @app.route('/login')
     def login():
         # If already authenticated and Odoo service is connected, redirect to main page
-        debug_log(f"Login route - Session data: {dict(session)}", "bot_logic")
+        debug_log(f"Login route - Session data: {_sanitize_session_for_log(session)}", "bot_logic")
         if session.get('authenticated') and odoo_service.is_authenticated():
             debug_log("User already authenticated and Odoo service connected, redirecting to index", "bot_logic")
             return redirect(url_for('index'))
@@ -1165,7 +1150,117 @@ def create_app():
                 'success': False,
                 'message': f'Error retrieving employee data: {str(e)}'
             }), 500
-    
+
+    @app.route('/api/team/attendance', methods=['GET'])
+    def team_attendance():
+        """Team attendance report for the current manager over a date range.
+
+        Query params: start, end (ISO YYYY-MM-DD). Returns a table widget the
+        frontend renders via renderTable. Single day → flat; range → grouped.
+        """
+        try:
+            if not session.get('authenticated'):
+                return jsonify({'error': 'Authentication required'}), 401
+
+            from datetime import date as _date
+
+            def _parse(p):
+                raw = (request.args.get(p) or '').strip()
+                try:
+                    return _date.fromisoformat(raw)
+                except Exception:
+                    return None
+
+            start = _parse('start')
+            end = _parse('end')
+            if start is None or end is None:
+                return jsonify({
+                    'success': False,
+                    'message': 'start and end are required (YYYY-MM-DD).'
+                }), 400
+            if start > end:
+                start, end = end, start
+            if (end - start).days > attendance_report.MAX_RANGE_DAYS:
+                return jsonify({
+                    'success': False,
+                    'message': f'Range too large; max {attendance_report.MAX_RANGE_DAYS} days.'
+                }), 400
+
+            ok, widget = attendance_report.get_team_attendance_report(
+                odoo_service, employee_service, start, end
+            )
+            if ok:
+                return jsonify({'success': True, 'widget': widget})
+            return jsonify({'success': False, 'message': widget}), 500
+
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'message': f'Error building team attendance report: {str(e)}'
+            }), 500
+
+    @app.route('/api/team/attendance/export', methods=['GET'])
+    def team_attendance_export():
+        """Export the team attendance report as .xlsx or .pdf.
+
+        Query params: start, end (ISO YYYY-MM-DD), format (excel|pdf). Returns a
+        streamed file download. Uses the same data + layout as the dashboard.
+        """
+        try:
+            if not session.get('authenticated'):
+                return jsonify({'error': 'Authentication required'}), 401
+
+            from flask import Response
+            from datetime import date as _date
+            from services import attendance_export
+
+            def _parse(p):
+                raw = (request.args.get(p) or '').strip()
+                try:
+                    return _date.fromisoformat(raw)
+                except Exception:
+                    return None
+
+            start = _parse('start')
+            end = _parse('end')
+            if start is None or end is None:
+                return jsonify({
+                    'success': False,
+                    'message': 'start and end are required (YYYY-MM-DD).'
+                }), 400
+            if start > end:
+                start, end = end, start
+            if (end - start).days > attendance_report.MAX_RANGE_DAYS:
+                return jsonify({
+                    'success': False,
+                    'message': f'Range too large; max {attendance_report.MAX_RANGE_DAYS} days.'
+                }), 400
+
+            fmt = (request.args.get('format') or 'excel').strip().lower()
+            if fmt not in ('excel', 'pdf'):
+                fmt = 'excel'
+
+            ok, result = attendance_export.get_team_attendance_export(
+                odoo_service, employee_service, start, end, fmt
+            )
+            if not ok:
+                return jsonify({'success': False, 'message': result}), 500
+
+            payload, media_type, filename = result
+            return Response(
+                payload,
+                mimetype=media_type,
+                headers={
+                    'Content-Disposition': f'attachment; filename="{filename}"',
+                    'Content-Length': str(len(payload)),
+                },
+            )
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'message': f'Error exporting team attendance: {str(e)}'
+            }), 500
+
     @app.route('/api/odoo/employee/<int:employee_id>', methods=['GET'])
     def get_employee_by_id(employee_id):
         """Get specific employee data by ID"""
@@ -1294,7 +1389,7 @@ def create_app():
     def test_employee_data():
         """Test endpoint to fetch and display employee data"""
         try:
-            debug_log(f"Test employee endpoint called - Session: {dict(session)}", "odoo_data")
+            debug_log(f"Test employee endpoint called - Session: {_sanitize_session_for_log(session)}", "odoo_data")
             debug_log(f"Request headers: {dict(request.headers)}", "odoo_data")
             debug_log(f"Request remote address: {request.remote_addr}", "odoo_data")
             if not session.get('authenticated'):
@@ -2990,6 +3085,8 @@ def create_app():
                     and not normalized_msg.startswith('submit_timeoff_request:')
                     and not normalized_msg.startswith('edit_overtime_request:')
                     and not normalized_msg.startswith('update_overtime_request:')
+                    # Reimbursement form payload always contains "request"; description often contains "my" → avoid misrouting to balances & requests
+                    and not normalized_msg.startswith('submit_reimbursement_request:')
                 )
             ):
                 # User query: show my overtime and time off requests
@@ -4207,6 +4304,110 @@ def create_app():
             if not odoo_session_data or not odoo_session_data.get('session_id') or not odoo_session_data.get('user_id'):
                 return jsonify({'success': False, 'message': 'Odoo session not authenticated'}), 401
 
+            def _apply_renewed_session(result):
+                renewed = result.pop('_renewed_session', None) if isinstance(result, dict) else None
+                if renewed:
+                    session['odoo_session_id'] = renewed.get('session_id')
+                    session['user_id'] = renewed.get('user_id')
+                    if renewed.get('username'):
+                        session['username'] = renewed.get('username')
+                    if renewed.get('password'):
+                        session['password'] = renewed.get('password')
+                    odoo_session_data['session_id'] = renewed.get('session_id')
+                    odoo_session_data['user_id'] = renewed.get('user_id')
+                    if renewed.get('username'):
+                        odoo_session_data['username'] = renewed.get('username')
+                    if renewed.get('password'):
+                        odoo_session_data['password'] = renewed.get('password')
+                return renewed
+
+            def _many2one_id(value):
+                if isinstance(value, (list, tuple)) and value:
+                    return value[0] if isinstance(value[0], int) else None
+                return value if isinstance(value, int) else None
+
+            def _odoo_request_for_manager_action(model_name, method_name, args, kwargs):
+                result = odoo_service.make_authenticated_request(
+                    model=model_name,
+                    method=method_name,
+                    args=args,
+                    kwargs=kwargs or {},
+                    session_id=odoo_session_data['session_id'],
+                    user_id=odoo_session_data['user_id'],
+                    username=odoo_session_data.get('username'),
+                    password=odoo_session_data.get('password')
+                )
+                _apply_renewed_session(result)
+                if not isinstance(result, dict) or 'error' in result:
+                    return False, result.get('error', 'Unknown Odoo error') if isinstance(result, dict) else 'Unknown Odoo error'
+                return True, result.get('result')
+
+            def _get_fresh_direct_report_ids():
+                emp_ok, current_employee = employee_service.get_current_user_employee_data()
+                if not emp_ok or not isinstance(current_employee, dict) or not current_employee.get('id'):
+                    return False, "Could not resolve current employee record", set(), set()
+
+                ok_reports, reports = _odoo_request_for_manager_action(
+                    'hr.employee',
+                    'search_read',
+                    [[('parent_id', '=', current_employee.get('id'))]],
+                    {'fields': ['id', 'user_id'], 'limit': 200}
+                )
+                if not ok_reports or not isinstance(reports, list):
+                    return False, reports or "Could not fetch direct reports", set(), set()
+
+                employee_ids = set()
+                user_ids = set()
+                for report in reports:
+                    if not isinstance(report, dict):
+                        continue
+                    report_employee_id = report.get('id')
+                    if isinstance(report_employee_id, int):
+                        employee_ids.add(report_employee_id)
+                    report_user_id = _many2one_id(report.get('user_id'))
+                    if isinstance(report_user_id, int):
+                        user_ids.add(report_user_id)
+                return True, None, employee_ids, user_ids
+
+            def _record_belongs_to_direct_report():
+                ok_reports, report_error, employee_ids, user_ids = _get_fresh_direct_report_ids()
+                if not ok_reports:
+                    return False, str(report_error)
+                if not employee_ids:
+                    return False, "No direct reports found for the current user"
+
+                if model == 'hr.leave':
+                    ok_record, rows = _odoo_request_for_manager_action(
+                        'hr.leave',
+                        'read',
+                        [[record_id]],
+                        {'fields': ['employee_id']}
+                    )
+                    if not ok_record or not isinstance(rows, list) or not rows:
+                        return False, "Could not verify the time-off request owner"
+                    leave_employee_id = _many2one_id(rows[0].get('employee_id'))
+                    if leave_employee_id in employee_ids:
+                        return True, None
+                    return False, "This time-off request is not assigned to one of your direct reports"
+
+                ok_record, rows = _odoo_request_for_manager_action(
+                    'approval.request',
+                    'read',
+                    [[record_id]],
+                    {'fields': ['request_owner_id']}
+                )
+                if not ok_record or not isinstance(rows, list) or not rows:
+                    return False, "Could not verify the overtime request owner"
+                owner_user_id = _many2one_id(rows[0].get('request_owner_id'))
+                if owner_user_id in user_ids:
+                    return True, None
+                return False, "This overtime request is not assigned to one of your direct reports"
+
+            allowed_record, ownership_error = _record_belongs_to_direct_report()
+            if not allowed_record:
+                debug_log(f"[ManagerAction] Denied: action={action} model={model} record_id={record_id} reason={ownership_error}", "bot_logic")
+                return jsonify({'success': False, 'message': ownership_error or 'Request is outside your team'}), 403
+
             # Ensure we have credentials for session renewal if needed
             if not odoo_session_data.get('password'):
                 # Try to get password from remember_me service if available
@@ -4487,7 +4688,7 @@ def create_app():
         """Debug endpoint to clear session and force fresh login"""
         try:
             debug_log("Clearing session...", "bot_logic")
-            debug_log(f"Session before clear: {dict(session)}", "bot_logic")
+            debug_log(f"Session before clear: {_sanitize_session_for_log(session)}", "bot_logic")
             session.clear()
             odoo_service.logout()
             debug_log("Session cleared successfully", "bot_logic")
@@ -4651,7 +4852,7 @@ def create_app():
         """Debug endpoint to show current user data and Odoo connection status"""
         try:
             debug_info = {
-                'session_data': dict(session),
+                'session_data': _sanitize_session_for_log(session),
                 'odoo_authenticated': odoo_service.is_authenticated(),
                 'odoo_user_info': odoo_service.get_user_info(),
                 'employee_data': None,

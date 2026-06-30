@@ -58,13 +58,20 @@ class Config:
 
     # Supabase Configuration
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
-    SUPABASE_SERVICE_ROLE = os.environ.get("SUPABASE_SERVICE_ROLE")
+    SUPABASE_SERVICE_ROLE = os.environ.get("SUPABASE_SERVICE_ROLE") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     SUPABASE_METRIC_TABLE = os.environ.get("SUPABASE_METRIC_TABLE", "session_metrics")
     SUPABASE_THREAD_TABLE = os.environ.get("SUPABASE_THREAD_TABLE", "chat_threads")
     SUPABASE_MESSAGE_TABLE = os.environ.get("SUPABASE_MESSAGE_TABLE", "chat_messages")
     SUPABASE_REMEMBER_ME_TABLE = os.environ.get("SUPABASE_REMEMBER_ME_TABLE", "remember_me_tokens")
     SUPABASE_SESSION_TABLE = os.environ.get("SUPABASE_SESSION_TABLE", "chat_sessions")
     SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE)
+    APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "Asia/Amman")
+    ATTENDANCE_SUPABASE_URL = os.environ.get("ATTENDANCE_SUPABASE_URL") or SUPABASE_URL
+    ATTENDANCE_SUPABASE_SERVICE_ROLE = (
+        os.environ.get("ATTENDANCE_SUPABASE_SERVICE_ROLE")
+        or os.environ.get("ATTENDANCE_SUPABASE_SERVICE_ROLE_KEY")
+        or SUPABASE_SERVICE_ROLE
+    )
     # Use Supabase for sessions if available (required for cloud deployments)
     # Falls back to filesystem storage if Supabase is disabled
     USE_SUPABASE_SESSIONS = _to_bool(os.environ.get("USE_SUPABASE_SESSIONS"), default=True)
