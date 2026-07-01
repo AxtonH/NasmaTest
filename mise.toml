@@ -1,0 +1,9 @@
+[tools]
+python = "3.11.9"
+
+[settings]
+# mise >= 2026.x enforces GitHub artifact attestation verification for the
+# python-build-standalone releases, but those releases publish no attestations,
+# so `mise install` fails with "No GitHub artifact attestations found".
+# Disable the check to keep deploys working.
+python.github_attestations = false

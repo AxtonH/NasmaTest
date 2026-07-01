@@ -1467,6 +1467,44 @@ def create_app():
             # Normalize message and handle commands/intents
             normalized_msg = (message or '').strip().lower()
 
+            # Canonical list of ALL internal control-message prefixes the frontend emits.
+            # Any message starting with one of these (or matching one of the exact action
+            # values) is a machine payload, never a natural-language query. Used to keep the
+            # fuzzy "balances & requests" heuristic below from swallowing reimbursement/
+            # overtime/timeoff form payloads whose free-text values naturally contain
+            # 'request' + 'my'/'show'/'view'/'pending'.
+            _INTERNAL_COMMAND_PREFIXES = (
+                'submit_timeoff_request:', 'edit_timeoff_request:', 'update_timeoff_request:',
+                'cancel_timeoff_request:', 'confirm_timeoff_request:',
+                'submit_overtime_request:', 'edit_overtime_request:', 'update_overtime_request:',
+                'cancel_overtime_request:', 'confirm_overtime_request:',
+                'submit_reimbursement_request:', 'edit_reimbursement_request:', 'update_reimbursement_request:',
+                'reimbursement_amount_currency=', 'reimbursement_link=',
+            )
+            _INTERNAL_COMMAND_EXACT = frozenset({
+                'timeoff_confirm', 'timeoff_cancel',
+                'overtime_confirm', 'overtime_cancel',
+                'reimbursement_confirm', 'reimbursement_cancel',
+            })
+
+            def _is_internal_command_payload(norm_msg: str) -> bool:
+                """True if the (already strip().lower()'d) message is a machine control
+                payload rather than a natural-language query."""
+                import re
+                if not norm_msg:
+                    return False
+                if norm_msg in _INTERNAL_COMMAND_EXACT:
+                    return True
+                if norm_msg.startswith(_INTERNAL_COMMAND_PREFIXES):
+                    return True
+                # Any structured payload: pipe-delimited fields, or an identifier prefix
+                # immediately followed by ':' or '=' (e.g. "context_key=value").
+                if '|' in norm_msg:
+                    return True
+                if re.match(r'^[a-z][a-z0-9_]*[:=]', norm_msg):
+                    return True
+                return False
+
             if thread_id:
                 _log_chat_message_event(
                     thread_id,
@@ -3080,13 +3118,13 @@ def create_app():
                     'request' in normalized_msg and (
                         'my' in normalized_msg or 'show' in normalized_msg or 'view' in normalized_msg or 'pending' in normalized_msg
                     )
-                    and not normalized_msg.startswith('edit_timeoff_request:')
-                    and not normalized_msg.startswith('update_timeoff_request:')
-                    and not normalized_msg.startswith('submit_timeoff_request:')
-                    and not normalized_msg.startswith('edit_overtime_request:')
-                    and not normalized_msg.startswith('update_overtime_request:')
-                    # Reimbursement form payload always contains "request"; description often contains "my" → avoid misrouting to balances & requests
-                    and not normalized_msg.startswith('submit_reimbursement_request:')
+                    # Robust guard: only treat as a "balances & requests" query when the
+                    # message is plain natural language, never a machine control payload.
+                    # Reimbursement/overtime/timeoff form payloads and their free-text
+                    # values (descriptions, receipt URLs) naturally contain 'request' + 'my',
+                    # so a fixed startswith list is fragile — exclude the whole internal
+                    # command namespace (and any pipe-delimited / identifier-prefixed payload).
+                    and not _is_internal_command_payload(normalized_msg)
                 )
             ):
                 # User query: show my overtime and time off requests
@@ -3801,6 +3839,9 @@ def create_app():
                         normalized_msg == 'timeoff_cancel'
                     )
                     
+                    # Initialize so every downstream intent branch sees a bound name even
+                    # when this is an internal command (intent detection is skipped then).
+                    intent, confidence, meta = (None, 0.0, {})
                     if not is_internal_timeoff_command:
                         intent, confidence, meta = intent_service.detect(message)
                         if intent == 'timeoff_request' and confidence >= 0.5:
@@ -3846,7 +3887,10 @@ def create_app():
                                         'has_employee_context': employee_data is not None,
                                         'thread_id': thread_id
                                     })
-                    elif intent == 'reimbursement_request' and confidence >= 0.5:
+                    # Standalone `if` (not chained to the is_internal_timeoff_command gate):
+                    # the reimbursement/document intent branches must run whenever intent was
+                    # detected, regardless of the timeoff-command short-circuit above.
+                    if intent == 'reimbursement_request' and confidence >= 0.5:
                         # Handle reimbursement request through the reimbursement service
                         # Get Odoo session data to pass to reimbursement service for stateless requests
                         odoo_session_data = get_odoo_session_data()
