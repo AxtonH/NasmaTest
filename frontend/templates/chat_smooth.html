@@ -725,6 +725,24 @@
              overflow: visible;
          }
 
+         /* #newSidebar / #newSidebarOverlay also carry the legacy .new-sidebar /
+            .new-sidebar-overlay classes, which set `transform` and `backdrop-filter`.
+            Either of those on an element makes it the containing block for its
+            position:fixed children — which pins the inner .global-sidebar-panel to the
+            wrapper's spot at the bottom of the body flow (y ≈ 100vh) instead of the
+            viewport, so the panel slides off-screen and the sidebar looks transparent/empty.
+            The wrapper must stay a 0x0 pass-through: no transform, no backdrop-filter.
+            The inner .global-sidebar-panel keeps its own blur, background, and slide. */
+         #newSidebar.global-sidebar-wrapper,
+         #newSidebar.global-sidebar-wrapper.open,
+         #newSidebarOverlay.global-overlay-wrapper,
+         #newSidebarOverlay.global-overlay-wrapper.active {
+             transform: none !important;
+             -webkit-backdrop-filter: none !important;
+             backdrop-filter: none !important;
+             background: transparent !important;
+         }
+
          .global-sidebar-panel {
              position: fixed;
              top: 0;
