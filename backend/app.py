@@ -471,12 +471,30 @@ def create_app():
     
     @app.before_request
     def _rehydrate_odoo_service_from_session():
-        """Rehydrate OdooService after any Flask auto-reload or process restart.
+        """Pin this request's Odoo identity onto the shared OdooService.
 
-        If the Flask session indicates the user is authenticated and we have a stored
-        Odoo session id, ensure the in-memory service carries those values so
-        downstream handlers can call Odoo without forcing a fresh login.
+        The OdooService is a process-global singleton whose mutable identity
+        (session_id/user_id/username/password) is rehydrated from the per-user
+        Flask session on every request. To stop two concurrent requests (Flask
+        threads or async/multi workers) from interleaving their rehydration and
+        reading each other's Odoo identity, we hold ``odoo_service.identity_lock``
+        for the ENTIRE request — acquired here and released in
+        ``_release_odoo_identity_lock`` (teardown). This serializes access to the
+        shared identity without rewriting every downstream call site.
+
+        Static/asset and health routes don't touch Odoo, so we skip locking them
+        to avoid needless serialization of concurrent asset fetches.
         """
+        g._odoo_identity_locked = False
+
+        # Endpoints that never call Odoo — no need to serialize them.
+        endpoint = request.endpoint or ''
+        if endpoint in {'static', 'health'} or endpoint.endswith('_asset') or endpoint.endswith('_svg'):
+            return
+
+        # Acquire for the whole request. Released in teardown even on error.
+        odoo_service.identity_lock.acquire()
+        g._odoo_identity_locked = True
         try:
             if not session.get('authenticated'):
                 if odoo_service.is_authenticated():
@@ -509,7 +527,24 @@ def create_app():
             # Update last activity time
             odoo_service.last_activity = time.time()
         except Exception:
-            # Best-effort only; never block requests here
+            # Best-effort only; never block requests here. The lock is still
+            # released in teardown regardless of what happens here.
+            pass
+
+    @app.teardown_request
+    def _release_odoo_identity_lock(exc=None):
+        """Release the per-request Odoo identity lock acquired in before_request.
+
+        Runs even when the view raises. Guarded by the g flag so we never
+        release a lock this request didn't acquire.
+        """
+        try:
+            if getattr(g, '_odoo_identity_locked', False):
+                g._odoo_identity_locked = False
+                odoo_service.identity_lock.release()
+        except Exception:
+            # Never let teardown raise; a failed release should not mask the
+            # original response/error.
             pass
     
     @app.route('/')
@@ -1516,6 +1551,54 @@ def create_app():
                         'normalized': normalized_msg
                     }
                 )
+
+            # Reimbursement internal-command fast path.
+            # The reimbursement form/confirmation buttons emit machine payloads
+            # (submit_reimbursement_request:..., reimbursement_confirm, etc.).
+            # These MUST go straight to the reimbursement service — otherwise they
+            # fall through to the overtime/time-off/intent handlers below, where
+            # the fuzzy time-off detector scores them >=0.4 (e.g. an embedded date
+            # like 01/07/2026 alone qualifies) and hijacks the submission into the
+            # time-off flow, which then conflicts with the active reimbursement
+            # session and rejects it ("I cannot start a new request..."). The
+            # overtime/time-off internal commands are already special-cased the
+            # same way; reimbursement was missing from that treatment.
+            _REIMBURSEMENT_CMD_PREFIXES = (
+                'submit_reimbursement_request:', 'edit_reimbursement_request:',
+                'update_reimbursement_request:', 'reimbursement_amount_currency=',
+                'reimbursement_link=',
+            )
+            _REIMBURSEMENT_CMD_EXACT = {'reimbursement_confirm', 'reimbursement_cancel'}
+            if normalized_msg in _REIMBURSEMENT_CMD_EXACT or normalized_msg.startswith(_REIMBURSEMENT_CMD_PREFIXES):
+                try:
+                    odoo_session_data = get_odoo_session_data()
+                    reimb_resp = reimbursement_service.handle_flow(message, thread_id, employee_data or {}, odoo_session_data)
+                    if reimb_resp:
+                        resp_thread = reimb_resp.get('thread_id') or thread_id
+                        assistant_text = reimb_resp.get('message', '')
+                        if assistant_text:
+                            _log_chat_message_event(
+                                resp_thread,
+                                'assistant',
+                                assistant_text,
+                                employee_data,
+                                {'source': 'reimbursement'}
+                            )
+                        return jsonify({
+                            'response': reimb_resp.get('message', ''),
+                            'status': 'success',
+                            'has_employee_context': employee_data is not None,
+                            'thread_id': resp_thread,
+                            'widgets': reimb_resp.get('widgets'),
+                            'buttons': reimb_resp.get('buttons')
+                        })
+                    # If the reimbursement service unexpectedly returns None for one
+                    # of its own commands, fall through rather than silently hang.
+                    debug_log(f"Reimbursement command '{normalized_msg[:40]}' returned no response; falling through", "bot_logic")
+                except Exception as e:
+                    debug_log(f"Error handling reimbursement command: {str(e)}", "bot_logic")
+                    import traceback
+                    debug_log(f"Traceback: {traceback.format_exc()}", "bot_logic")
 
             # Global cancel intent handling (before any validation/parsing or ChatGPT call)
             def _is_cancel_intent(txt: str) -> bool:

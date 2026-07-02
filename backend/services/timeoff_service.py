@@ -135,6 +135,39 @@ class TimeOffService:
         for neg_pattern in negative_patterns:
             if re.search(neg_pattern, message_lower):
                 confidence -= 0.3
+
+        # Informational / policy questions must NOT open the request form.
+        # A user asking "what is the sick leave policy?" or "how many annual
+        # leave days do I get?" is seeking an answer, not submitting a request.
+        # These phrasings share leave-type keywords with real requests, so we
+        # apply a strong penalty (matching two positive signals) to drop them
+        # below threshold. Actual requests ("I want time off", "request annual
+        # leave", "book a day off") don't match these because they lack the
+        # informational lead-ins and carry an intent verb instead.
+        informational_patterns = [
+            # "what/how/why ... policy/entitlement/rule/allowance"
+            r'\b(?:policy|policies|entitlement|entitled|allowance|rule|rules|eligible|eligibility)\b',
+            # "what is/are ...", "how does ... work", "explain ...", "tell me about ..."
+            r'(?:what\s+(?:is|are|does|do)|how\s+(?:does|do|much|many|to)|why|when\s+(?:can|do|does)|explain|tell\s+me\s+about|difference\s+between)\b',
+            # "am I entitled to", "do I get", "how many ... do I get"
+            r'(?:do|can|am|are)\s+i\b.{0,30}(?:get|entitled|allowed|have)\b',
+        ]
+        has_informational = any(re.search(p, message_lower) for p in informational_patterns)
+        # Only suppress when the message ISN'T an explicit request. If the user
+        # both asks and states intent (e.g. "how do I request time off"), the
+        # existing "how do i request" pattern is a legitimate request trigger,
+        # so we require the absence of a direct first-person request verb.
+        has_direct_request = bool(re.search(
+            r'\b(?:i\s+)?(?:want|need|would\s+like|request|apply|book|schedule|submit|take|put\s+in)\b',
+            message_lower
+        ))
+        # Hard cap (not a fixed subtraction): a leave-type keyword plus multiple
+        # patterns can push a policy question's raw score to ~1.0, which a fixed
+        # penalty can't reliably beat. Capping below the 0.4 threshold makes the
+        # suppression deterministic regardless of how many positive signals stacked.
+        if has_informational and not has_direct_request:
+            confidence = min(confidence, 0.2)
+            debug_log(f"Informational/policy phrasing detected; suppressing time-off request trigger", "bot_logic")
         
         # Normalize confidence
         confidence = max(0.0, min(1.0, confidence))
@@ -389,7 +422,7 @@ class TimeOffService:
                     'args': [[leave_type_id]],
                     'kwargs': {'fields': ['name']}
                 }
-                ok_lt, leave_type_data = self._make_odoo_request_stateless(
+                ok_lt, leave_type_data, _lt_renewed = self._make_odoo_request_stateless(
                     'hr.leave.type', 'read', leave_type_params,
                     session_id=session_id,
                     user_id=user_id,
@@ -475,23 +508,27 @@ class TimeOffService:
                                 'type': 'binary',
                                 'mimetype': mimetype,
                             }
-                            att_success, att_id = self._make_odoo_request_stateless('ir.attachment', 'create', {
+                            att_success, att_id, _att_renewed = self._make_odoo_request_stateless('ir.attachment', 'create', {
                                 'args': [attachment_payload],
                                 'kwargs': {}
                             }, session_id=session_id, user_id=user_id, username=username, password=password)
 
                             if att_success and isinstance(att_id, int):
                                 attachment_ids.append(att_id)
-                        except Exception:
-                            pass
+                            else:
+                                self._log(f"Failed to create supporting attachment for leave #{leave_id}: {att_id}", "bot_logic")
+                        except Exception as att_err:
+                            self._log(f"Exception creating supporting attachment for leave #{leave_id}: {att_err}", "bot_logic")
 
                     if attachment_ids:
                         link_args = {
                             'args': [[leave_id], {'supported_attachment_ids': [(6, 0, attachment_ids)]}],
                             'kwargs': {}
                         }
-                        link_success, link_resp = self._make_odoo_request_stateless('hr.leave', 'write', link_args,
+                        link_success, link_resp, _link_renewed = self._make_odoo_request_stateless('hr.leave', 'write', link_args,
                             session_id=session_id, user_id=user_id, username=username, password=password)
+                        if not link_success:
+                            self._log(f"Failed to link supporting attachments {attachment_ids} to leave #{leave_id}: {link_resp}", "bot_logic")
 
                 return True, {
                     'leave_id': leave_id,

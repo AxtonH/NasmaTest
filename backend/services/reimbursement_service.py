@@ -428,7 +428,7 @@ class ReimbursementService:
                 return False, (
                     "I couldn't find the configured expense category product in Odoo. "
                     "Please ensure the product exists with the correct Internal Reference and is allowed to be expensed."
-                )
+                ), None
 
             expense_values['product_id'] = product_id
 

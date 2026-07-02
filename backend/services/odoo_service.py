@@ -1,6 +1,7 @@
 import requests
 import json
 import time
+import threading
 from typing import Dict, Optional, Tuple
 try:
     from ..config.settings import Config
@@ -19,6 +20,15 @@ class OdooService:
         self.password = None  # Store for re-authentication
         self.last_activity = None
         self.session_timeout = 7200  # 2 hours in seconds (Odoo default)
+        # Serializes access to this process-global instance's mutable identity
+        # (session_id/user_id/username/password). The stateful attributes are
+        # rehydrated per request from the Flask session; without this lock two
+        # concurrent requests (threads or async workers) could interleave their
+        # rehydration and read each other's Odoo identity. Held for the whole
+        # request via before_request/teardown_request in app.py. This is a
+        # reentrant lock so a request that re-pins its own identity mid-flight
+        # (e.g. after a session renewal) does not deadlock against itself.
+        self.identity_lock = threading.RLock()
         # Reuse HTTP connections across requests for lower latency
         try:
             self.http = requests.Session()
