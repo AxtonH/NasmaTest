@@ -506,6 +506,68 @@ def build_main_overview_table_widget(odoo_service, overview: List[Dict], user_tz
         if not ok_attendance or not isinstance(first_punch_by_code, dict):
             first_punch_by_code = {}
 
+        # Resolve each member's working weekdays exactly the way the attendance
+        # report does, so "Punched In" agrees with the attendance table: a member
+        # who is NOT scheduled to work today (rest day / day off) must show '—',
+        # never 'Absent'. The report hides non-working days entirely; here we keep
+        # the row (for Title/Tasks) but blank the punch cell. If schedule lookup
+        # fails we fall back to the shared PREZLAB default working days rather than
+        # mislabeling everyone Absent.
+        working_days_by_emp: Dict[int, frozenset] = {}
+        default_working_days = None
+        try:
+            try:
+                from .attendance_report import (
+                    fetch_member_schedules,
+                    fetch_working_days_by_calendar,
+                    PREZLAB_DEFAULT_DAYS,
+                )
+            except Exception:
+                from attendance_report import (  # type: ignore
+                    fetch_member_schedules,
+                    fetch_working_days_by_calendar,
+                    PREZLAB_DEFAULT_DAYS,
+                )
+            default_working_days = PREZLAB_DEFAULT_DAYS
+            sched_ids = [eid for eid in employee_ids if isinstance(eid, int)]
+            ok_sched, sched = fetch_member_schedules(odoo_service, sched_ids)
+            if ok_sched and isinstance(sched, dict):
+                cal_by_emp = {eid: cal for eid, (cal, _comp) in sched.items()}
+                cal_ids = [c for c in cal_by_emp.values() if isinstance(c, int)]
+                ok_days, days_by_cal = fetch_working_days_by_calendar(odoo_service, cal_ids)
+                if not (ok_days and isinstance(days_by_cal, dict)):
+                    days_by_cal = {}
+                for eid, cal in cal_by_emp.items():
+                    working_days_by_emp[eid] = days_by_cal.get(cal, PREZLAB_DEFAULT_DAYS) if isinstance(cal, int) else PREZLAB_DEFAULT_DAYS
+        except Exception as sched_err:
+            # Degrade gracefully: without schedules we use the default work week
+            # rather than crashing or defaulting everyone to Absent.
+            print(f"[manager_helper] Overview working-days lookup failed, using default work week: {sched_err}", flush=True)
+
+        # Today's weekday in the user's timezone (Mon=0..Sun=6), matching the
+        # report's convention. Uses the same tz relabeling as _utc_day_bounds_for_tz.
+        def _today_weekday_local(tzname: str) -> int:
+            now = datetime.now()
+            try:
+                if ZoneInfo and tzname:
+                    return datetime.now(ZoneInfo(tzname)).weekday()
+            except Exception:
+                pass
+            return now.weekday()
+
+        today_weekday = _today_weekday_local(user_tz or '')
+
+        def _is_working_today(member: Dict) -> bool:
+            eid = member.get('id')
+            wd = working_days_by_emp.get(eid) if isinstance(eid, int) else None
+            if wd is None:
+                wd = default_working_days
+            # If we truly have no schedule info at all, treat as working (preserve
+            # prior behavior of showing an attendance state) rather than hiding.
+            if wd is None:
+                return True
+            return today_weekday in wd
+
         def _punched_in_cell(member: Dict) -> str:
             code = _normalize_emp_code(member.get('emp_code'))
             if not code:
@@ -515,6 +577,10 @@ def build_main_overview_table_widget(odoo_service, overview: List[Dict], user_tz
             punch_time = first_punch_by_code.get(code)
             if punch_time:
                 return _attendance_pill(str(punch_time), 'present')
+            # No punch: distinguish a rest day (not scheduled → '—') from a
+            # genuine absence on a scheduled working day.
+            if not _is_working_today(member):
+                return '—'
             return _attendance_pill('Absent', 'absent')
 
         for m in overview:

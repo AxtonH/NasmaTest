@@ -27,17 +27,30 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.platypus import (
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-    Table,
-    TableStyle,
-)
+# reportlab is only needed for PDF export. Import it lazily/optionally so that a
+# missing reportlab (e.g. not installed in a given environment) disables ONLY the
+# PDF path — Excel export (openpyxl) must keep working regardless. render_pdf()
+# raises a clear error if reportlab is unavailable; the orchestrator surfaces it.
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+    _REPORTLAB_AVAILABLE = True
+    _REPORTLAB_IMPORT_ERROR = None
+except Exception as _rl_err:  # reportlab missing/broken — PDF disabled, Excel unaffected
+    _REPORTLAB_AVAILABLE = False
+    _REPORTLAB_IMPORT_ERROR = _rl_err
+    colors = None  # type: ignore
+    A4 = landscape = ParagraphStyle = getSampleStyleSheet = mm = None  # type: ignore
+    Paragraph = SimpleDocTemplate = Spacer = Table = TableStyle = None  # type: ignore
 
 try:  # reuse the formatters + status constants from the report module
     from .attendance_report import (
@@ -276,16 +289,28 @@ def _apply_widths(ws: Worksheet, n_cols: int) -> None:
 # PDF renderer (ported verbatim from the dashboard's exports/pdf.py)
 # --------------------------------------------------------------------------- #
 
-_HEADER_BG = colors.HexColor("#1F2430")
-_HEADER_FG = colors.white
-_SECTION_BG = colors.HexColor("#EEF1F5")
-_GRID = colors.HexColor("#E5E7EB")
-_ROW_ALT = colors.HexColor("#FAFAFA")
+# These color constants call into reportlab, so only define them when it's
+# available. They are read exclusively inside render_pdf/_build_pdf_table, which
+# refuse to run without reportlab, so leaving them None when it's absent is safe.
+if _REPORTLAB_AVAILABLE:
+    _HEADER_BG = colors.HexColor("#1F2430")
+    _HEADER_FG = colors.white
+    _SECTION_BG = colors.HexColor("#EEF1F5")
+    _GRID = colors.HexColor("#E5E7EB")
+    _ROW_ALT = colors.HexColor("#FAFAFA")
+else:
+    _HEADER_BG = _HEADER_FG = _SECTION_BG = _GRID = _ROW_ALT = None  # type: ignore
 _COL_WIDTHS_MM = [55, 80, 35, 35, 55]
 
 
 def render_pdf(table: ExportTable) -> bytes:
     """Build the PDF and return it as bytes."""
+    if not _REPORTLAB_AVAILABLE:
+        raise RuntimeError(
+            "PDF export is unavailable because the 'reportlab' package is not "
+            "installed in this environment. Please export as Excel instead, or "
+            f"install reportlab (original import error: {_REPORTLAB_IMPORT_ERROR})."
+        )
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,

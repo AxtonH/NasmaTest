@@ -1247,7 +1247,12 @@ def create_app():
 
             from flask import Response
             from datetime import date as _date
-            from services import attendance_export
+            try:
+                # Production import style when running as package 'backend.*'
+                from .services import attendance_export
+            except Exception:
+                # Local import style when running as script from backend/ directory
+                from services import attendance_export
 
             def _parse(p):
                 raw = (request.args.get(p) or '').strip()
