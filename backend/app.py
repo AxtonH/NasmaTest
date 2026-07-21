@@ -506,10 +506,31 @@ def create_app():
             uname = session.get('username')
             pwd = session.get('password')  # Get password from Flask session for session renewal
             if not sid or not uid:
-                # This user has no pinned Odoo identity. Never fall through to
+                # This user has no pinned Odoo identity. If they have stored
+                # credentials (remember_me), self-heal: re-authenticate as THEM
+                # and repair the session, instead of bouncing them to login.
+                if uname and pwd:
+                    try:
+                        ok, _msg, fresh = odoo_service.authenticate(uname, pwd)
+                    except Exception:
+                        ok, fresh = False, None
+                    if ok and fresh and fresh.get('session_id') and fresh.get('user_id'):
+                        session['user_id'] = fresh['user_id']
+                        session['odoo_session_id'] = fresh['session_id']
+                        session.modified = True
+                        odoo_service.last_activity = time.time()
+                        debug_log(f"Rehydrate self-heal: re-established Odoo session for {uname}", "bot_logic")
+                        return
+                # No way to recover this user's identity. Never fall through to
                 # whatever identity the previous request left on the shared
                 # singleton — that is cross-account bleed. Clear it so auth
                 # checks fail closed instead.
+                debug_log(
+                    f"Rehydrate: authenticated session missing Odoo identity "
+                    f"(has_sid={bool(sid)}, has_uid={bool(uid)}, has_uname={bool(uname)}, "
+                    f"has_pwd={bool(pwd)}, endpoint={endpoint}) — failing closed",
+                    "bot_logic",
+                )
                 if odoo_service.is_authenticated():
                     odoo_service.logout()
                 return
@@ -588,7 +609,12 @@ def create_app():
         
         # Verify Odoo authentication is still valid
         if not odoo_service.is_authenticated():
-            debug_log("Flask session exists but Odoo service not authenticated, clearing session and redirecting to login", "bot_logic")
+            debug_log(
+                "Flask session exists but Odoo service not authenticated, clearing session and redirecting to login "
+                f"(session has_sid={bool(session.get('odoo_session_id'))}, has_uid={bool(session.get('user_id'))}, "
+                f"has_pwd={bool(session.get('password'))}, permanent={session.get('_permanent', False)})",
+                "bot_logic",
+            )
             session.clear()
             odoo_service.logout()
             return redirect(url_for('login'))
@@ -1136,15 +1162,12 @@ def create_app():
                 except Exception as e:
                     debug_log(f"Failed to revoke refresh token: {str(e)}", "bot_logic")
             
-            # Also revoke all tokens for the user (optional - for security)
-            username = session.get('username', '')
-            user_id = session.get('user_id')
-            if user_id:
-                try:
-                    auth_token_service.revoke_all_user_tokens(user_id)
-                    debug_log(f"Revoked all tokens for user_id={user_id}", "bot_logic")
-                except Exception as e:
-                    debug_log(f"Failed to revoke all user tokens: {str(e)}", "bot_logic")
+            # NOTE: deliberately do NOT revoke all of the user's tokens here.
+            # Logout revokes only the token presented by THIS device (above);
+            # revoking everything killed remember-me on the user's other
+            # devices (e.g. logging out in the browser broke Teams auto-login).
+            # Full revocation stays available via revoke_all_user_tokens for
+            # security events (password change, suspected compromise).
 
             # Clear session
             session.pop('authenticated', None)

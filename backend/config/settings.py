@@ -1,3 +1,4 @@
+import hashlib
 import os
 from pathlib import Path
 
@@ -43,6 +44,14 @@ class Config:
     
     # Flask Configuration
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
+    # JWT signing secret for access tokens. Must be stable across restarts,
+    # deploys, and replicas — otherwise every issued token dies on the next
+    # deploy ("Signature verification failed") and auto-login breaks for
+    # everyone. Prefer a dedicated env var; fall back to a value derived from
+    # SECRET_KEY so it is at least deterministic.
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or hashlib.sha256(
+        (SECRET_KEY + ':nasma-jwt-v1').encode()
+    ).hexdigest()
     DEBUG = _to_bool(os.environ.get('FLASK_DEBUG'), default=False)
     PERMANENT_SESSION_LIFETIME = 3600  # 1 hour in seconds
     # Cookie settings for cross-site usage

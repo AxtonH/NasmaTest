@@ -44,8 +44,10 @@ class AuthTokenService:
         self.supabase: Client = create_client(supabase_url, supabase_key)
         self.table_name = table_name
         
-        # JWT secret key (should be in environment variables in production)
-        self.jwt_secret = getattr(Config, 'JWT_SECRET_KEY', secrets.token_urlsafe(32))
+        # JWT secret key — comes from Config (env JWT_SECRET_KEY or derived
+        # from SECRET_KEY). Never generate it at runtime: a per-process random
+        # secret invalidates every issued token on each restart/deploy.
+        self.jwt_secret = Config.JWT_SECRET_KEY
         self.jwt_algorithm = 'HS256'
         
         # Token expiration times
