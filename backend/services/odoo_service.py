@@ -29,9 +29,17 @@ class OdooService:
         # reentrant lock so a request that re-pins its own identity mid-flight
         # (e.g. after a session renewal) does not deadlock against itself.
         self.identity_lock = threading.RLock()
-        # Reuse HTTP connections across requests for lower latency
+        # Reuse HTTP connections across requests for lower latency.
+        # SECURITY: this Session is shared by every user of the process, so its
+        # cookie jar must never retain cookies. If it did, Odoo's session_id
+        # cookie from user A's login would be sent along with user B's
+        # /web/session/authenticate call, and Odoo would bind both logins to
+        # the same Odoo session — cross-account identity bleed. Every call must
+        # pass the session cookie explicitly via cookies={...}.
         try:
+            from http.cookiejar import DefaultCookiePolicy
             self.http = requests.Session()
+            self.http.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
             adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20)
             self.http.mount('http://', adapter)
             self.http.mount('https://', adapter)
@@ -95,7 +103,14 @@ class OdooService:
                         set_cookie = response.headers.get('Set-Cookie', '')
                         if 'session_id=' in set_cookie:
                             session_id = set_cookie.split('session_id=')[1].split(';')[0]
-                    
+
+                    if not session_id:
+                        # Without a fresh session id this login cannot be
+                        # isolated from other users — refuse it rather than
+                        # continuing with a None/stale session.
+                        print("DEBUG ODOO AUTH ERROR: Login succeeded but Odoo returned no session_id; refusing session-less login")
+                        return False, "Login failed: no session issued by Odoo. Please try again.", None
+
                     session_data = {
                         'session_id': session_id,
                         'user_id': result['result'].get('uid'),

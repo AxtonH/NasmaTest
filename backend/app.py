@@ -506,6 +506,12 @@ def create_app():
             uname = session.get('username')
             pwd = session.get('password')  # Get password from Flask session for session renewal
             if not sid or not uid:
+                # This user has no pinned Odoo identity. Never fall through to
+                # whatever identity the previous request left on the shared
+                # singleton — that is cross-account bleed. Clear it so auth
+                # checks fail closed instead.
+                if odoo_service.is_authenticated():
+                    odoo_service.logout()
                 return
 
             if (
@@ -516,9 +522,10 @@ def create_app():
                 odoo_service.session_id = sid
                 odoo_service.user_id = uid
                 odoo_service.username = uname
-                # Set password if available (needed for session renewal)
-                if pwd:
-                    odoo_service.password = pwd
+                # Always overwrite the password on an identity switch — even
+                # with None — so session renewal can never run with the
+                # previous user's credentials.
+                odoo_service.password = pwd
 
             # Update password if it changed (e.g., after auto-login refresh)
             if pwd and odoo_service.password != pwd:
@@ -530,6 +537,30 @@ def create_app():
             # Best-effort only; never block requests here. The lock is still
             # released in teardown regardless of what happens here.
             pass
+
+    @app.after_request
+    def _sync_renewed_odoo_session(response):
+        """Persist a mid-request Odoo session renewal back to this user's cookie.
+
+        post_with_retry/ensure_active_session may re-authenticate and rotate
+        odoo_service.session_id during a request. Without writing the new id
+        back, every later request re-pins the stale id and forces another
+        renewal round-trip. Runs before teardown_request, so the identity lock
+        is still held. Only syncs when the singleton identity is provably this
+        user's (matching user_id), never across identities.
+        """
+        try:
+            if (
+                getattr(g, '_odoo_identity_locked', False)
+                and session.get('authenticated')
+                and odoo_service.session_id
+                and odoo_service.user_id == session.get('user_id')
+                and session.get('odoo_session_id') != odoo_service.session_id
+            ):
+                session['odoo_session_id'] = odoo_service.session_id
+        except Exception:
+            pass
+        return response
 
     @app.teardown_request
     def _release_odoo_identity_lock(exc=None):
