@@ -106,7 +106,7 @@ class AuthTokenService:
         debug_log(f"Created access token for user_id={user_id}, username={username}", "bot_logic")
         return token
 
-    def create_refresh_token(self, user_id: int, username: str, password: str) -> str:
+    def create_refresh_token(self, user_id: int, username: str, password: str, trusted_device_key: str = None) -> str:
         """
         Create a refresh token and store it in the database with encrypted password
 
@@ -114,6 +114,9 @@ class AuthTokenService:
             user_id: User ID from Odoo
             username: Username
             password: User password (will be encrypted and stored)
+            trusted_device_key: Odoo auth_totp trusted-device key ('td_id')
+                for 2FA accounts — stored encrypted so auto-login can
+                re-authenticate without prompting for a TOTP code.
 
         Returns:
             Refresh token string (to be stored in browser)
@@ -130,7 +133,7 @@ class AuthTokenService:
 
         # Remove any existing tokens for this user (optional - can allow multiple devices)
         # For now, we'll allow multiple tokens per user (one per device/browser)
-        
+
         # Insert new token
         data = {
             'token_hash': token_hash,
@@ -140,12 +143,25 @@ class AuthTokenService:
             'created_at': created_at.isoformat(),
             'revoked_at': None
         }
+        if trusted_device_key:
+            data['encrypted_td'] = self._simple_encrypt(trusted_device_key, refresh_token)
 
         try:
             self.supabase.table(self.table_name).insert(data).execute()
             debug_log(f"Created refresh token for user_id={user_id}, username={username}", "bot_logic")
             return refresh_token
         except Exception as e:
+            # If the encrypted_td column doesn't exist yet (migration not
+            # applied), retry without it rather than failing the login.
+            if 'encrypted_td' in data:
+                debug_log(f"WARNING: refresh token insert with encrypted_td failed ({str(e)}); retrying without it — run supabase_refresh_tokens_td_migration.sql", "bot_logic")
+                data.pop('encrypted_td', None)
+                try:
+                    self.supabase.table(self.table_name).insert(data).execute()
+                    return refresh_token
+                except Exception as e2:
+                    debug_log(f"FAILED: Error creating refresh token: {str(e2)}", "bot_logic")
+                    raise
             debug_log(f"FAILED: Error creating refresh token: {str(e)}", "bot_logic")
             raise
 
@@ -185,6 +201,20 @@ class AuthTokenService:
 
         Returns:
             Tuple of (user_id, username, password) if valid, None otherwise
+        """
+        full = self.verify_refresh_token_full(refresh_token)
+        if not full:
+            return None
+        return (full['user_id'], full['username'], full['password'])
+
+    def verify_refresh_token_full(self, refresh_token: str) -> Optional[Dict]:
+        """
+        Verify a refresh token and return the full credential set.
+
+        Returns:
+            Dict {'user_id', 'username', 'password', 'trusted_device_key'}
+            if valid, None otherwise. trusted_device_key is None for accounts
+            without 2FA (or tokens created before the td migration).
         """
         token_hash = self._hash_token(refresh_token)
         
@@ -228,11 +258,25 @@ class AuthTokenService:
             # Decrypt password using refresh token as key
             try:
                 password = self._simple_decrypt(encrypted_password, refresh_token)
-                debug_log(f"Refresh token verified for user_id={user_id}, username={username}", "bot_logic")
-                return (user_id, username, password)
             except Exception as e:
                 debug_log(f"FAILED: Error decrypting password: {str(e)}", "bot_logic")
                 return None
+
+            trusted_device_key = None
+            encrypted_td = record.get('encrypted_td')
+            if encrypted_td:
+                try:
+                    trusted_device_key = self._simple_decrypt(encrypted_td, refresh_token)
+                except Exception as e:
+                    debug_log(f"WARNING: Could not decrypt trusted device key: {str(e)}", "bot_logic")
+
+            debug_log(f"Refresh token verified for user_id={user_id}, username={username}", "bot_logic")
+            return {
+                'user_id': user_id,
+                'username': username,
+                'password': password,
+                'trusted_device_key': trusted_device_key,
+            }
             
         except Exception as e:
             debug_log(f"FAILED: Error verifying refresh token: {str(e)}", "bot_logic")

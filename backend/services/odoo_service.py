@@ -1,5 +1,6 @@
 import requests
 import json
+import re
 import time
 import threading
 from typing import Dict, Optional, Tuple
@@ -12,12 +13,18 @@ class OdooService:
     """Service for Odoo API integration and authentication"""
     
     def __init__(self):
-        self.odoo_url = Config.ODOO_URL
+        # Normalize: a trailing slash in ODOO_URL produces '//web/...' URLs
+        self.odoo_url = (Config.ODOO_URL or '').rstrip('/')
         self.odoo_db = Config.ODOO_DB
         self.session_id = None
         self.user_id = None
         self.username = None
         self.password = None  # Store for re-authentication
+        # Odoo trusted-device key (auth_totp 'td_id' cookie). Presented during
+        # authenticate so accounts with 2FA can re-authenticate (session
+        # renewal, auto-login) without a fresh TOTP code. Part of the per-user
+        # identity: rehydrated per request and cleared on logout.
+        self.trusted_device_key = None
         self.last_activity = None
         self.session_timeout = 7200  # 2 hours in seconds (Odoo default)
         # Serializes access to this process-global instance's mutable identity
@@ -47,17 +54,26 @@ class OdooService:
         except Exception:
             self.http = requests
     
-    def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
+    # Sentinel message returned when the password stage passed but Odoo is
+    # waiting for a TOTP code. Callers that only check `success` treat it as
+    # a normal failure; the login endpoint uses it to start the TOTP step.
+    TOTP_REQUIRED = "TOTP_REQUIRED"
+
+    def authenticate(self, username: str, password: str, trusted_device_key: str = None) -> Tuple[bool, str, Optional[Dict]]:
         """
         Authenticate user with Odoo (stateless - returns session data instead of storing)
 
         Args:
             username: Odoo username
             password: Odoo password
+            trusted_device_key: Odoo auth_totp trusted-device key ('td_id'
+                cookie) — lets 2FA accounts skip the TOTP challenge. Falls
+                back to self.trusted_device_key (per-request pinned identity).
 
         Returns:
             Tuple of (success: bool, message: str, session_data: dict or None)
             session_data contains: {'session_id', 'user_id', 'username', 'password'}
+            When 2FA is pending: (False, TOTP_REQUIRED, {'pre_session_id': ...})
         """
         try:
             # Odoo authentication endpoint
@@ -76,10 +92,16 @@ class OdooService:
                 "id": 1
             }
 
+            # Present the trusted-device cookie if we have one so 2FA
+            # accounts authenticate fully in one step.
+            td_key = trusted_device_key or self.trusted_device_key
+            cookies = {'td_id': td_key} if td_key else {}
+
             # Make authentication request
             response = self.http.post(
                 auth_url,
                 json=auth_data,
+                cookies=cookies,
                 timeout=10
             )
 
@@ -111,9 +133,28 @@ class OdooService:
                         print("DEBUG ODOO AUTH ERROR: Login succeeded but Odoo returned no session_id; refusing session-less login")
                         return False, "Login failed: no session issued by Odoo. Please try again.", None
 
+                    user_id = result['result'].get('uid') if isinstance(result['result'], dict) else None
+                    if not user_id:
+                        # Password stage passed but no uid: typically an
+                        # account with two-factor authentication enabled —
+                        # Odoo parks the session in a pre-auth state pending
+                        # the TOTP code. Try session_info once in case the
+                        # session is actually complete, then fail closed.
+                        # Storing user_id=None here is what used to strand
+                        # users in a login loop (and, before the singleton
+                        # fix, dropped them into other people's accounts).
+                        user_id = self._fetch_session_uid(session_id)
+                    if not user_id:
+                        # Password accepted, session parked pre-auth: Odoo is
+                        # waiting for the TOTP code. Hand the pre-auth session
+                        # back so the caller can run the TOTP step.
+                        keys = list(result['result'].keys()) if isinstance(result['result'], dict) else type(result['result']).__name__
+                        print(f"DEBUG ODOO AUTH: 2FA pending for {username} (result keys: {keys}); TOTP step required")
+                        return False, self.TOTP_REQUIRED, {'pre_session_id': session_id, 'username': username}
+
                     session_data = {
                         'session_id': session_id,
-                        'user_id': result['result'].get('uid'),
+                        'user_id': user_id,
                         'username': username,
                         'password': password,  # For re-authentication
                         'last_activity': time.time()
@@ -142,6 +183,25 @@ class OdooService:
         except Exception as e:
             return False, f"Authentication error: {str(e)}", None
     
+    def _fetch_session_uid(self, session_id: str) -> Optional[int]:
+        """Ask Odoo for the uid bound to a session (fallback when the
+        authenticate response carries no uid). Returns None if the session
+        is not fully authenticated (e.g. pending a 2FA challenge)."""
+        try:
+            resp = self.http.post(
+                f"{self.odoo_url}/web/session/get_session_info",
+                json={"jsonrpc": "2.0", "method": "call", "params": {}, "id": 1},
+                cookies={'session_id': session_id},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                info = resp.json().get('result') or {}
+                uid = info.get('uid') if isinstance(info, dict) else None
+                return uid or None
+        except Exception as e:
+            print(f"DEBUG ODOO AUTH: get_session_info fallback failed: {e}")
+        return None
+
     def is_authenticated(self) -> bool:
         """Check if user is currently authenticated"""
         return self.session_id is not None and self.user_id is not None
@@ -205,7 +265,102 @@ class OdooService:
         self.user_id = None
         self.username = None
         self.password = None
+        self.trusted_device_key = None
         self.last_activity = None
+
+    def complete_totp_login(self, pre_session_id: str, code: str) -> Tuple[bool, str, Optional[Dict]]:
+        """Complete a 2FA login: submit the TOTP code for a pre-auth session.
+
+        Drives Odoo's /web/login/totp form flow: fetch the form (for the CSRF
+        token), post the code with remember=1 (so Odoo issues a 90-day
+        trusted-device key we can reuse for silent re-authentication), then
+        read back the finalized session. Odoo rotates the session id on
+        finalize, so the returned session_id may differ from pre_session_id.
+
+        Returns (success, message, session_data) where session_data contains
+        {'session_id', 'user_id', 'trusted_device_key'}.
+        """
+        try:
+            code = re.sub(r'\s+', '', str(code or ''))
+            if not code:
+                return False, "Verification code is required.", None
+            totp_url = f"{self.odoo_url}/web/login/totp"
+            cookies = {'session_id': pre_session_id}
+
+            # 1. Fetch the TOTP form to obtain the CSRF token.
+            page = self.http.get(totp_url, cookies=cookies, timeout=10, allow_redirects=False)
+            if page.status_code in (301, 302, 303):
+                # Pre-auth session no longer valid — but check whether it is
+                # because the session already got FINALIZED (e.g. a previous
+                # attempt succeeded without us detecting it): in that case the
+                # user is authenticated and we should just proceed.
+                print(f"DEBUG ODOO TOTP: form GET redirected (status={page.status_code}, location={page.headers.get('Location', '')!r})")
+                user_id = self._fetch_session_uid(pre_session_id)
+                if user_id:
+                    return True, "Authentication successful", {
+                        'session_id': pre_session_id,
+                        'user_id': user_id,
+                        'trusted_device_key': None,
+                        'last_activity': time.time(),
+                    }
+                return False, "Your login attempt expired. Please enter your password again.", None
+            match = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', page.text or '')
+            if not match:
+                match = re.search(r'value="([^"]+)"[^>]*name="csrf_token"', page.text or '')
+            if not match:
+                print("DEBUG ODOO TOTP ERROR: Could not find csrf_token on /web/login/totp page")
+                return False, "Could not start the verification step. Please try again.", None
+
+            # 2. Submit the code. remember=1 asks Odoo for a trusted-device
+            #    key so later re-authentication skips the TOTP challenge.
+            resp = self.http.post(
+                totp_url,
+                data={
+                    'totp_token': code,
+                    'csrf_token': match.group(1),
+                    'remember': '1',
+                    'redirect': '/web',
+                },
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                cookies=cookies,
+                timeout=10,
+                allow_redirects=False,
+            )
+
+            # 3. Decide success SEMANTICALLY, not by response shape: different
+            #    Odoo versions/proxies answer this POST with different
+            #    statuses and redirect targets. The ground truth is whether a
+            #    session is now fully authenticated (has a uid). Check the
+            #    rotated session id from the response first, then the
+            #    original one (Odoo may finalize in place without rotating).
+            location = resp.headers.get('Location', '')
+            rotated_sid = resp.cookies.get('session_id')
+            td_key = resp.cookies.get('td_id')
+            print(
+                f"DEBUG ODOO TOTP: verify response status={resp.status_code} "
+                f"location={location!r} rotated_sid={'yes' if rotated_sid else 'no'} "
+                f"td_cookie={'yes' if td_key else 'no'}"
+            )
+
+            for candidate_sid in filter(None, [rotated_sid, pre_session_id]):
+                user_id = self._fetch_session_uid(candidate_sid)
+                if user_id:
+                    return True, "Authentication successful", {
+                        'session_id': candidate_sid,
+                        'user_id': user_id,
+                        'trusted_device_key': td_key,
+                        'last_activity': time.time(),
+                    }
+
+            # No authenticated session anywhere — the code really was wrong.
+            body_snippet = re.sub(r'\s+', ' ', (resp.text or ''))[:300]
+            print(f"DEBUG ODOO TOTP: no authenticated session after verify; body snippet: {body_snippet}")
+            return False, "Invalid verification code. Please try again.", None
+        except requests.exceptions.Timeout:
+            return False, "Connection timeout. Please try again.", None
+        except Exception as e:
+            print(f"DEBUG ODOO TOTP ERROR: {e}")
+            return False, f"Verification error: {str(e)}", None
     
     def test_connection(self) -> Tuple[bool, str]:
         """
@@ -244,7 +399,10 @@ class OdooService:
         if not self.username or not self.password:
             return False, "Cannot renew session: credentials not stored"
 
-        return self.authenticate(self.username, self.password)
+        # authenticate() returns a 3-tuple; callers of _renew_session unpack
+        # 2 values. Returning it directly raised ValueError on every renewal.
+        ok, message, _session_data = self.authenticate(self.username, self.password)
+        return ok, message
 
     def ensure_active_session(self) -> Tuple[bool, str]:
         """Ensure session is active, renew if necessary"""

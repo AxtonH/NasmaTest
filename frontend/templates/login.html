@@ -38,16 +38,22 @@
             background: rgba(255, 255, 255, 0.18);
             border: 1px solid rgba(220, 38, 38, 0.35);
             color: #DC2626;
-            backdrop-filter: blur(6px);
             -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
         }
         .success-message {
             background: rgba(41, 28, 72, 0.12);
             border: 1px solid rgba(41, 28, 72, 0.35);
             color: #291C48;
-            backdrop-filter: blur(6px);
             -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
         }
+
+        /* Shared text utilities (replaces inline style attributes) */
+        .brand-ink { color: #291C48; }
+        .totp-back { color: #291C48; font-size: 13px; }
+        .login-footnote { color: #291C48; opacity: 0.7; font-size: 9pt; }
+        .accent-coral { color: #FF6666; }
 
         /* Frosted input styling to match message shell */
         body .frosted-input,
@@ -55,13 +61,13 @@
             background: rgba(255, 255, 255, 0.18) !important;
             border: 1px solid rgba(41, 28, 72, 0.35) !important;
             color: #291C48 !important;
-            backdrop-filter: blur(6px) !important;
             -webkit-backdrop-filter: blur(6px) !important;
+            backdrop-filter: blur(6px) !important;
             box-shadow: none !important;
             outline: none !important;
             background-clip: padding-box !important;
-            appearance: none !important;
             -webkit-appearance: none !important;
+            appearance: none !important;
             caret-color: #291C48 !important;
         }
         body .frosted-input::placeholder { color: #291C48; opacity: 0.85; }
@@ -87,10 +93,10 @@
         <div class="relative z-10 flex items-center justify-center min-h-screen px-4">
             <div class="w-full max-w-[640px] flex flex-col items-center gap-[32px]">
                 <img src="/Nasma-logo.png" alt="Nasma logo" class="h-12 w-auto"/>
-                <p class="text-center text-[26px] font-medium" style="color:#291C48;">Enter your Odoo details to log in.</p>
+                <p id="loginHeading" class="text-center text-[26px] font-medium brand-ink">Enter your Odoo details to log in.</p>
 
                 <form id="loginForm" class="w-full flex flex-col items-center gap-[32px]">
-                    <div class="w-full">
+                    <div class="w-full" id="usernameField">
                             <input
                             id="username"
                             name="username"
@@ -101,7 +107,7 @@
                         />
                     </div>
 
-                    <div class="w-full">
+                    <div class="w-full" id="passwordField">
                         <div class="relative">
                             <input
                                 id="password"
@@ -137,19 +143,48 @@
                         </span>
                     </button>
 
+                    <!-- Two-factor authentication step (hidden until Odoo asks for it) -->
+                    <div id="totpSection" class="hidden w-full flex flex-col gap-[32px]">
+                        <input
+                            id="totpCode"
+                            name="totpCode"
+                            type="text"
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            maxlength="10"
+                            placeholder="Enter the 6-digit verification code here"
+                            class="w-full h-[65.08px] rounded-[8px] px-6 frosted-input !bg-[rgba(255,255,255,0.18)] !border !border-[rgba(41,28,72,0.35)] !text-[#291C48]"
+                        />
+                        <button
+                            type="button"
+                            id="totpButton"
+                            class="w-full h-[65.08px] rounded-[8px] bg-[#291C48] text-white text-[22.63px] font-medium hover:opacity-90 transition"
+                        >
+                            <span id="totpButtonText">Verify</span>
+                            <span id="totpSpinner" class="hidden">Verifying...</span>
+                        </button>
+                        <button
+                            type="button"
+                            id="totpBackButton"
+                            class="w-full text-center underline totp-back"
+                        >
+                            Back to login
+                        </button>
+                    </div>
+
                     <!-- Moved confirmation/message box here between button and checkbox -->
                     <div id="messageContainer" class="hidden w-full">
                         <div id="messageContent" class="mt-0 px-4 py-3 rounded-lg text-sm font-medium"></div>
                     </div>
 
-                    <div class="flex items-center gap-[18px] mt-[32px]">
+                    <div class="flex items-center gap-[18px] mt-[32px]" id="rememberRow">
                         <input id="rememberMe" type="checkbox" checked class="h-[25.83px] w-[25.83px] border border-[#291C48] bg-transparent" />
-                        <label for="rememberMe" class="text-[26px] font-medium" style="color:#291C48;">Keep me logged in.</label>
+                        <label for="rememberMe" class="text-[26px] font-medium brand-ink">Keep me logged in.</label>
                     </div>
 
-                    <div class="w-full mt-2">
-                        <p class="text-center" style="color:#291C48; opacity:0.7; font-size:9pt;">
-                            Please use your <span style="color:#FF6666;">Odoo credentials</span> to log in.<br/>
+                    <div class="w-full mt-2" id="loginFootnote">
+                        <p class="text-center login-footnote">
+                            Please use your <span class="accent-coral">Odoo credentials</span> to log in.<br/>
                             If you are unsure of your login details, you can locate your Odoo credentials in your saved browser passwords or contact the Operations team for assistance
                         </p>
                     </div>
@@ -328,6 +363,17 @@
                 this.togglePasswordButton = document.getElementById('togglePassword');
                 this.eyeIcon = document.getElementById('eyeIcon');
                 this.rememberMeCheckbox = document.getElementById('rememberMe');
+                this.loginHeading = document.getElementById('loginHeading');
+                this.usernameField = document.getElementById('usernameField');
+                this.passwordField = document.getElementById('passwordField');
+                this.rememberRow = document.getElementById('rememberRow');
+                this.loginFootnote = document.getElementById('loginFootnote');
+                this.totpSection = document.getElementById('totpSection');
+                this.totpCodeInput = document.getElementById('totpCode');
+                this.totpButton = document.getElementById('totpButton');
+                this.totpButtonText = document.getElementById('totpButtonText');
+                this.totpSpinner = document.getElementById('totpSpinner');
+                this.totpBackButton = document.getElementById('totpBackButton');
                 this.tokenManager = new TokenManager();
 
                 this.init();
@@ -339,6 +385,85 @@
 
                 this.loginForm.addEventListener('submit', this.handleLogin.bind(this));
                 this.togglePasswordButton.addEventListener('click', this.togglePasswordVisibility.bind(this));
+                this.totpButton.addEventListener('click', this.handleTotpVerify.bind(this));
+                this.totpBackButton.addEventListener('click', this.exitTotpStep.bind(this));
+                this.totpCodeInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        this.handleTotpVerify();
+                    }
+                });
+            }
+
+            enterTotpStep() {
+                // Dedicated verification view: hide everything password-related
+                this.totpSection.classList.remove('hidden');
+                this.loginButton.classList.add('hidden');
+                this.usernameField.classList.add('hidden');
+                this.passwordField.classList.add('hidden');
+                this.rememberRow.classList.add('hidden');
+                this.loginFootnote.classList.add('hidden');
+                this.loginHeading.textContent = 'Enter the verification code from your authenticator app.';
+                this.hideMessage();
+                this.totpCodeInput.value = '';
+                this.totpCodeInput.focus();
+            }
+
+            exitTotpStep() {
+                this.totpSection.classList.add('hidden');
+                this.loginButton.classList.remove('hidden');
+                this.usernameField.classList.remove('hidden');
+                this.passwordField.classList.remove('hidden');
+                this.rememberRow.classList.remove('hidden');
+                this.loginFootnote.classList.remove('hidden');
+                this.loginHeading.textContent = 'Enter your Odoo details to log in.';
+                this.hideMessage();
+            }
+
+            async handleTotpVerify() {
+                const code = (this.totpCodeInput.value || '').trim();
+                if (!code) {
+                    this.showMessage('Please enter the verification code', 'error');
+                    return;
+                }
+
+                this.setTotpLoading(true);
+                this.hideMessage();
+
+                try {
+                    const response = await fetch('/api/auth/totp-verify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code: code })
+                    });
+                    const data = await response.json();
+
+                    if (data.success) {
+                        if (data.access_token && data.refresh_token) {
+                            this.tokenManager.saveTokens(data.access_token, data.refresh_token);
+                        }
+                        this.showMessage('Login successful! Redirecting...', 'success');
+                        setTimeout(() => { window.location.href = '/'; }, 1000);
+                    } else if (data.restart) {
+                        // Pre-auth session expired — start over from the password step
+                        this.exitTotpStep();
+                        this.showMessage(data.message || 'Please log in again.', 'error');
+                    } else {
+                        this.showMessage(data.message || 'Invalid verification code', 'error');
+                        this.totpCodeInput.value = '';
+                        this.totpCodeInput.focus();
+                    }
+                } catch (error) {
+                    this.showMessage('Network error. Please try again.', 'error');
+                } finally {
+                    this.setTotpLoading(false);
+                }
+            }
+
+            setTotpLoading(loading) {
+                this.totpButton.disabled = loading;
+                this.totpButtonText.classList.toggle('hidden', loading);
+                this.totpSpinner.classList.toggle('hidden', !loading);
             }
 
             async tryAutoLogin() {
@@ -475,6 +600,9 @@
                         setTimeout(() => {
                             window.location.href = '/';
                         }, 1500);
+                    } else if (data.requires_totp) {
+                        // Odoo accepted the password and wants the 2FA code
+                        this.enterTotpStep(data.message);
                     } else {
                         this.showMessage(data.message || 'Login failed', 'error');
                     }

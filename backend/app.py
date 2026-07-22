@@ -505,10 +505,14 @@ def create_app():
             uid = session.get('user_id')
             uname = session.get('username')
             pwd = session.get('password')  # Get password from Flask session for session renewal
+            tdk = session.get('totp_td')  # Odoo trusted-device key (2FA accounts)
             if not sid or not uid:
                 # This user has no pinned Odoo identity. If they have stored
                 # credentials (remember_me), self-heal: re-authenticate as THEM
                 # and repair the session, instead of bouncing them to login.
+                # Pin THIS user's trusted-device key first so a 2FA account
+                # heals silently (and never with a previous user's key).
+                odoo_service.trusted_device_key = tdk
                 if uname and pwd:
                     try:
                         ok, _msg, fresh = odoo_service.authenticate(uname, pwd)
@@ -543,14 +547,17 @@ def create_app():
                 odoo_service.session_id = sid
                 odoo_service.user_id = uid
                 odoo_service.username = uname
-                # Always overwrite the password on an identity switch — even
-                # with None — so session renewal can never run with the
-                # previous user's credentials.
+                # Always overwrite the password and trusted-device key on an
+                # identity switch — even with None — so session renewal can
+                # never run with the previous user's credentials.
                 odoo_service.password = pwd
+                odoo_service.trusted_device_key = tdk
 
             # Update password if it changed (e.g., after auto-login refresh)
             if pwd and odoo_service.password != pwd:
                 odoo_service.password = pwd
+            if tdk and odoo_service.trusted_device_key != tdk:
+                odoo_service.trusted_device_key = tdk
 
             # Update last activity time
             odoo_service.last_activity = time.time()
@@ -661,6 +668,99 @@ def create_app():
         debug_log("User not authenticated, showing login page", "bot_logic")
         return render_template('login.html')
     
+    def _finalize_login(username, password, remember_me, session_data):
+        """Establish the authenticated Flask session and issue JWT tokens.
+
+        Shared tail of /api/auth/login and /api/auth/totp-verify. session_data
+        must contain a verified user_id and session_id (and, after a TOTP
+        step, the trusted_device_key).
+        """
+        # Store authentication in Flask session (per-user, isolated)
+        # Only set permanent session if remember_me is checked
+        session.permanent = remember_me  # Permanent session only with remember_me
+        session['authenticated'] = True
+        session['username'] = username
+        session['user_id'] = session_data['user_id']
+        # Persist Odoo web session id for rehydration across reloads
+        session['odoo_session_id'] = session_data['session_id']
+        # Store password encrypted for session renewal (only if remember_me)
+        if remember_me:
+            session['password'] = password  # Flask session is encrypted by default
+        # Persist the Odoo trusted-device key so 2FA accounts can silently
+        # re-authenticate (session renewal) without a new TOTP code.
+        td_key = session_data.get('trusted_device_key')
+        if td_key:
+            session['totp_td'] = td_key
+
+        # Pin the singleton to this identity for the rest of this request
+        # (we hold the identity lock; next requests re-pin via rehydration).
+        odoo_service.session_id = session_data['session_id']
+        odoo_service.user_id = session_data['user_id']
+        odoo_service.username = username
+        odoo_service.password = password
+        if td_key:
+            odoo_service.trusted_device_key = td_key
+        odoo_service.last_activity = time.time()
+
+        debug_log(f"Authentication successful for {username} (permanent session: {remember_me})", "bot_logic")
+        debug_log(f"Session stored with session_id: {session_data['session_id'][:20]}...", "bot_logic")
+
+        response_data = {
+            'success': True,
+            'message': 'Authentication successful',
+            'user_info': {
+                'user_id': session_data['user_id'],
+                'username': username,
+                'database': Config.ODOO_DB,
+                'server_url': Config.ODOO_URL
+            }
+        }
+
+        # Handle remember me functionality with JWT tokens
+        if remember_me:
+            try:
+                # Generate JWT access token and refresh token
+                access_token = auth_token_service.create_access_token(
+                    user_id=session_data['user_id'],
+                    username=username,
+                    email=username
+                )
+                refresh_token = auth_token_service.create_refresh_token(
+                    user_id=session_data['user_id'],
+                    username=username,
+                    password=password,  # Password encrypted and stored with refresh token
+                    trusted_device_key=td_key  # For silent 2FA re-authentication
+                )
+
+                response_data['access_token'] = access_token
+                response_data['refresh_token'] = refresh_token
+                debug_log(f"JWT tokens created for {username} (user_id: {session_data['user_id']})", "bot_logic")
+
+                # Set cookies for Teams iframe compatibility
+                response = jsonify(response_data)
+                response.set_cookie(
+                    'nasma_access_token',
+                    access_token,
+                    max_age=7*24*60*60,  # 7 days
+                    httponly=False,  # Allow JavaScript access
+                    samesite='None',  # Required for Teams iframes
+                    secure=True  # Required when SameSite=None
+                )
+                response.set_cookie(
+                    'nasma_refresh_token',
+                    refresh_token,
+                    max_age=365*24*60*60,  # 1 year
+                    httponly=False,  # Allow JavaScript access
+                    samesite='None',  # Required for Teams iframes
+                    secure=True  # Required when SameSite=None
+                )
+                return response
+            except Exception as e:
+                debug_log(f"Failed to create JWT tokens: {str(e)}", "bot_logic")
+                # Continue without tokens - user can still use session-based auth
+
+        return jsonify(response_data)
+
     @app.route('/api/auth/login', methods=['POST'])
     def auth_login():
         try:
@@ -679,76 +779,27 @@ def create_app():
             # Authenticate with Odoo (stateless - returns session data)
             success, message, session_data = odoo_service.authenticate(username, password)
 
-            if success and session_data:
-                # Store authentication in Flask session (per-user, isolated)
-                # Only set permanent session if remember_me is checked
-                session.permanent = remember_me  # Permanent session only with remember_me
-                session['authenticated'] = True
-                session['username'] = username
-                session['user_id'] = session_data['user_id']
-                # Persist Odoo web session id for rehydration across reloads
-                session['odoo_session_id'] = session_data['session_id']
-                # Store password encrypted for session renewal (only if remember_me)
-                if remember_me:
-                    session['password'] = password  # Flask session is encrypted by default
-
-                debug_log(f"Authentication successful for {username} (permanent session: {remember_me})", "bot_logic")
-                debug_log(f"Session stored with session_id: {session_data['session_id'][:20]}...", "bot_logic")
-
-                response_data = {
-                    'success': True,
-                    'message': message,
-                    'user_info': {
-                        'user_id': session_data['user_id'],
-                        'username': username,
-                        'database': Config.ODOO_DB,
-                        'server_url': Config.ODOO_URL
-                    }
+            if not success and message == odoo_service.TOTP_REQUIRED and session_data:
+                # Password accepted; Odoo wants the TOTP code. Park the
+                # pre-auth state in this user's Flask session and tell the
+                # frontend to show the code input.
+                session['totp_pending'] = {
+                    'pre_session_id': session_data['pre_session_id'],
+                    'username': username,
+                    'password': password,
+                    'remember_me': bool(remember_me),
                 }
+                session.modified = True
+                debug_log(f"2FA required for {username}, awaiting TOTP code", "bot_logic")
+                return jsonify({
+                    'success': False,
+                    'requires_totp': True,
+                    'message': 'Enter the verification code from your authenticator app.'
+                })
 
-                # Handle remember me functionality with JWT tokens
-                if remember_me:
-                    try:
-                        # Generate JWT access token and refresh token
-                        access_token = auth_token_service.create_access_token(
-                            user_id=session_data['user_id'],
-                            username=username,
-                            email=username
-                        )
-                        refresh_token = auth_token_service.create_refresh_token(
-                            user_id=session_data['user_id'],
-                            username=username,
-                            password=password  # Password encrypted and stored with refresh token
-                        )
-                        
-                        response_data['access_token'] = access_token
-                        response_data['refresh_token'] = refresh_token
-                        debug_log(f"JWT tokens created for {username} (user_id: {session_data['user_id']})", "bot_logic")
-                        
-                        # Set cookies for Teams iframe compatibility
-                        response = jsonify(response_data)
-                        response.set_cookie(
-                            'nasma_access_token',
-                            access_token,
-                            max_age=7*24*60*60,  # 7 days
-                            httponly=False,  # Allow JavaScript access
-                            samesite='None',  # Required for Teams iframes
-                            secure=True  # Required when SameSite=None
-                        )
-                        response.set_cookie(
-                            'nasma_refresh_token',
-                            refresh_token,
-                            max_age=365*24*60*60,  # 1 year
-                            httponly=False,  # Allow JavaScript access
-                            samesite='None',  # Required for Teams iframes
-                            secure=True  # Required when SameSite=None
-                        )
-                        return response
-                    except Exception as e:
-                        debug_log(f"Failed to create JWT tokens: {str(e)}", "bot_logic")
-                        # Continue without tokens - user can still use session-based auth
-
-                return jsonify(response_data)
+            if success and session_data:
+                session.pop('totp_pending', None)
+                return _finalize_login(username, password, remember_me, session_data)
             else:
                 return jsonify({
                     'success': False,
@@ -760,7 +811,63 @@ def create_app():
                 'success': False,
                 'message': f'Authentication error: {str(e)}'
             }), 500
-    
+
+    @app.route('/api/auth/totp-verify', methods=['POST'])
+    def auth_totp_verify():
+        """Second step of a 2FA login: verify the TOTP code for the pending
+        pre-auth session created by /api/auth/login."""
+        try:
+            data = request.get_json(silent=True) or {}
+            code = str(data.get('code') or '').strip()
+
+            pending = session.get('totp_pending')
+            if not pending or not pending.get('pre_session_id'):
+                return jsonify({
+                    'success': False,
+                    'restart': True,
+                    'message': 'No login in progress. Please enter your email and password again.'
+                }), 400
+            if not code:
+                return jsonify({
+                    'success': False,
+                    'message': 'Verification code is required'
+                }), 400
+
+            ok, message, totp_data = odoo_service.complete_totp_login(pending['pre_session_id'], code)
+            if not ok:
+                # An expired pre-auth session cannot be retried with another
+                # code — the user must restart from the password step.
+                expired = 'expired' in (message or '').lower()
+                if expired:
+                    session.pop('totp_pending', None)
+                debug_log(f"TOTP verification failed for {pending.get('username')}: {message}", "bot_logic")
+                return jsonify({
+                    'success': False,
+                    'restart': expired,
+                    'message': message
+                }), 401
+
+            session.pop('totp_pending', None)
+            session_data = {
+                'session_id': totp_data['session_id'],
+                'user_id': totp_data['user_id'],
+                'username': pending['username'],
+                'trusted_device_key': totp_data.get('trusted_device_key'),
+            }
+            debug_log(f"TOTP verification succeeded for {pending['username']}", "bot_logic")
+            return _finalize_login(
+                pending['username'],
+                pending.get('password'),
+                pending.get('remember_me', False),
+                session_data,
+            )
+
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'message': f'Verification error: {str(e)}'
+            }), 500
+
     @app.route('/api/auth/verify-remember-me', methods=['POST'])
     def verify_remember_me():
         """Verify remember me token and auto-login if valid"""
@@ -1020,22 +1127,28 @@ def create_app():
                     password = session.get('password')
                     
                     if password:
-                        # Authenticate with Odoo to get fresh session
-                        success, message, session_data = odoo_service.authenticate(username, password)
-                        
+                        # Authenticate with Odoo to get fresh session (pass the
+                        # trusted-device key so 2FA accounts skip the TOTP step)
+                        success, message, session_data = odoo_service.authenticate(
+                            username, password, trusted_device_key=session.get('totp_td')
+                        )
+
                         if success and session_data:
                             # Store authentication in Flask session
                             session.permanent = True
                             session['authenticated'] = True
                             session['username'] = username
-                            session['user_id'] = user_id
+                            # Use the uid Odoo just verified, not the token
+                            # payload's — a stale/null stored value here breaks
+                            # every subsequent request for this user.
+                            session['user_id'] = session_data['user_id']
                             session['odoo_session_id'] = session_data['session_id']
                             session['password'] = password  # Keep password for future auto-logins
-                            
+
                             # Set password in OdooService for session renewal
                             odoo_service.password = password
                             odoo_service.username = username
-                            odoo_service.user_id = user_id
+                            odoo_service.user_id = session_data['user_id']
                             odoo_service.session_id = session_data['session_id']
                             
                             debug_log(f"Auto-login successful via access token for {username} (Odoo session established)", "bot_logic")
@@ -1064,13 +1177,19 @@ def create_app():
             
             # Access token expired or invalid - try refresh token
             if refresh_token:
-                user_info = auth_token_service.verify_refresh_token(refresh_token)
+                user_info = auth_token_service.verify_refresh_token_full(refresh_token)
                 if user_info:
-                    user_id, username, password = user_info
-                    
-                    # Authenticate with Odoo using decrypted password
-                    success, message, session_data = odoo_service.authenticate(username, password)
-                    
+                    user_id = user_info['user_id']
+                    username = user_info['username']
+                    password = user_info['password']
+                    td_key = user_info.get('trusted_device_key')
+
+                    # Authenticate with Odoo using decrypted password. The
+                    # trusted-device key lets 2FA accounts skip the TOTP step.
+                    success, message, session_data = odoo_service.authenticate(
+                        username, password, trusted_device_key=td_key
+                    )
+
                     if success and session_data:
                         # Generate new access token
                         new_access_token = auth_token_service.create_access_token(
@@ -1083,16 +1202,23 @@ def create_app():
                         session.permanent = True
                         session['authenticated'] = True
                         session['username'] = username
-                        session['user_id'] = user_id
+                        # Use the uid Odoo just verified, not the stored token
+                        # record's — a stale/null value here breaks every
+                        # subsequent request for this user.
+                        session['user_id'] = session_data['user_id']
                         session['odoo_session_id'] = session_data['session_id']
                         session['password'] = password  # Keep password for faster access token flow
-                        
+                        if td_key:
+                            session['totp_td'] = td_key  # Keep 2FA silent for session renewal
+
                         # Set password in OdooService for session renewal
                         odoo_service.password = password
                         odoo_service.username = username
-                        odoo_service.user_id = user_id
+                        odoo_service.user_id = session_data['user_id']
                         odoo_service.session_id = session_data['session_id']
-                        
+                        if td_key:
+                            odoo_service.trusted_device_key = td_key
+
                         debug_log(f"Auto-login successful via refresh token for {username} (Odoo session established)", "bot_logic")
                         
                         response = jsonify({
