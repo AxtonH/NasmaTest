@@ -154,6 +154,16 @@ class OdooService:
                         # users in a login loop (and, before the singleton
                         # fix, dropped them into other people's accounts).
                         user_id = self._fetch_session_uid(session_id)
+                    if not user_id and td_key:
+                        # Odoo IGNORES the td_id cookie on /web/session/
+                        # authenticate — the trusted-device bypass only lives
+                        # in the GET /web/login/totp handler (verified against
+                        # Odoo 18 source). Present the key there to finalize
+                        # the pre-auth session without a code.
+                        finalized = self._try_trusted_device_finalize(session_id, td_key)
+                        if finalized:
+                            session_id = finalized['session_id']
+                            user_id = finalized['user_id']
                     if not user_id:
                         # Password accepted, session parked pre-auth: Odoo is
                         # waiting for the TOTP code. Hand the pre-auth session
@@ -277,6 +287,41 @@ class OdooService:
         self.password = None
         self.trusted_device_key = None
         self.last_activity = None
+
+    def _try_trusted_device_finalize(self, pre_session_id: str, td_key: str) -> Optional[Dict]:
+        """Finalize a 2FA-pending session using a trusted-device key.
+
+        Odoo only honors the td_id cookie on GET /web/login/totp (never on
+        /web/session/authenticate): a pre-auth session hitting that route
+        with a valid key is finalized and redirected, exactly like a browser
+        that checked "remember this device". Finalize rotates the session id,
+        so probe the rotated sid first, then the original.
+
+        Returns {'session_id', 'user_id'} on success, None if the key was
+        rejected (expired/revoked — caller falls back to the TOTP prompt).
+        """
+        try:
+            resp = self.http.get(
+                f"{self.odoo_url}/web/login/totp",
+                headers={'User-Agent': self._BROWSER_UA},
+                cookies={'session_id': pre_session_id, 'td_id': td_key},
+                timeout=10,
+                allow_redirects=False,
+            )
+            rotated_sid = resp.cookies.get('session_id')
+            print(
+                f"DEBUG ODOO TOTP: trusted-device finalize status={resp.status_code} "
+                f"location={resp.headers.get('Location', '')!r} "
+                f"rotated_sid={'yes' if rotated_sid else 'no'}"
+            )
+            for sid in filter(None, [rotated_sid, pre_session_id]):
+                uid = self._fetch_session_uid(sid)
+                if uid:
+                    return {'session_id': sid, 'user_id': uid}
+            print("DEBUG ODOO TOTP: trusted-device key not accepted (expired or revoked); TOTP prompt required")
+        except Exception as e:
+            print(f"DEBUG ODOO TOTP: trusted-device finalize failed: {e}")
+        return None
 
     def complete_totp_login(self, pre_session_id: str, code: str, user_agent: str = None) -> Tuple[bool, str, Optional[Dict]]:
         """Complete a 2FA login: submit the TOTP code for a pre-auth session.
