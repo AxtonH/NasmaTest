@@ -1,207 +1,230 @@
 """Export the team attendance report as .xlsx or .pdf.
 
-This is a faithful port of the standalone Attendance Dashboard's export feature
-(`features/exports/{service,excel,pdf}.py`). The `ExportTable` structure, the
-openpyxl/reportlab renderers, the styling (dark header band, section shading,
-zebra striping), the column shapes, and the filename convention are reproduced
-verbatim so a file exported from Nasma matches one exported from the dashboard.
+This is a faithful port of the standalone Attendance Dashboard's report
+template (`features/exports/{report,excel,pdf,chart}.py`): a branded Summary
+sheet/page (hero KEY METRICS tiles, arrival/departure pattern tables with
+charts, the per-employee overview, TOP RANKINGS podiums) plus one sheet/page
+per employee (PROFILE, SUMMARY tile grid, DAILY LOG with status pills, and a
+STATUS KEY legend). The layout lives in `attendance_export_excel.py` /
+`attendance_export_pdf.py`; the report shape in `attendance_export_report.py`
+— all reproduced verbatim from the dashboard so a file exported from Nasma
+matches one exported from the dashboard.
 
-The only Nasma-specific piece is the adapter (`build_daily_export` /
-`build_range_export`) that converts Nasma's `MemberRange` data into the same
-`ExportTable` row matrix the dashboard builds from its response models. Status
-words (Absent / On leave / Holiday) and worked-time formatting match the
-dashboard's `exports/service.py` exactly.
+The only Nasma-specific pieces here:
 
-No attendance logic here — just reshaping + layout.
+  - the adapter (`_adapt_ranges`) that converts Nasma's `MemberRange` data
+    (built by `attendance_report._gather_member_ranges`, the exact same data
+    the on-screen widget renders) into the report builder's inputs, and
+  - the profile lookups (department from the cached direct-reports list,
+    Odoo `x_studio_pod` for the "Pool / Team" field — both degrade to blank).
+
+Shift timing (start 09:00, 15m grace, 8h day) mirrors the dashboard's
+`config/shift_rules.yaml`. One deliberate deviation: the dashboard's phase-1
+config marks Thursday as org-wide WFH; Nasma resolves real per-employee Odoo
+schedules and its on-screen table shows those Thursdays as Absent, so the
+export keeps `wfh_weekdays` empty to stay consistent with the screen (see
+`ShiftRule` in `attendance_export_report.py`).
+
+No attendance logic here — just reshaping + orchestration.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import date
-from io import BytesIO
-from typing import List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, Set, Tuple
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.worksheet import Worksheet
-
-# reportlab is only needed for PDF export. Import it lazily/optionally so that a
-# missing reportlab (e.g. not installed in a given environment) disables ONLY the
-# PDF path — Excel export (openpyxl) must keep working regardless. render_pdf()
-# raises a clear error if reportlab is unavailable; the orchestrator surfaces it.
-try:
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import mm
-    from reportlab.platypus import (
-        Paragraph,
-        SimpleDocTemplate,
-        Spacer,
-        Table,
-        TableStyle,
-    )
-    _REPORTLAB_AVAILABLE = True
-    _REPORTLAB_IMPORT_ERROR = None
-except Exception as _rl_err:  # reportlab missing/broken — PDF disabled, Excel unaffected
-    _REPORTLAB_AVAILABLE = False
-    _REPORTLAB_IMPORT_ERROR = _rl_err
-    colors = None  # type: ignore
-    A4 = landscape = ParagraphStyle = getSampleStyleSheet = mm = None  # type: ignore
-    Paragraph = SimpleDocTemplate = Spacer = Table = TableStyle = None  # type: ignore
-
-try:  # reuse the formatters + status constants from the report module
+try:  # package-style import (matches app.py's primary import block)
+    from .manager_helper import _make_odoo_request, _normalize_emp_code
     from .attendance_report import (
         MemberRange,
-        DayRow,
-        STATUS_ABSENT,
-        STATUS_ON_LEAVE,
-        STATUS_HOLIDAY,
-        _fmt_time,
-        _fmt_worked_minutes,
-        _fmt_weekday_date,
+        STATUS_ABSENT as NASMA_STATUS_ABSENT,
+        STATUS_HOLIDAY as NASMA_STATUS_HOLIDAY,
+        STATUS_ON_LEAVE as NASMA_STATUS_ON_LEAVE,
+        _iter_days,
     )
-except Exception:  # script-style import
+    from .attendance_export_report import (
+        EmployeesWeekResponse,
+        EmployeeWeek,
+        EmployeeWeekDay,
+        ShiftRule,
+        build_attendance_report,
+    )
+    from .attendance_export_excel import render_xlsx
+except Exception:  # script-style import (running from backend/)
+    from manager_helper import _make_odoo_request, _normalize_emp_code  # type: ignore
     from attendance_report import (  # type: ignore
         MemberRange,
-        DayRow,
-        STATUS_ABSENT,
-        STATUS_ON_LEAVE,
-        STATUS_HOLIDAY,
-        _fmt_time,
-        _fmt_worked_minutes,
-        _fmt_weekday_date,
+        STATUS_ABSENT as NASMA_STATUS_ABSENT,
+        STATUS_HOLIDAY as NASMA_STATUS_HOLIDAY,
+        STATUS_ON_LEAVE as NASMA_STATUS_ON_LEAVE,
+        _iter_days,
     )
-
-
-# --------------------------------------------------------------------------- #
-# ExportTable (ported verbatim from the dashboard's exports/service.py)
-# --------------------------------------------------------------------------- #
-
-@dataclass(frozen=True)
-class ExportTable:
-    """A flat, renderer-agnostic view of an attendance report.
-
-    `title` heads the sheet/page. `columns` are the header cells. `rows` is a
-    list of string rows aligned to `columns`. `section_rows` holds the indices
-    in `rows` that are section headers (per-employee banners in the grouped
-    layout) so renderers can style them distinctly; it's empty for the flat
-    daily layout. `subtitle` is an optional one-line caption.
-    """
-
-    title: str
-    subtitle: str
-    columns: List[str]
-    rows: List[List[str]]
-    section_rows: Set[int] = field(default_factory=set)
-
-
-# --------------------------------------------------------------------------- #
-# Status / worked-time formatting (matches the dashboard's exports/service.py)
-# --------------------------------------------------------------------------- #
-
-STATUS_ABSENT_WORD = "Absent"
-STATUS_ON_LEAVE_WORD = "On leave"
-STATUS_HOLIDAY_WORD = "Holiday"
-
-
-def _worked_or_status(row: DayRow) -> str:
-    """One cell combining worked time and excused/absent status (text words).
-
-    Precedence Holiday > On leave > Absent, same as the dashboard. A worked day
-    shows the formatted duration.
-    """
-    if row.status == STATUS_HOLIDAY:
-        return STATUS_HOLIDAY_WORD
-    if row.status == STATUS_ON_LEAVE:
-        return STATUS_ON_LEAVE_WORD
-    if row.status == STATUS_ABSENT:
-        return STATUS_ABSENT_WORD
-    return _fmt_worked_minutes(row.worked_minutes)
-
-
-# --------------------------------------------------------------------------- #
-# Adapter: Nasma MemberRange[] → ExportTable (matches the dashboard layouts)
-# --------------------------------------------------------------------------- #
-
-def build_daily_export(ranges: List[MemberRange], *, period_label: str) -> ExportTable:
-    """Flat one-row-per-member table for a single day.
-
-    Column shape matches the dashboard's daily Employees export: Emp code, Name,
-    Punch in, Punch out, Worked time. Only members scheduled that day appear
-    (ranges already exclude unscheduled members, who have no day rows).
-    """
-    columns = ["Emp code", "Name", "Punch in", "Punch out", "Worked time"]
-    rows: List[List[str]] = []
-    for mr in ranges:
-        if not mr.days:
-            continue
-        d = mr.days[0]
-        rows.append([
-            mr.emp_code,
-            mr.name,
-            _fmt_time(d.punch_in),
-            _fmt_time(d.punch_out),
-            _worked_or_status(d),
-        ])
-    return ExportTable(
-        title="Attendance · Team",
-        subtitle=period_label,
-        columns=columns,
-        rows=rows,
+    from attendance_export_report import (  # type: ignore
+        EmployeesWeekResponse,
+        EmployeeWeek,
+        EmployeeWeekDay,
+        ShiftRule,
+        build_attendance_report,
     )
+    from attendance_export_excel import render_xlsx  # type: ignore
 
 
-def build_range_export(ranges: List[MemberRange], *, period_label: str) -> ExportTable:
-    """Grouped table for a date range — one section per member.
-
-    A banner row (emp code, name, days-worked + total hours) followed by the
-    per-day breakdown. Banner row indices are recorded in `section_rows` so the
-    renderers bold/shade them. Mirrors the dashboard's `build_range_export`.
-    """
-    columns = ["Emp code / Day", "Name", "Punch in", "Punch out", "Worked time"]
-    rows: List[List[str]] = []
-    section_rows: Set[int] = set()
-
-    for mr in ranges:
-        days_label = "1 day" if mr.days_worked == 1 else f"{mr.days_worked} days"
-        total = _fmt_worked_minutes(mr.total_worked_minutes)
-        section_rows.add(len(rows))
-        rows.append([mr.emp_code, mr.name, "", "", f"{days_label} · {total}"])
-        for d in mr.days:
-            rows.append([
-                _fmt_weekday_date(d.day),
-                "",
-                _fmt_time(d.punch_in),
-                _fmt_time(d.punch_out),
-                _worked_or_status(d),
-            ])
-
-    return ExportTable(
-        title="Attendance · Team",
-        subtitle=period_label,
-        columns=columns,
-        rows=rows,
-        section_rows=section_rows,
-    )
+# Org-wide shift timing — mirrors the dashboard's config/shift_rules.yaml
+# except `wfh_weekdays` (see the module docstring).
+DEFAULT_SHIFT_RULE = ShiftRule(
+    start="09:00",
+    grace_minutes=15,
+    full_day_minutes=480,
+    wfh_weekdays=(),
+)
 
 
-def build_export_table(
+# --------------------------------------------------------------------------- #
+# Adapter: Nasma MemberRange[] → report-builder inputs
+# --------------------------------------------------------------------------- #
+
+def _adapt_ranges(
     ranges: List[MemberRange],
-    start_date: date,
-    end_date: date,
-) -> ExportTable:
-    """Pick the daily or range layout and stamp the period caption."""
-    if start_date == end_date:
-        return build_daily_export(ranges, period_label=_period_label(start_date, end_date, True))
-    return build_range_export(ranges, period_label=_period_label(start_date, end_date, False))
+    days: List[date],
+    rule: ShiftRule,
+) -> Tuple[EmployeesWeekResponse, Dict[date, FrozenSet[str]]]:
+    """Convert MemberRanges into the report's response + schedule map.
+
+    A `MemberRange` carries one `DayRow` per SCHEDULED day, so the per-day
+    working sets fall straight out of the rows — a day with no row for a
+    member is their weekend, which the report builder then labels itself.
+
+    Row conversion mirrors the dashboard's employees service:
+      - Holiday / On leave / Absent rows keep their flags (punch times stay
+        visible when present — someone who popped in on a leave day).
+      - A worked row with no punch yet (today pre-cutoff, or a future
+        scheduled day) emits NO row: the builder renders the gap as
+        upcoming ("—") instead of a false Present.
+      - An absence on an org WFH weekday emits no row either, so the gap
+        reads as WFH — no office attendance is expected that day.
+    """
+    working_by_day: Dict[date, Set[str]] = {day: set() for day in days}
+    rows: List[EmployeeWeek] = []
+
+    for mr in ranges:
+        day_rows: List[EmployeeWeekDay] = []
+        for d in mr.days:
+            if d.day in working_by_day:
+                working_by_day[d.day].add(mr.emp_code)
+
+            if d.status == NASMA_STATUS_HOLIDAY:
+                flags = {"on_holiday": True}
+            elif d.status == NASMA_STATUS_ON_LEAVE:
+                flags = {"on_leave": True}
+            elif d.status == NASMA_STATUS_ABSENT:
+                if d.day.weekday() in rule.wfh_weekdays:
+                    continue  # WFH weekday — not an office absence
+                flags = {"absent": True}
+            else:  # worked
+                if d.punch_in is None:
+                    continue  # unsettled (today/future) → upcoming gap
+                flags = {}
+
+            day_rows.append(
+                EmployeeWeekDay(
+                    date=d.day.isoformat(),
+                    punch_in=d.punch_in,
+                    punch_out=d.punch_out,
+                    worked_minutes=d.worked_minutes,
+                    **flags,
+                )
+            )
+        rows.append(EmployeeWeek(emp_code=mr.emp_code, name=mr.name, days=day_rows))
+
+    return (
+        EmployeesWeekResponse(rows=rows),
+        {day: frozenset(codes) for day, codes in working_by_day.items()},
+    )
 
 
-def _period_label(start: date, end: date, single_day: bool) -> str:
+# --------------------------------------------------------------------------- #
+# Profile lookups (department + Odoo pod) — degrade to blank, never fail
+# --------------------------------------------------------------------------- #
+
+def _tag_name(value: Any) -> str:
+    """Display name for a Studio tag field, "" when unset.
+
+    Studio tag fields aren't one consistent shape over XML-RPC: depending on
+    how the field was defined it arrives as a many2one `[id, "Name"]`, a
+    many2many id list (no names in the payload), or a plain selection/char
+    string. Read the ones that carry a name and fall back to "" for the
+    id-list form rather than rendering a bare id. (Same coercion as the
+    dashboard's Odoo roster.)
+    """
+    if isinstance(value, list):
+        if len(value) >= 2 and isinstance(value[1], str):
+            return value[1].strip()
+        return ""
+    if value is False or value is None:
+        return ""
+    return str(value).strip()
+
+
+def _profile_maps(
+    odoo_service, employee_service
+) -> Tuple[Mapping[str, str], Mapping[str, str]]:
+    """(department_by_emp_code, pod_by_emp_code) for the manager's team.
+
+    Departments come from the cached direct-reports list the range gatherer
+    already used. Pods (`x_studio_pod`, the export's "Pool / Team" field)
+    need one extra hr.employee read; both maps degrade to empty on any
+    failure — the renderers show "—" for missing values.
+    """
+    departments: Dict[str, str] = {}
+    pods: Dict[str, str] = {}
+    try:
+        ok, team = employee_service.get_direct_reports_current_user()
+        if not ok or not isinstance(team, list):
+            return departments, pods
+
+        code_by_employee_id: Dict[int, str] = {}
+        for m in team:
+            if not isinstance(m, dict):
+                continue
+            code = _normalize_emp_code(m.get("emp_code"))
+            if not code:
+                continue
+            departments[code] = str(m.get("department") or "")
+            eid = m.get("id")
+            if isinstance(eid, int):
+                code_by_employee_id[eid] = code
+
+        if code_by_employee_id:
+            params = {
+                "args": [[("id", "in", list(code_by_employee_id))]],
+                "kwargs": {
+                    "fields": ["id", "x_studio_pod"],
+                    "limit": len(code_by_employee_id) + 1,
+                },
+            }
+            ok2, rows = _make_odoo_request(
+                odoo_service, "hr.employee", "search_read", params
+            )
+            if ok2:
+                for r in rows or []:
+                    if not isinstance(r, dict):
+                        continue
+                    code = code_by_employee_id.get(r.get("id"))
+                    if code:
+                        pods[code] = _tag_name(r.get("x_studio_pod"))
+    except Exception:
+        # Supplementary data only — the report renders without it.
+        pass
+    return departments, pods
+
+
+# --------------------------------------------------------------------------- #
+# Captions + filename (unchanged conventions)
+# --------------------------------------------------------------------------- #
+
+def _period_label(start: date, end: date) -> str:
     """Human-readable caption, DD-MM-YYYY (matches the dashboard route)."""
-    if single_day:
+    if start == end:
         return start.strftime("%A, %d-%m-%Y")
     return f"{start.strftime('%d-%m-%Y')} to {end.strftime('%d-%m-%Y')}"
 
@@ -217,175 +240,6 @@ def export_filename(start: date, end: date, ext: str) -> str:
     else:
         stamp = f"{start.isoformat()}_to_{end.isoformat()}"
     return f"prezlab-attendance_{stamp}.{ext}"
-
-
-# --------------------------------------------------------------------------- #
-# Excel renderer (ported verbatim from the dashboard's exports/excel.py)
-# --------------------------------------------------------------------------- #
-
-_HEADER_FILL = PatternFill("solid", fgColor="1F2430")
-_HEADER_FONT = Font(bold=True, color="FFFFFF")
-_SECTION_FILL = PatternFill("solid", fgColor="EEF1F5")
-_SECTION_FONT = Font(bold=True, color="1F2430")
-_TITLE_FONT = Font(bold=True, size=14)
-_SUBTITLE_FONT = Font(size=10, color="6B7280")
-_COLUMN_WIDTHS = [18, 26, 12, 12, 18]
-
-
-def render_xlsx(table: ExportTable) -> bytes:
-    """Build the workbook and return it as bytes."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Attendance"
-
-    n_cols = len(table.columns)
-    last_col_letter = get_column_letter(n_cols)
-
-    ws.merge_cells(f"A1:{last_col_letter}1")
-    title_cell = ws["A1"]
-    title_cell.value = table.title
-    title_cell.font = _TITLE_FONT
-
-    ws.merge_cells(f"A2:{last_col_letter}2")
-    subtitle_cell = ws["A2"]
-    subtitle_cell.value = table.subtitle
-    subtitle_cell.font = _SUBTITLE_FONT
-
-    header_row_idx = 4  # leave row 3 blank as a spacer
-    for col_idx, name in enumerate(table.columns, start=1):
-        cell = ws.cell(row=header_row_idx, column=col_idx, value=name)
-        cell.fill = _HEADER_FILL
-        cell.font = _HEADER_FONT
-        cell.alignment = Alignment(vertical="center")
-
-    for offset, row_values in enumerate(table.rows):
-        excel_row = header_row_idx + 1 + offset
-        is_section = offset in table.section_rows
-        for col_idx, value in enumerate(row_values, start=1):
-            cell = ws.cell(row=excel_row, column=col_idx, value=value)
-            if is_section:
-                cell.fill = _SECTION_FILL
-                cell.font = _SECTION_FONT
-
-    _apply_widths(ws, n_cols)
-    ws.freeze_panes = ws.cell(row=header_row_idx + 1, column=1)
-
-    buffer = BytesIO()
-    wb.save(buffer)
-    return buffer.getvalue()
-
-
-def _apply_widths(ws: Worksheet, n_cols: int) -> None:
-    for col_idx in range(1, n_cols + 1):
-        width = (
-            _COLUMN_WIDTHS[col_idx - 1]
-            if col_idx - 1 < len(_COLUMN_WIDTHS)
-            else 16
-        )
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-
-
-# --------------------------------------------------------------------------- #
-# PDF renderer (ported verbatim from the dashboard's exports/pdf.py)
-# --------------------------------------------------------------------------- #
-
-# These color constants call into reportlab, so only define them when it's
-# available. They are read exclusively inside render_pdf/_build_pdf_table, which
-# refuse to run without reportlab, so leaving them None when it's absent is safe.
-if _REPORTLAB_AVAILABLE:
-    _HEADER_BG = colors.HexColor("#1F2430")
-    _HEADER_FG = colors.white
-    _SECTION_BG = colors.HexColor("#EEF1F5")
-    _GRID = colors.HexColor("#E5E7EB")
-    _ROW_ALT = colors.HexColor("#FAFAFA")
-else:
-    _HEADER_BG = _HEADER_FG = _SECTION_BG = _GRID = _ROW_ALT = None  # type: ignore
-_COL_WIDTHS_MM = [55, 80, 35, 35, 55]
-
-
-def render_pdf(table: ExportTable) -> bytes:
-    """Build the PDF and return it as bytes."""
-    if not _REPORTLAB_AVAILABLE:
-        raise RuntimeError(
-            "PDF export is unavailable because the 'reportlab' package is not "
-            "installed in this environment. Please export as Excel instead, or "
-            f"install reportlab (original import error: {_REPORTLAB_IMPORT_ERROR})."
-        )
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(A4),
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
-        leftMargin=10 * mm,
-        rightMargin=10 * mm,
-        title=table.title,
-    )
-
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "ExportTitle",
-        parent=styles["Title"],
-        fontSize=16,
-        alignment=0,  # left
-        spaceAfter=2,
-    )
-    subtitle_style = ParagraphStyle(
-        "ExportSubtitle",
-        parent=styles["Normal"],
-        fontSize=10,
-        textColor=colors.HexColor("#6B7280"),
-        spaceAfter=10,
-    )
-
-    elements: list = [
-        Paragraph(table.title, title_style),
-        Paragraph(table.subtitle, subtitle_style),
-        Spacer(1, 4),
-    ]
-
-    if table.rows:
-        elements.append(_build_pdf_table(table))
-    else:
-        elements.append(Paragraph("No data for this period.", subtitle_style))
-
-    doc.build(elements)
-    return buffer.getvalue()
-
-
-def _build_pdf_table(table: ExportTable) -> Table:
-    data = [table.columns, *table.rows]
-    col_widths = [w * mm for w in _COL_WIDTHS_MM[: len(table.columns)]]
-
-    style_commands: list = [
-        ("BACKGROUND", (0, 0), (-1, 0), _HEADER_BG),
-        ("TEXTCOLOR", (0, 0), (-1, 0), _HEADER_FG),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 1), (-1, -1), 8.5),
-        ("GRID", (0, 0), (-1, -1), 0.5, _GRID),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.5, _GRID),
-    ]
-
-    for row_idx in table.section_rows:
-        data_row = row_idx + 1  # +1 shifts past the header row
-        style_commands.append(("BACKGROUND", (0, data_row), (-1, data_row), _SECTION_BG))
-        style_commands.append(("FONTNAME", (0, data_row), (-1, data_row), "Helvetica-Bold"))
-
-    if not table.section_rows:
-        for i in range(1, len(data)):
-            if i % 2 == 0:
-                style_commands.append(("BACKGROUND", (0, i), (-1, i), _ROW_ALT))
-
-    tbl = Table(data, colWidths=col_widths, repeatRows=1)
-    tbl.setStyle(TableStyle(style_commands))
-    return tbl
 
 
 # --------------------------------------------------------------------------- #
@@ -415,18 +269,47 @@ def get_team_attendance_export(
         except Exception:
             from attendance_report import _gather_member_ranges  # type: ignore
 
-        ok, ranges, _today = _gather_member_ranges(
+        ok, ranges, today = _gather_member_ranges(
             odoo_service, employee_service, start_date, end_date
         )
         if not ok:
             return False, ranges
 
-        table = build_export_table(ranges, start_date, end_date)
+        days = _iter_days(start_date, end_date)
+        rule = DEFAULT_SHIFT_RULE
+        response, working_by_day = _adapt_ranges(ranges, days, rule)
+        departments, pods = _profile_maps(odoo_service, employee_service)
+
+        report = build_attendance_report(
+            response,
+            days=days,
+            rule=rule,
+            period_label=_period_label(start_date, end_date),
+            generated_on=today,
+            department_by_emp_code=departments,
+            pod_by_emp_code=pods,
+            working_emp_codes_by_day=working_by_day,
+        )
 
         if fmt == "pdf":
-            payload = render_pdf(table)
+            # Lazy import: a missing reportlab/Pillow disables ONLY the PDF
+            # path — Excel export (openpyxl) must keep working regardless.
+            try:
+                try:
+                    from .attendance_export_pdf import render_pdf
+                except Exception:
+                    from attendance_export_pdf import render_pdf  # type: ignore
+            except Exception as import_err:
+                return False, (
+                    "PDF export is unavailable because its dependencies "
+                    "(reportlab / Pillow) are not installed in this "
+                    "environment. Please export as Excel instead "
+                    f"(original import error: {import_err})."
+                )
+            payload = render_pdf(report)
             return True, (payload, _PDF_MEDIA, export_filename(start_date, end_date, "pdf"))
-        payload = render_xlsx(table)
+
+        payload = render_xlsx(report)
         return True, (payload, _XLSX_MEDIA, export_filename(start_date, end_date, "xlsx"))
     except Exception as e:
         return False, f"Error building attendance export: {e}"
