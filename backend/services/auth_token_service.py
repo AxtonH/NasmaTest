@@ -238,7 +238,10 @@ class AuthTokenService:
             if created_at_str:
                 try:
                     created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                    if datetime.utcnow() - created_at > self.refresh_token_expiry:
+                    # Supabase timestamps are offset-aware; utcnow() is naive
+                    # and comparing the two raises (skipping expiry entirely).
+                    now = datetime.now(created_at.tzinfo) if created_at.tzinfo else datetime.utcnow()
+                    if now - created_at > self.refresh_token_expiry:
                         debug_log(f"FAILED: Refresh token has expired (created: {created_at_str})", "bot_logic")
                         # Mark as revoked for cleanup
                         self.revoke_refresh_token(refresh_token)

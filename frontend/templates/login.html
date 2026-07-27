@@ -537,6 +537,14 @@
                         setTimeout(() => {
                             window.location.href = '/';
                         }, 1000);
+                    } else if (data.requires_totp) {
+                        // Trusted-device key missing or expired — ask for just
+                        // the code. Keep the tokens: verifying the code mints a
+                        // fresh pair with a new trusted-device key.
+                        console.log('[AUTO_LOGIN] 2FA code required to refresh trusted device');
+                        this.setLoading(false);
+                        this.hideMessage();
+                        this.enterTotpStep();
                     } else {
                         console.error('[AUTO_LOGIN] FAILED: Auto-login unsuccessful:', data.message);
                         this.tokenManager.clearTokens();

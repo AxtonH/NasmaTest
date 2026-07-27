@@ -59,6 +59,16 @@ class OdooService:
     # a normal failure; the login endpoint uses it to start the TOTP step.
     TOTP_REQUIRED = "TOTP_REQUIRED"
 
+    # Fallback User-Agent for the /web/login/totp form flow. Odoo's
+    # remember-device branch names the trusted device from the request's
+    # User-Agent; an unparseable UA (e.g. python-requests) makes that branch
+    # crash with a 500 AFTER the session is finalized — login succeeds but
+    # the td_id cookie is never issued, so every relog re-prompts for a code.
+    _BROWSER_UA = (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    )
+
     def authenticate(self, username: str, password: str, trusted_device_key: str = None) -> Tuple[bool, str, Optional[Dict]]:
         """
         Authenticate user with Odoo (stateless - returns session data instead of storing)
@@ -268,7 +278,7 @@ class OdooService:
         self.trusted_device_key = None
         self.last_activity = None
 
-    def complete_totp_login(self, pre_session_id: str, code: str) -> Tuple[bool, str, Optional[Dict]]:
+    def complete_totp_login(self, pre_session_id: str, code: str, user_agent: str = None) -> Tuple[bool, str, Optional[Dict]]:
         """Complete a 2FA login: submit the TOTP code for a pre-auth session.
 
         Drives Odoo's /web/login/totp form flow: fetch the form (for the CSRF
@@ -276,6 +286,10 @@ class OdooService:
         trusted-device key we can reuse for silent re-authentication), then
         read back the finalized session. Odoo rotates the session id on
         finalize, so the returned session_id may differ from pre_session_id.
+
+        user_agent should be the END USER's browser UA (forwarded from the
+        incoming request) — Odoo names the trusted device from it, and an
+        unparseable UA 500s the remember-device branch (no td_id cookie).
 
         Returns (success, message, session_data) where session_data contains
         {'session_id', 'user_id', 'trusted_device_key'}.
@@ -286,9 +300,10 @@ class OdooService:
                 return False, "Verification code is required.", None
             totp_url = f"{self.odoo_url}/web/login/totp"
             cookies = {'session_id': pre_session_id}
+            ua_headers = {'User-Agent': user_agent or self._BROWSER_UA}
 
             # 1. Fetch the TOTP form to obtain the CSRF token.
-            page = self.http.get(totp_url, cookies=cookies, timeout=10, allow_redirects=False)
+            page = self.http.get(totp_url, headers=ua_headers, cookies=cookies, timeout=10, allow_redirects=False)
             if page.status_code in (301, 302, 303):
                 # Pre-auth session no longer valid — but check whether it is
                 # because the session already got FINALIZED (e.g. a previous
@@ -321,7 +336,7 @@ class OdooService:
                     'remember': '1',
                     'redirect': '/web',
                 },
-                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                headers={'Content-Type': 'application/x-www-form-urlencoded', **ua_headers},
                 cookies=cookies,
                 timeout=10,
                 allow_redirects=False,
@@ -341,10 +356,23 @@ class OdooService:
                 f"location={location!r} rotated_sid={'yes' if rotated_sid else 'no'} "
                 f"td_cookie={'yes' if td_key else 'no'}"
             )
+            if resp.status_code >= 500:
+                print(
+                    "ERROR ODOO TOTP: Odoo returned a server error on the TOTP "
+                    "verify POST — the session may still finalize, but the "
+                    "trusted-device cookie is lost and auto-login will "
+                    "re-prompt for a code."
+                )
 
             for candidate_sid in filter(None, [rotated_sid, pre_session_id]):
                 user_id = self._fetch_session_uid(candidate_sid)
                 if user_id:
+                    if not td_key:
+                        print(
+                            "ERROR ODOO TOTP: login finalized but Odoo issued "
+                            "no td_id cookie; the refresh token will be stored "
+                            "WITHOUT a trusted-device key."
+                        )
                     return True, "Authentication successful", {
                         'session_id': candidate_sid,
                         'user_id': user_id,

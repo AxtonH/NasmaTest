@@ -833,7 +833,10 @@ def create_app():
                     'message': 'Verification code is required'
                 }), 400
 
-            ok, message, totp_data = odoo_service.complete_totp_login(pending['pre_session_id'], code)
+            ok, message, totp_data = odoo_service.complete_totp_login(
+                pending['pre_session_id'], code,
+                user_agent=request.headers.get('User-Agent'),
+            )
             if not ok:
                 # An expired pre-auth session cannot be retried with another
                 # code — the user must restart from the password step.
@@ -1163,6 +1166,23 @@ def create_app():
                                     'server_url': Config.ODOO_URL
                                 }
                             })
+                        elif message == odoo_service.TOTP_REQUIRED and session_data:
+                            # Trusted-device key missing/expired but the stored
+                            # password is still valid. Ask for just the code
+                            # instead of failing (which wipes the tokens).
+                            session['totp_pending'] = {
+                                'pre_session_id': session_data['pre_session_id'],
+                                'username': username,
+                                'password': password,
+                                'remember_me': True,
+                            }
+                            session.modified = True
+                            debug_log(f"Auto-login for {username}: trusted device not accepted, requesting TOTP code only", "bot_logic")
+                            return jsonify({
+                                'success': False,
+                                'requires_totp': True,
+                                'message': 'Enter the verification code from your authenticator app.'
+                            })
                         else:
                             # Odoo authentication failed
                             debug_log(f"Auto-login failed: Odoo authentication failed for {username}", "bot_logic")
@@ -1243,8 +1263,26 @@ def create_app():
                             samesite='None',
                             secure=True
                         )
-                        
+
                         return response
+                    elif message == odoo_service.TOTP_REQUIRED and session_data:
+                        # Refresh token has no (or a rejected) trusted-device
+                        # key but the password is still valid. Ask for just the
+                        # code; the totp-verify step mints fresh tokens WITH a
+                        # new trusted-device key.
+                        session['totp_pending'] = {
+                            'pre_session_id': session_data['pre_session_id'],
+                            'username': username,
+                            'password': password,
+                            'remember_me': True,
+                        }
+                        session.modified = True
+                        debug_log(f"Auto-login for {username}: trusted device not accepted, requesting TOTP code only", "bot_logic")
+                        return jsonify({
+                            'success': False,
+                            'requires_totp': True,
+                            'message': 'Enter the verification code from your authenticator app.'
+                        })
                     else:
                         # Odoo authentication failed
                         debug_log(f"Auto-login failed: Odoo authentication failed for {username}", "bot_logic")
