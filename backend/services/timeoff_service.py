@@ -17,6 +17,75 @@ def debug_log(message: str, category: str = "general"):
     elif category == "general" and Config.VERBOSE_LOGS:
         print(f"DEBUG: {message}")
 
+
+def _parse_date_flexible(d) -> Optional[datetime]:
+    """Parse a YYYY-MM-DD or DD/MM/YYYY date string; None if unparseable."""
+    for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
+        try:
+            return datetime.strptime((d or '').strip()[:10], fmt)
+        except (ValueError, AttributeError):
+            continue
+    return None
+
+
+def format_duration_days(date_from: str, date_to: str) -> str:
+    """Inclusive calendar-day duration between two dates, e.g. 01/06 to 02/06 -> '2 days'.
+
+    Accepts YYYY-MM-DD or DD/MM/YYYY strings. Returns '' if either date can't be parsed
+    or the range is invalid, so callers can skip the line entirely.
+
+    Fallback only: counts every calendar day including weekends/holidays. Prefer
+    TimeOffService.format_request_duration_days, which matches Odoo's deduction.
+    """
+    start = _parse_date_flexible(date_from)
+    end = _parse_date_flexible(date_to)
+    if not start or not end:
+        return ''
+    days = (end - start).days + 1
+    if days < 1:
+        return ''
+    return f"{days} day{'s' if days != 1 else ''}"
+
+
+def count_working_days(unusual_days: Dict, date_from: str, date_to: str) -> Optional[int]:
+    """Count working days in [date_from, date_to] given Odoo's get_unusual_days result.
+
+    unusual_days maps 'YYYY-MM-DD' -> True for non-working days (weekends, public
+    holidays per the employee's calendar). Returns None if inputs are invalid.
+    """
+    start = _parse_date_flexible(date_from)
+    end = _parse_date_flexible(date_to)
+    if not start or not end or end < start or not isinstance(unusual_days, dict):
+        return None
+    days = 0
+    current = start
+    while current <= end:
+        if not unusual_days.get(current.strftime('%Y-%m-%d')):
+            days += 1
+        current += timedelta(days=1)
+    return days
+
+
+def format_duration_hours(hour_from, hour_to) -> str:
+    """Duration between two decimal hour keys (e.g. '9.5', '13') -> '3 hours 30 minutes'.
+
+    Returns '' if the keys can't be parsed or the range is invalid.
+    """
+    try:
+        diff = float(hour_to) - float(hour_from)
+    except (TypeError, ValueError):
+        return ''
+    if diff <= 0:
+        return ''
+    hours = int(diff)
+    minutes = int(round((diff - hours) * 60))
+    if hours and minutes:
+        return f"{hours} hour{'s' if hours != 1 else ''} {minutes} minutes"
+    if hours:
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    return f"{minutes} minutes"
+
+
 class TimeOffService:
     """Service for managing Odoo time-off/leave requests with fuzzy logic detection"""
     
@@ -1020,7 +1089,116 @@ class TimeOffService:
         except Exception:
             return None
     
-    def build_timeoff_confirmation_message(self, leave_type_id: int, date_from: str, date_to: str, 
+    def _working_days_from_calendar(self, iso_from: str, iso_to: str, employee_id: Optional[int],
+                                    odoo_session_data: Optional[Dict] = None) -> Optional[int]:
+        """Count working days by reading the employee's resource calendar directly.
+
+        Independent of hr.leave.get_unusual_days: reads the calendar's attendance
+        weekdays plus global leaves (public holidays) via search_read. Returns None
+        if the calendar can't be resolved, so the caller can decide what to show.
+        """
+        try:
+            if not employee_id:
+                return None
+            ok_emp, emp = self._make_odoo_request(
+                'hr.employee', 'read',
+                {'args': [[employee_id]], 'kwargs': {'fields': ['resource_calendar_id']}},
+                odoo_session_data
+            )
+            if not ok_emp or not isinstance(emp, list) or not emp:
+                debug_log(f"Duration calendar fallback: cannot read employee {employee_id}: {emp}", "bot_logic")
+                return None
+            cal_val = emp[0].get('resource_calendar_id')
+            cal_id = cal_val[0] if isinstance(cal_val, (list, tuple)) and cal_val else None
+            if not cal_id:
+                debug_log(f"Duration calendar fallback: employee {employee_id} has no resource calendar", "bot_logic")
+                return None
+
+            ok_att, attendances = self._make_odoo_request(
+                'resource.calendar.attendance', 'search_read',
+                {'args': [[('calendar_id', '=', cal_id)]], 'kwargs': {'fields': ['dayofweek']}},
+                odoo_session_data
+            )
+            if not ok_att or not isinstance(attendances, list):
+                debug_log(f"Duration calendar fallback: cannot read attendances for calendar {cal_id}: {attendances}", "bot_logic")
+                return None
+            # dayofweek: '0' = Monday ... '6' = Sunday (matches Python's weekday())
+            working_weekdays = {int(a['dayofweek']) for a in attendances if a.get('dayofweek') is not None}
+            if not working_weekdays:
+                # No attendance lines (e.g. fully flexible calendar): every day counts
+                working_weekdays = set(range(7))
+
+            # Global leaves (public holidays): resource_id is False, overlapping the range
+            holiday_dates = set()
+            ok_lv, leaves = self._make_odoo_request(
+                'resource.calendar.leaves', 'search_read',
+                {'args': [[
+                    ('resource_id', '=', False),
+                    ('calendar_id', 'in', [cal_id, False]),
+                    ('date_from', '<=', f"{iso_to} 23:59:59"),
+                    ('date_to', '>=', f"{iso_from} 00:00:00"),
+                ]], 'kwargs': {'fields': ['date_from', 'date_to']}},
+                odoo_session_data
+            )
+            if ok_lv and isinstance(leaves, list):
+                for lv in leaves:
+                    lv_from = _parse_date_flexible(str(lv.get('date_from') or ''))
+                    lv_to = _parse_date_flexible(str(lv.get('date_to') or ''))
+                    if lv_from and lv_to:
+                        current = lv_from
+                        while current <= lv_to:
+                            holiday_dates.add(current.strftime('%Y-%m-%d'))
+                            current += timedelta(days=1)
+
+            start = datetime.strptime(iso_from, '%Y-%m-%d')
+            end = datetime.strptime(iso_to, '%Y-%m-%d')
+            days = 0
+            current = start
+            while current <= end:
+                if current.weekday() in working_weekdays and current.strftime('%Y-%m-%d') not in holiday_dates:
+                    days += 1
+                current += timedelta(days=1)
+            debug_log(f"Duration via calendar {cal_id}: {days} working days "
+                      f"(weekdays={sorted(working_weekdays)}, holidays={sorted(holiday_dates)})", "bot_logic")
+            return days
+        except Exception as e:
+            debug_log(f"Duration calendar fallback error: {str(e)}", "bot_logic")
+            return None
+
+    def format_request_duration_days(self, date_from: str, date_to: str,
+                                     odoo_session_data: Optional[Dict] = None,
+                                     employee_id: Optional[int] = None) -> str:
+        """Duration in days as Odoo will actually deduct it, e.g. '2 days'.
+
+        Primary: hr.leave.get_unusual_days (the same RPC the Odoo web form uses to
+        gray out non-working days). Secondary: direct read of the employee's working
+        calendar. Returns '' if neither works — never falls back to a raw calendar-day
+        count, which would overstate the deduction across weekends/holidays.
+        """
+        try:
+            start = _parse_date_flexible(date_from)
+            end = _parse_date_flexible(date_to)
+            if not start or not end or start > end:
+                return ''
+            iso_from = start.strftime('%Y-%m-%d')
+            iso_to = end.strftime('%Y-%m-%d')
+
+            params = {'args': [iso_from, iso_to], 'kwargs': {}}
+            ok, unusual_days = self._make_odoo_request('hr.leave', 'get_unusual_days', params, odoo_session_data)
+            debug_log(f"get_unusual_days({iso_from}, {iso_to}) ok={ok} result={unusual_days}", "bot_logic")
+            if ok and isinstance(unusual_days, dict) and unusual_days:
+                days = count_working_days(unusual_days, iso_from, iso_to)
+                if days is not None:
+                    return f"{days} day{'s' if days != 1 else ''}"
+
+            days = self._working_days_from_calendar(iso_from, iso_to, employee_id, odoo_session_data)
+            if days is not None:
+                return f"{days} day{'s' if days != 1 else ''}"
+        except Exception as e:
+            debug_log(f"Error computing working-day duration: {str(e)}", "bot_logic")
+        return ''
+
+    def build_timeoff_confirmation_message(self, leave_type_id: int, date_from: str, date_to: str,
                                           is_custom_hours: bool, hour_from: str = '', hour_to: str = '',
                                           employee_data: Optional[Dict] = None,
                                           leave_balance_service=None, odoo_session_data: Optional[Dict] = None,
@@ -1112,22 +1290,29 @@ class TimeOffService:
             
             # Add relation field for Compassionate Leave
             relation_text = f"\n👥 **Relation:** {relation}" if relation and leave_type_name == 'Compassionate Leave' else ""
-            
+
             if is_custom_hours:
+                duration = format_duration_hours(hour_from, hour_to)
+                duration_text = f"⏳ **Duration:** {duration}\n" if duration else ""
                 msg = (
                     "Here are the details for your time off request:\n\n"
                     f"📋 **Leave Type:** {leave_type_name}{relation_text}\n"
                     f"📅 **Date:** {date_from_formatted}\n"
                     f"⏰ **Hours:** {hour_from_formatted} → {hour_to_formatted}\n"
+                    f"{duration_text}"
                     f"👤 **Employee:** {employee_name}{remaining_leave_text}\n\n"
                     "Do you want to submit this request? Reply or click 'Yes' to confirm or 'No' to cancel"
                 )
             else:
+                emp_id = employee_data.get('id') if isinstance(employee_data, dict) else None
+                duration = self.format_request_duration_days(date_from, date_to, odoo_session_data, employee_id=emp_id)
+                duration_text = f"⏳ **Duration:** {duration}\n" if duration else ""
                 msg = (
                     "Here are the details for your time off request:\n\n"
                     f"📋 **Leave Type:** {leave_type_name}{relation_text}\n"
                     f"📅 **Start Date:** {date_from_formatted}\n"
                     f"📅 **End Date:** {date_to_formatted}\n"
+                    f"{duration_text}"
                     f"👤 **Employee:** {employee_name}{remaining_leave_text}\n\n"
                     "Do you want to submit this request? Reply or click 'Yes' to confirm or 'No' to cancel"
                 )

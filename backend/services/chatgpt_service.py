@@ -5,6 +5,10 @@ try:
 except Exception:
     # Local run from backend/ directory
     from config.settings import Config
+try:
+    from .timeoff_service import format_duration_hours
+except Exception:
+    from services.timeoff_service import format_duration_hours
 from datetime import datetime
 from typing import List, Dict, Any
 from flask import g
@@ -151,6 +155,24 @@ class ChatGPTService:
         self.reimbursement_service = reimbursement_service
         self.metrics_service = metrics_service
         self.auth_token_service = auth_token_service
+
+    def _duration_days_line(self, date_from: str, date_to: str, employee_data: dict = None) -> str:
+        """Build the '⏳ **Duration:** N days' summary line, or '' if unavailable.
+
+        Uses Odoo's working-day computation (weekends/public holidays excluded) via
+        the time off service. Omits the line when Odoo can't answer — a raw
+        calendar-day count would overstate the actual deduction.
+        """
+        duration = ''
+        try:
+            if self.timeoff_service:
+                emp_id = employee_data.get('id') if isinstance(employee_data, dict) else None
+                duration = self.timeoff_service.format_request_duration_days(
+                    date_from, date_to, self.get_current_odoo_session(), employee_id=emp_id
+                )
+        except Exception as e:
+            debug_log(f"Error computing duration line: {str(e)}", "bot_logic")
+        return f"⏳ **Duration:** {duration}\n" if duration else ""
 
     def _resolve_identity(self, employee_data: dict = None) -> Dict[str, str]:
         """Extract tenant/user identifiers for metric logging."""
@@ -1218,6 +1240,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             response_text += f"📋 **Leave Type:** {matched_type.get('name', 'Unknown')}\n"
                             response_text += f"📅 **Start Date:** {dd_slash_mm_yyyy(start_date)}\n"
                             response_text += f"📅 **End Date:** {dd_slash_mm_yyyy(end_date)}\n"
+                            response_text += self._duration_days_line(start_date, end_date, employee_data)
                             response_text += f"👤 **Employee:** {employee_data.get('name', 'Unknown')}\n\n"
                             response_text += "Do you want to submit this request? Reply with 'yes' to confirm or 'no' to cancel."
                             return self._create_response(response_text, thread_id)
@@ -1469,11 +1492,13 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                         # Continue without remaining leave info if there's an error
                     
+                    duration_text = self._duration_days_line(existing_start, existing_end, employee_data)
                     response_text = (
                         "Perfect! Here's your time-off request summary:\n\n"
                         f"📋 **Leave Type:** {selected_type.get('name', 'Unknown')}\n"
                         f"📅 **Start Date:** {_fmt(existing_start)}\n"
                         f"📅 **End Date:** {_fmt(existing_end)}\n"
+                        f"{duration_text}"
                         f"👤 **Employee:** {(employee_data or {}).get('name', 'Unknown')}{remaining_leave_text}\n"
                         "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     )
@@ -1592,11 +1617,13 @@ Be thorough and informative while maintaining clarity and accuracy."""
                     debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                     # Continue without remaining leave info if there's an error
                 
+                duration_text = self._duration_days_line(existing_start, existing_end, employee_data)
                 response_text = (
                     "Perfect! Here's your time-off request summary:\n\n"
                     f"📋 **Leave Type:** {best_match.get('name', 'Unknown')}\n"
                     f"📅 **Start Date:** {_fmt(existing_start)}\n"
                     f"📅 **End Date:** {_fmt(existing_end)}\n"
+                    f"{duration_text}"
                     f"👤 **Employee:** {(employee_data or {}).get('name', 'Unknown')}{remaining_leave_text}\n\n"
                     "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                 )
@@ -1788,6 +1815,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
             response_text += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if selected_type else 'Unknown'}\n"
             response_text += f"📅 **Start Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
             response_text += f"📅 **End Date:** {dd_mm_yyyy(parsed_date)}\n"
+            response_text += self._duration_days_line(start_date, parsed_date, resolved_employee)
             response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
             response_text += "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
             buttons = [
@@ -2087,11 +2115,13 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                             # Continue without remaining leave info if there's an error
                     
+                    duration_text = self._duration_days_line(start_update, end_update, resolved_employee)
                     response_text = (
                         "Great, noted your dates. Here's your time-off request summary:\n\n"
                         f"📋 **Leave Type:** {lt}\n"
                         f"📅 **Start Date:** {dd_mm_yyyy(start_update)}\n"
                         f"📅 **End Date:** {dd_mm_yyyy(end_update)}\n"
+                        f"{duration_text}"
                         f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
                         "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     )
@@ -2156,11 +2186,13 @@ Be thorough and informative while maintaining clarity and accuracy."""
                             debug_log(f"Error getting remaining leave: {str(e)}", "bot_logic")
                             # Continue without remaining leave info if there's an error
                     
+                    duration_text = self._duration_days_line(single_conf, single_conf, resolved_employee)
                     response_text = (
                         "Great, noted your date. Here's your time-off request summary:\n\n"
                         f"📋 **Leave Type:** {lt}\n"
                         f"📅 **Start Date:** { _dd_mm_yyyy(single_conf)}\n"
                         f"📅 **End Date:** { _dd_mm_yyyy(single_conf)}\n"
+                        f"{duration_text}"
                         f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
                         "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     )
@@ -2333,12 +2365,15 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         first_doc = docs[0]
                         doc_name = first_doc.get('filename') or first_doc.get('name') or 'Supporting document'
                     
+                    hours_duration = format_duration_hours(raw_from, raw_to)
+                    hours_duration_text = f"⏳ **Duration:** {hours_duration}\n" if hours_duration else ""
                     if is_sick_custom_hours:
                         # Custom format for sick leave custom hours
                         response_text = f"Great, noted your hours. Here's your time-off request summary:\n\n"
                         response_text += f"📋 **Leave Type:** {leave_type_name}\n"
                         response_text += f"📅 **Date:** {dd_mm_yyyy(start_date)}\n"
                         response_text += f"⏰ **Hours:** {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
+                        response_text += hours_duration_text
                         response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
                         if remaining_leave_text:
                             # Remove leading newline if present to avoid extra space
@@ -2356,6 +2391,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         response_text += f"📋 **Leave Type:** {leave_type_name}\n"
                         response_text += f"📅 **Date:** {dd_mm_yyyy(start_date)}\n"
                         response_text += f"⏰ **Hours:** from {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
+                        response_text += hours_duration_text
                         response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
                         response_text += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     else:
@@ -2364,6 +2400,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                         response_text += f"📋 **Leave Type:** {leave_type_name}\n"
                         response_text += f"📅 **Date:** {dd_mm_yyyy(start_date)}\n"
                         response_text += f"⏰ **Hours:** from {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
+                        response_text += hours_duration_text
                         response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n\n"
                         response_text += "Do you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     buttons = [
@@ -2452,6 +2489,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                     response_text += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown')}\n"
                     response_text += f"📅 **Start Date:** {dd_mm_yyyy(start_date)}\n"
                     response_text += f"📅 **End Date:** {dd_mm_yyyy(end_date)}\n"
+                    response_text += self._duration_days_line(start_date, end_date, resolved_employee)
                     response_text += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n"
                     response_text += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
                     buttons = [
@@ -3033,10 +3071,13 @@ Be thorough and informative while maintaining clarity and accuracy."""
 
             if is_sick_custom_hours and raw_from and raw_to:
                 # Custom format for sick leave custom hours
+                hours_duration = format_duration_hours(raw_from, raw_to)
                 summary = "Great, I have everything I need. Here's your time-off request summary:\n\n"
                 summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
                 summary += f"📅 **Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
                 summary += f"⏰ **Hours:** {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
+                if hours_duration:
+                    summary += f"⏳ **Duration:** {hours_duration}\n"
                 summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
                 if remaining_leave_text:
                     # Remove leading newline if present to avoid extra space
@@ -3050,10 +3091,13 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 summary += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
             elif is_unpaid_leave and raw_from and raw_to:
                 # Format for unpaid leave custom hours (no leave balance - unlimited)
+                hours_duration = format_duration_hours(raw_from, raw_to)
                 summary = "Great, I have everything I need. Here's your time-off request summary:\n\n"
                 summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
                 summary += f"📅 **Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
                 summary += f"⏰ **Hours:** {self._format_hour_label(raw_from)} to {self._format_hour_label(raw_to)}\n"
+                if hours_duration:
+                    summary += f"⏳ **Duration:** {hours_duration}\n"
                 summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}\n"
                 if doc_name:
                     summary += f"📎 **Supporting Document:** {doc_name}\n"
@@ -3064,6 +3108,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
                 summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
                 summary += f"📅 **Start Date:** {dd_mm_yyyy(start_date) if start_date else 'Unknown'}\n"
                 summary += f"📅 **End Date:** {dd_mm_yyyy(end_date) if end_date else 'Unknown'}\n"
+                summary += self._duration_days_line(start_date, end_date, resolved_employee)
                 summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n"
                 if doc_name:
                     summary += f"📎 **Supporting Document:** {doc_name}\n"
@@ -3174,6 +3219,7 @@ Be thorough and informative while maintaining clarity and accuracy."""
         summary += f"📋 **Leave Type:** {selected_type.get('name', 'Unknown') if isinstance(selected_type, dict) else 'Unknown'}\n"
         summary += f"📅 **Start Date:** {dd_mm_yyyy(start_date)}\n"
         summary += f"📅 **End Date:** {dd_mm_yyyy(end_date)}\n"
+        summary += self._duration_days_line(start_date, end_date, resolved_employee)
         summary += f"👤 **Employee:** {resolved_employee.get('name', 'Unknown')}{remaining_leave_text}\n"
         summary += "\nDo you want to submit this request? reply or click 'yes' to confirm or 'no' to cancel"
         buttons = [
